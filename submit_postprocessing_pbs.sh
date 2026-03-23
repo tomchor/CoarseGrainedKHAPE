@@ -25,7 +25,7 @@ export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
-time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/01_filter_fields.py --filename output/khi_2916x1x4096.nc 2>&1 | tee logs/01_filter_fields_2916x1x4096.out
+time /glade/u/home/tomasc/miniconda3/envs/py313/bin/python -u postprocessing/01_filter_fields.py --filename output/khi_2916x1x4096.nc --n-workers 6 --threads-per-worker 3 2>&1 | tee logs/01_filter_fields_2916x1x4096.out
 qstat -f $PBS_JOBID >> logs/01_filter_fields_2916x1x4096.log
 qstat -f $PBS_JOBID >> logs/01_filter_fields_2916x1x4096.out
 
