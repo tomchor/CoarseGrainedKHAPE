@@ -14,6 +14,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for KE budget")
 parser.add_argument("--filename", default="output/khi_128x1x256.nc",
                     help="Path to simulation NetCDF file")
+parser.add_argument("--use-gpu", action="store_true",
+                    help="Apply filters on GPU via CuPy (requires cupy and cupy-xarray)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
@@ -37,20 +39,55 @@ dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
 
 ds = condense_velocities(ds, indices=[1, 2, 3])
 
-ds_filt_list = []
-for ℓ in filter_length_scales:
-    print(f"  filter_length_scale = {ℓ:.4f}...")
-    gaussian_filter = gcm_filters.Filter(
-        filter_scale=ℓ * np.sqrt(12),
-        dx_min=dx_min,
-        filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-        grid_type=gcm_filters.GridType.REGULAR,
-    )
-    ds_ℓ = xr.Dataset({
-        "ūᵢ": gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions),
-        "b̄":  gaussian_filter.apply(ds["b"],  dims=filtered_dimensions),
-    })
-    ds_filt_list.append(ds_ℓ)
+if args.use_gpu:
+    import cupy_xarray  # noqa: F401 — registers .as_cupy() / .as_numpy() on xarray
+    print("GPU mode active (CuPy backend)")
+
+    # Build all filters once
+    filters = {
+        ℓ: gcm_filters.Filter(
+            filter_scale=ℓ * np.sqrt(12),
+            dx_min=dx_min,
+            filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+            grid_type=gcm_filters.GridType.REGULAR,
+        )
+        for ℓ in filter_length_scales
+    }
+
+    # Accumulate per-scale results across time steps
+    results = {ℓ: {"ūᵢ": [], "b̄": []} for ℓ in filter_length_scales}
+    n_times = len(ds.time)
+    for t_idx in range(n_times):
+        if t_idx % 10 == 0:
+            print(f"  time step {t_idx}/{n_times}...")
+        ds_t = ds.isel(time=t_idx).load().as_cupy()
+        for ℓ, gf in filters.items():
+            results[ℓ]["ūᵢ"].append(gf.apply(ds_t["uᵢ"], dims=filtered_dimensions).as_numpy())
+            results[ℓ]["b̄"].append(gf.apply(ds_t["b"],   dims=filtered_dimensions).as_numpy())
+
+    ds_filt_list = []
+    for ℓ in filter_length_scales:
+        ds_ℓ = xr.Dataset({
+            "ūᵢ": xr.concat(results[ℓ]["ūᵢ"], dim=ds.time),
+            "b̄":  xr.concat(results[ℓ]["b̄"],  dim=ds.time),
+        })
+        ds_filt_list.append(ds_ℓ)
+
+else:
+    ds_filt_list = []
+    for ℓ in filter_length_scales:
+        print(f"  filter_length_scale = {ℓ:.4f}...")
+        gaussian_filter = gcm_filters.Filter(
+            filter_scale=ℓ * np.sqrt(12),
+            dx_min=dx_min,
+            filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+            grid_type=gcm_filters.GridType.REGULAR,
+        )
+        ds_ℓ = xr.Dataset({
+            "ūᵢ": gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions),
+            "b̄":  gaussian_filter.apply(ds["b"],  dims=filtered_dimensions),
+        })
+        ds_filt_list.append(ds_ℓ)
 
 scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
                             name="filter_length_scale")
