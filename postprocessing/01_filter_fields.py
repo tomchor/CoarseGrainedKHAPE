@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import gcm_filters
-from dask.distributed import Client, LocalCluster
+from dask.distributed import Client, LocalCluster, progress
 from aux00_utils import load_dataset_and_grid, condense_velocities
 #---
 
@@ -80,7 +80,10 @@ if __name__ == "__main__":
     print("Saving filtered fields...")
 
     output_filename = filename.replace(".nc", "_filtered_velocities.nc")
-    ds_filt.to_netcdf(output_filename)
+    write = ds_filt.to_netcdf(output_filename, compute=False)
+    future = client.compute(write)
+    progress(future)
+    future.result()
     print(f"Filtered fields saved to: {output_filename}")
     #---
 
