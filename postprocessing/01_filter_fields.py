@@ -40,6 +40,10 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("Loading data and grid...")
     ds = load_dataset_and_grid(filename)
+    # Chunk only along time: each time step is one independent task.
+    # x/y must stay whole (filter operates along those dims).
+    # z is a batch dimension that gcm_filters handles internally via numpy — splitting
+    # it would multiply an already complex task graph without improving performance. (Comment by Claude)
     ds = ds.chunk({"time": 1})
     print(f"Dataset loaded: {len(ds.time)} time steps")
     #---
