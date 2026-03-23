@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 #+++ Imports
 import os
+import multiprocessing
+multiprocessing.set_start_method("fork", force=True)  # required before dask.distributed on Python 3.12+
 from pathlib import Path
 import numpy as np
 import xarray as xr
