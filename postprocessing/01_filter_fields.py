@@ -4,9 +4,8 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
-import gcm_filters
 from dask.distributed import Client, LocalCluster, progress
-from aux00_utils import load_dataset_and_grid, condense_velocities
+from aux00_utils import load_dataset_and_grid, condense_velocities, make_gaussian_filter
 #---
 
 #+++ Configuration
@@ -43,39 +42,35 @@ if __name__ == "__main__":
     # Chunk only along time: each time step is one independent task.
     # x/y must stay whole (filter operates along those dims).
     # z is a batch dimension that gcm_filters handles internally via numpy — splitting
-    # it would multiply an already complex task graph without improving performance. (Comment by Claude)
+    # it would multiply an already complex task graph without improving performance.
     ds = ds.chunk({"time": 1})
     print(f"Dataset loaded: {len(ds.time)} time steps")
     #---
 
     #+++ Filter velocity and buoyancy fields at each length scale
+    filter_in_2d = ds.dims["x_caa"] > 1 and ds.dims["y_aca"] > 1
     print("\n" + "="*60)
-    print("Filtering velocity and buoyancy fields...")
-
-    filtered_dimensions = ["x_caa", "y_aca"]
-    dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
+    if filter_in_2d:
+        print("Filtering velocity and buoyancy fields in 2D (x and y)...")
+    else:
+        print("Filtering velocity and buoyancy fields in 1D (x only)...")
 
     ds = condense_velocities(ds, indices=[1, 2, 3])
 
     ds_filt_list = []
     for ℓ in filter_length_scales:
         print(f"  filter_length_scale = {ℓ:.4f}...")
-        gaussian_filter = gcm_filters.Filter(
-            filter_scale=ℓ * np.sqrt(12),
-            dx_min=dx_min,
-            filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-            grid_type=gcm_filters.GridType.REGULAR,
-        )
-        ds_ℓ = xr.Dataset({
-            "ūᵢ": gaussian_filter.apply(ds["uᵢ"], dims=filtered_dimensions),
-            "b̄":  gaussian_filter.apply(ds["b"],  dims=filtered_dimensions),
-        })
-        ds_filt_list.append(ds_ℓ)
+        gf = make_gaussian_filter(ℓ, ds, filter_in_2d)
+        ds_filt_list.append(xr.Dataset({
+            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "y_aca"]),
+            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "y_aca"]),
+        }))
 
     scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
                                 name="filter_length_scale")
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]  # scale-independent, no filter_length_scale dimension
+    ds_filt.attrs["filter_ndim"] = 2 if filter_in_2d else 1
     print("Done building lazy task graph — all filter scales will be computed in parallel")
     #---
 

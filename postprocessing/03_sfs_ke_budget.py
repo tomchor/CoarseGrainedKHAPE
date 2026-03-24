@@ -4,9 +4,8 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
-import gcm_filters
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
 from aux03_plotting import budget_colors
 from aux01_pe_functions import calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
@@ -40,7 +39,6 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
-dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
 
 ds = condense_velocities(ds, indices=[1, 2, 3])  # uᵢ with i dimension
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
@@ -48,9 +46,11 @@ ds_full = ds[["b", "dV", "uᵢ"]].copy()
 filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
+filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Filter length scales: {filter_length_scales}")
+print(f"Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
 #---
 
 #+++ Calculate strain tensor of the full (unfiltered) flow  [scale-independent]
@@ -73,12 +73,7 @@ budget_list = []
 for ℓ in filter_length_scales:
     print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
 
-    gaussian_filter = gcm_filters.Filter(
-        filter_scale=ℓ * np.sqrt(12),
-        dx_min=dx_min,
-        filter_shape=gcm_filters.FilterShape.GAUSSIAN,
-        grid_type=gcm_filters.GridType.REGULAR,
-    )
+    gaussian_filter = make_gaussian_filter(ℓ, ds, filter_in_2d)
 
     ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ)
 
@@ -150,6 +145,9 @@ output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
 with ProgressBar():
     sfs_ke_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
+
+# Reload from disk so plots read pre-computed data rather than re-triggering the dask graph
+sfs_ke_budget_terms = xr.open_dataset(output_filename, decode_timedelta=False)
 #---
 
 #+++ Plot integrated KE decomposition

@@ -3,6 +3,7 @@ import time
 from functools import wraps
 import numpy as np
 import xarray as xr
+import gcm_filters
 
 #+++ Timing decorator
 def timeit(func):
@@ -119,6 +120,67 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
         aux_ds[str(i+1)] = da
     aux_ds = condense(aux_ds, list(aux_ds.data_vars.keys()), output_name, dimname=dimname, indices=indices)
     return aux_ds[output_name]
+#---
+
+#+++ Gaussian filter (unified 1D / 2D)
+class GaussianFilter:
+    """Unified Gaussian filter with a gcm_filters-compatible .apply() interface.
+
+    In 2D mode: wraps gcm_filters.Filter (REGULAR grid).
+    In 1D mode: applies scipy gaussian_filter1d along dims[0] with mode='wrap'
+                (suitable for periodic x with y=1 simulations).
+
+    Scale convention is consistent with gcm_filters: filter_scale = ℓ * sqrt(12),
+    so the real-space Gaussian sigma = ℓ, and sigma in grid units = ℓ / dx_min.
+    """
+    def __init__(self, ℓ, dx_min, filter_in_2d=True):
+        self.filter_in_2d = filter_in_2d
+        if filter_in_2d:
+            self._filter = gcm_filters.Filter(
+                filter_scale=ℓ * np.sqrt(12),
+                dx_min=dx_min,
+                filter_shape=gcm_filters.FilterShape.GAUSSIAN,
+                grid_type=gcm_filters.GridType.REGULAR,
+            )
+        else:
+            self._sigma_grid = ℓ / dx_min
+
+    def apply(self, da, dims):
+        if self.filter_in_2d:
+            return self._filter.apply(da, dims=dims)
+        from scipy.ndimage import gaussian_filter1d
+        return xr.apply_ufunc(
+            gaussian_filter1d, da,
+            input_core_dims=[[dims[0]]],
+            output_core_dims=[[dims[0]]],
+            kwargs={"sigma": self._sigma_grid, "axis": -1, "mode": "wrap"},
+            dask="parallelized",
+            output_dtypes=[da.dtype],
+        )
+
+    def __getattr__(self, name):
+        if self.filter_in_2d:
+            return getattr(self._filter, name)
+        raise AttributeError(f"GaussianFilter has no attribute '{name}' in 1D mode")
+
+
+def make_gaussian_filter(ℓ, ds, filter_in_2d):
+    """Return a GaussianFilter for length scale ℓ using grid spacing from ds.
+
+    Parameters
+    ----------
+    ℓ : float
+        Filter length scale in physical units.
+    ds : xr.Dataset
+        Simulation dataset (must contain Δx_caa and Δy_aca).
+    filter_in_2d : bool
+        If True, filter in x and y (gcm_filters). If False, filter in x only (scipy).
+    """
+    if filter_in_2d:
+        dx_min = float(min(ds.Δx_caa.min(), ds.Δy_aca.min()))
+    else:
+        dx_min = float(ds.Δx_caa.min())
+    return GaussianFilter(ℓ, dx_min, filter_in_2d=filter_in_2d)
 #---
 
 #+++ Dask-parallel filter wrapper
