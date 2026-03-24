@@ -1,6 +1,9 @@
 #!/usr/bin/env python
-#+++ Imports
 import os
+# Disable HDF5 advisory file locking — required for parallel writes on Lustre (Derecho/GPFS)
+# and when multiple dask worker processes open the same HDF5/NetCDF4 file concurrently.
+os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
+#+++ Imports
 from pathlib import Path
 import numpy as np
 import xarray as xr
@@ -48,7 +51,7 @@ if __name__ == "__main__":
     #---
 
     #+++ Filter velocity and buoyancy fields at each length scale
-    filter_in_2d = ds.dims["x_caa"] > 1 and ds.dims["y_aca"] > 1
+    filter_in_2d = ds.sizes["x_caa"] > 1 and ds.sizes["y_aca"] > 1
     print("\n" + "="*60)
     if filter_in_2d:
         print("Filtering velocity and buoyancy fields in 2D (x and y)...")

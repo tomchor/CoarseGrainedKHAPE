@@ -21,6 +21,10 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
+# Disable HDF5 file locking — Lustre (GPFS) advisory locks are unreliable and
+# cause EAGAIN failures when multiple dask worker processes write to the same file.
+export HDF5_USE_FILE_LOCKING=FALSE
+
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
