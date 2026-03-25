@@ -7,7 +7,6 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 import os
 from pathlib import Path
 import time
-import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter

@@ -2,7 +2,6 @@
 #+++ Imports
 import os
 from pathlib import Path
-import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_velocities, condense_uw_velocities, integrate, make_gaussian_filter

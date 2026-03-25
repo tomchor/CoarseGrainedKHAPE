@@ -4,7 +4,6 @@ Kinetic energy calculation functions
 This module contains functions for calculating kinetic energy (KE).
 """
 
-import numpy as np
 import xarray as xr
 from aux00_utils import (integrate, calculate_gradient,
                          condense_velocities, condense_uw_velocities,
