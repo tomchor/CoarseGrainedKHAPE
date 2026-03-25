@@ -14,7 +14,7 @@ from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, m
 from aux03_plotting import budget_colors
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
-    local_potential_energies_timeseries,
+    local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
@@ -44,9 +44,9 @@ ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
 
-#+++ Load filtered fields
+#+++ Load filtered fields and pre-sorted density
 print("\n" + "="*60)
-print("Loading pre-filtered fields...")
+print("Loading pre-filtered fields and sorted density...")
 
 filtered_dimensions = ["x_caa", "y_aca"]
 
@@ -61,6 +61,11 @@ filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
+
+sorted_density_filename = filename.replace(".nc", "_sorted_density.nc")
+t0 = time.time()
+full_local_pes = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Calculate scale-independent fields
@@ -70,12 +75,6 @@ print("Calculating scale-independent fields...")
 t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
-
-t0 = time.time()
-full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ", rho_to_sort=ds_full.ρ,
-                                                     ape_method="precomputed_integral",
-                                                     use_numpy_version=True, n_workers=n_workers)
-print(f"  full_local_pes  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
@@ -103,7 +102,8 @@ for ℓ in filter_length_scales:
 
     t0 = time.time()
     filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                         rho_to_sort=ds_full.ρ,
+                                                         rho_sorted=full_local_pes.rho_sorted,
+                                                         dz_sorted=full_local_pes.dz_sorted,
                                                          ape_method="precomputed_integral",
                                                          use_numpy_version=True, n_workers=n_workers)
     print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")

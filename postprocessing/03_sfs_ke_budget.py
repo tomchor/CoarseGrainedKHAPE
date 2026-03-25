@@ -97,8 +97,8 @@ for ℓ in filter_length_scales:
 
     print("  APE->KE exchange term...")
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
-        ds_full["uᵢ"].sel(i=3),   # full w
-        ds_full.b,                # full buoyancy
+        ds_full["uᵢ"].sel(i=3), # full w
+        ds_full.b,              # full buoyancy
         gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
