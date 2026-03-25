@@ -9,8 +9,8 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
-from aux03_plotting import budget_colors
+from aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from aux03_plotting import budget_colors, plot_sfs_budget
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
@@ -80,8 +80,7 @@ print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer_filename = filename.replace(".nc", "_energy_transfer.nc")
-energy_transfer = xr.open_dataset(energy_transfer_filename, decode_timedelta=False).chunk({"time": 1})
+energy_transfer = load_energy_transfer(filename)
 
 dV = ds_full.dV
 budget_list = []
@@ -203,8 +202,6 @@ print("\n" + "="*60)
 print("Creating plots...")
 print("="*60)
 
-import matplotlib.pyplot as plt
-
 integrated_vars = {
     "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
     "∫Π_APE dV":           budget_colors["flux"],
@@ -213,19 +210,6 @@ integrated_vars = {
     "∫Rˢ dV":              "C4",
     "residual_APE":         budget_colors["residual"],
 }
-
-for ℓ in filter_length_scales:
-    fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-    for var, color in integrated_vars.items():
-        sfs_ape_budget_terms[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
-            ax=ax, x="time", label=var, color=color)
-    ax.legend()
-    ax.set_ylabel("Budget Terms [W or J s⁻¹]")
-    ax.set_title(f"Integrated SFS APE Budget Terms  (ℓ = {ℓ:.4f})")
-    ax.grid(True, alpha=0.3)
-    plot_filename = str(REPO_ROOT / "figures" / os.path.basename(output_filename).replace(
-        ".nc", f"_l{ℓ:.4f}.png"))
-    fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Plot saved to: {plot_filename}")
+plot_sfs_budget(sfs_ape_budget_terms, integrated_vars, filter_length_scales,
+                output_filename, REPO_ROOT, "Integrated SFS APE Budget Terms")
 #---

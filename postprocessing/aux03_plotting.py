@@ -14,6 +14,42 @@ budget_colors = {
     "residual":    "k",
 }
 
+#+++ SFS budget plotting
+def plot_sfs_budget(budget_terms, integrated_vars, filter_length_scales, output_filename, repo_root, title):
+    """Plot integrated SFS budget terms vs time for each filter scale.
+
+    Parameters
+    ----------
+    budget_terms : xr.Dataset
+        Dataset with budget variables indexed by filter_length_scale and time.
+    integrated_vars : dict
+        Mapping of variable name → matplotlib color.
+    filter_length_scales : array-like
+        Filter length scales to iterate over.
+    output_filename : str
+        Path to the saved NetCDF file; used to derive the plot filename.
+    repo_root : Path
+        Repository root directory; figures are written to repo_root/figures/.
+    title : str
+        Base title string, e.g. "Integrated SFS KE Budget Terms".
+    """
+    import os
+    for ℓ in filter_length_scales:
+        fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
+        for var, color in integrated_vars.items():
+            budget_terms[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
+                ax=ax, x="time", label=var, color=color)
+        ax.legend()
+        ax.set_ylabel("Budget Terms [W or J s⁻¹]")
+        ax.set_title(f"{title}  (ℓ = {ℓ:.4f})")
+        ax.grid(True, alpha=0.3)
+        plot_filename = str(repo_root / "figures" / os.path.basename(output_filename).replace(
+            ".nc", f"_l{ℓ:.4f}.png"))
+        fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Plot saved to: {plot_filename}")
+#---
+
 #+++ Plot energy timeseries
 def plot_energy_timeseries(ds, APE=None, TPE=None, RPE=None, KE=None):
     """
