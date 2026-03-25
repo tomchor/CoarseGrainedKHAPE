@@ -38,12 +38,12 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 
-filtered_dimensions = ["x_caa", "y_aca"]
-
 filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
-filter_length_scales = ds_filt.filter_length_scale.values
 filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
+filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
+
+filter_length_scales = ds_filt.filter_length_scale.values
 tensor_dimensions = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
 
 if filter_in_2d:
