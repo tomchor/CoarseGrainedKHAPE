@@ -938,25 +938,34 @@ def vectorized_local_APE_precomputed_integral(ds0, vertically_sorted_ds, use_num
 #+++ Per-timestep worker (pure numpy, parallelisable)
 def _process_single_timestep(
     rho_np,           # 3D np.ndarray — density to compute APE for
-    rho_to_sort_np,   # 3D np.ndarray — density to sort (may be same as rho_np)
+    rho_to_sort_np,   # 3D np.ndarray — density to sort; None when pre-sorted arrays are given
     dz_flat_np,       # 3D np.ndarray — dV/LxLy, time-independent
     z_np,             # 3D np.ndarray — z-coordinate broadcast, time-independent
     z_min,            # float
-    use_inverse_sort, # bool — True when rho_np is rho_to_sort_np
+    use_inverse_sort, # bool — True when sorting and rho_np is rho_to_sort_np
+    rho_sorted_1d,    # 1D np.ndarray — pre-sorted reference density; None triggers sorting
+    dz_sorted_1d,     # 1D np.ndarray — pre-sorted cell heights; None triggers sorting
+    z_sorted_1d,      # 1D np.ndarray — z coords of sorted state; None triggers recompute
 ):
     """
     Compute APE, z_0, and upsilon for one timestep.  All inputs/outputs are
     plain numpy arrays so the function can be run in a thread or process pool.
     """
     shape = rho_np.shape
-    rho_1d        = rho_to_sort_np.ravel()
-    dz_flat_1d    = dz_flat_np.ravel()
 
-    # --- sort ---
-    sort_indices      = np.argsort(-rho_1d)
-    dz_1d_sorted      = dz_flat_1d[sort_indices]
-    rho_1d_sorted     = rho_1d[sort_indices]
-    z_1d_sorted       = np.cumsum(dz_1d_sorted) + z_min + dz_1d_sorted[0] / 2
+    if rho_sorted_1d is not None:
+        # Use pre-sorted reference state — skip sorting entirely
+        rho_1d_sorted = rho_sorted_1d
+        dz_1d_sorted  = dz_sorted_1d
+        z_1d_sorted   = z_sorted_1d
+    else:
+        # Sort rho_to_sort_np to build the reference state
+        rho_1d        = rho_to_sort_np.ravel()
+        dz_flat_1d    = dz_flat_np.ravel()
+        sort_indices  = np.argsort(-rho_1d)
+        dz_1d_sorted  = dz_flat_1d[sort_indices]
+        rho_1d_sorted = rho_1d[sort_indices]
+        z_1d_sorted   = np.cumsum(dz_1d_sorted) + z_min + dz_1d_sorted[0] / 2
 
     # --- cumulative integrals for APE ---
     cumulative_rho_dz = np.concatenate([[0.0], np.cumsum(rho_1d_sorted * dz_1d_sorted)])
@@ -970,7 +979,7 @@ def _process_single_timestep(
         inverse[sort_indices] = np.arange(n, dtype=np.intp)
         z0_3d = z_1d_sorted[inverse].reshape(shape)
     else:
-        # Vectorised binary search — for filtered/different density
+        # Vectorised binary search — for filtered density or pre-sorted reference
         rho_bar_flat   = rho_np.ravel()
         neg_sorted     = -rho_1d_sorted
         idx            = np.searchsorted(neg_sorted, -rho_bar_flat, side="left")
@@ -999,7 +1008,7 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
                                         ape_method="precomputed_integral", use_numpy_version=True,
                                         density_name="rho", dV_name="dV", LxLy_name="LxLy",
                                         z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
-                                        rho_to_sort=None, n_workers=None):
+                                        rho_sorted=None, dz_sorted=None, n_workers=None):
     """
     Calculate local APE and TPE fields for all time steps
 
@@ -1032,10 +1041,15 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
         Name of vertical extent attribute
     z_name : str
         Name of vertical coordinate
-    rho_to_sort : xr.DataArray, optional
-        Density field to use for sorting instead of the dataset density. If it
-        has a "time" dimension it will be sliced per step. If None, the density
-        from the dataset is used.
+    rho_sorted : xr.DataArray, optional
+        Pre-sorted reference density profile (time, z_1d_sorted), e.g. from a
+        previous call's ``result.rho_sorted``.  When provided together with
+        ``dz_sorted``, the sorting step is skipped entirely and the supplied
+        arrays are used as the reference state directly.
+    dz_sorted : xr.DataArray, optional
+        Pre-sorted cell heights (time, z_1d_sorted), e.g. from a previous
+        call's ``result.dz_sorted``.  Must be provided together with
+        ``rho_sorted``.
     n_workers : int or None, optional
         Number of parallel workers for the time loop.  None means use
         os.cpu_count().  Set to 1 to disable parallelism.
@@ -1060,36 +1074,25 @@ def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting
     z_min = ds.attrs[z_min_name] if isinstance(z_min_name, str) else z_min_name
 
     # Pre-extract time-independent numpy arrays to avoid repeated xarray overhead
-    rho_all_np        = ds[density_name].values            # (time, x, y, z)
-    dz_flat_np        = (dV / LxLy).values                 # (x, y, z)
-    z_np              = (xr.zeros_like(ds[density_name].isel(time=0)) + ds[density_name].isel(time=0)[z_name]).values  # (x, y, z)
-
-    if rho_to_sort is not None and "time" in rho_to_sort.dims:
-        rho_to_sort_all_np = rho_to_sort.values  # (time, x, y, z)
-    else:
-        rho_to_sort_all_np = None  # will fall back to rho_all_np per step
-
-    # When rho_to_sort is not supplied (or is the same underlying data), we can
-    # use the O(N) inverse-sort path for z_0.
-    if rho_to_sort is None:
-        use_inverse_sort = True
-    elif rho_to_sort_all_np is not None:
-        use_inverse_sort = np.shares_memory(rho_all_np, rho_to_sort_all_np)
-    else:
-        use_inverse_sort = np.shares_memory(rho_all_np[0], rho_to_sort.values)
+    rho_all_np = ds[density_name].values            # (time, x, y, z)
+    dz_flat_np = (dV / LxLy).values                 # (x, y, z)
+    z_np       = (xr.zeros_like(ds[density_name].isel(time=0)) + ds[density_name].isel(time=0)[z_name]).values  # (x, y, z)
 
     # Build per-timestep argument tuples (all numpy, picklable)
     task_args = []
-    for i in range(n_times):
-        rho_np_i = rho_all_np[i]
-        if rho_to_sort_all_np is not None:
-            rts_np_i = rho_to_sort_all_np[i]
-        elif rho_to_sort is not None:
-            # rho_to_sort has no time dim
-            rts_np_i = rho_to_sort.values
-        else:
-            rts_np_i = rho_np_i
-        task_args.append((rho_np_i, rts_np_i, dz_flat_np, z_np, z_min, use_inverse_sort))
+    if rho_sorted is not None and dz_sorted is not None:
+        # Pre-sorted path: extract all numpy arrays once; skip sorting in worker
+        rho_sorted_all_np = rho_sorted.values                        # (time, N)
+        dz_sorted_all_np  = dz_sorted.values                         # (time, N)
+        z_sorted_1d_np    = rho_sorted.coords["z_1d_sorted"].values  # (N,)
+        for i in range(n_times):
+            task_args.append((rho_all_np[i], None, dz_flat_np, z_np, z_min, False,
+                              rho_sorted_all_np[i], dz_sorted_all_np[i], z_sorted_1d_np))
+    else:
+        # Self-sort path: sort ds[density_name] and use O(N) inverse permutation for z_0
+        for i in range(n_times):
+            task_args.append((rho_all_np[i], rho_all_np[i], dz_flat_np, z_np, z_min, True,
+                              None, None, None))
 
     # --- parallel or serial time loop ---
     if n_workers == 1 or n_times == 1:

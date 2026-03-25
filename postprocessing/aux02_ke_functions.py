@@ -432,6 +432,12 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
     ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
     strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
 
+    # Compute the full-field reference state once; reuse its sorted arrays in the loop
+    print("Computing full-field reference state (rho_sorted)...")
+    full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ",
+                                                         ape_method="precomputed_integral",
+                                                         use_numpy_version=True, n_workers=n_workers)
+
     dV = ds_full.dV
     transfer_list = []
 
@@ -454,9 +460,11 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
 
         # --- APE cross-scale transfer ---
         # Compute ρ̄ and the large-scale reference state z₀(ρ̄) → Υˡ
+        # Pass pre-sorted full-field reference state to avoid re-sorting each iteration
         ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
         filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                             rho_to_sort=ds_full.ρ,
+                                                             rho_sorted=full_local_pes.rho_sorted,
+                                                             dz_sorted=full_local_pes.dz_sorted,
                                                              ape_method="precomputed_integral",
                                                              use_numpy_version=True, n_workers=n_workers)
         # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
