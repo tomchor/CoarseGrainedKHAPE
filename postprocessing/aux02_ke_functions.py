@@ -142,7 +142,7 @@ def calculate_strain_tensor(u_i_bar, dimensions=("x_caa", "y_aca", "z_aac"), ind
 
 #+++ SFS KE dissipation
 def calculate_sfs_ke_dissipation(S, ν, filter, filter_dims=["x_caa", "y_aca"],
-                                  index_dims=("i", "j")):
+                                 index_dims=("i", "j")):
     """
     Compute the SFS KE dissipation ε<ℓ = 2ν τ(S, S)
 

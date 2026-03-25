@@ -568,7 +568,7 @@ def calculate_z0_from_sort_indices(rho, vertically_sorted_ds):
     return xr.DataArray(z0_flat.reshape(rho.shape), dims=rho.dims, coords=rho.coords)
 
 
-def calculate_z0_field_vectorized(rho, vertically_sorted_ds, z_name="z_aac"):
+def calculate_z0_field_vectorized(rho, vertically_sorted_ds):
     """
     Fully-vectorized z_0 calculation using binary search (no Python loops).
 
@@ -637,7 +637,7 @@ def calculate_Upsilon(z0_field, rho, z_name="z_aac"):
     xr.DataArray
         3D field of Υ values [m² s⁻²], same shape as rho
     """
-    return g * (rho[z_name] - z0_field) / ρ0
+    return g * (rho.coords[z_name] - z0_field) / ρ0
 #---
 
 #+++ Local APE calculations using on-the-fly integral method
@@ -674,7 +674,6 @@ def _local_APE_on_the_fly_integral_xarray(ρ, z, z_0, vertically_sorted_ds):
 
     # Calculate buoyancy difference and integrate
     ρ_sorted_profile_slice = ρ_sorted_profile.sel(z_1d_sorted=displacement_slice)
-
     b_l = - g * (ρ - ρ_sorted_profile_slice) / ρ0
 
     return -(b_l * signed_dz_flat).sum("z_1d_sorted")  # APE in Boussinesq units [m² s⁻²]
