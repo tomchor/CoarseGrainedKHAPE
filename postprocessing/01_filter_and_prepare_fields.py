@@ -65,6 +65,7 @@ full_local_pes = local_potential_energies_timeseries(ds_for_sort, density_name="
                                                      use_numpy_version=True, n_workers=n_workers)
 
 sorted_density_filename = filename.replace(".nc", "_sorted_density.nc")
-full_local_pes.to_netcdf(sorted_density_filename)
+with ProgressBar():
+    full_local_pes.to_netcdf(sorted_density_filename)
 print(f"Sorted density saved to: {sorted_density_filename}")
 #---

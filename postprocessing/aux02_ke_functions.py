@@ -393,7 +393,7 @@ def integrated_KE_timeseries(ds, verbose=False, u_name="u", v_name="v", w_name="
 
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
-                               ds_filt=None, n_workers=18):
+                              ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -408,6 +408,13 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
     ds_filt : xr.Dataset, optional
         Pre-computed filtered fields (ūᵢ, b̄) indexed by filter_length_scale.
         If None, filter_fields() is called internally.
+    rho_sorted : xr.DataArray, optional
+        Pre-sorted reference density (time, z_1d_sorted), e.g. loaded from a
+        ``*_sorted_density.nc`` file.  When provided together with
+        ``dz_sorted``, the density-sorting step is skipped entirely.
+    dz_sorted : xr.DataArray, optional
+        Pre-sorted cell heights (time, z_1d_sorted). Must be supplied together
+        with ``rho_sorted``.
     n_workers : int
         Number of threads for APE sorting (ThreadPoolExecutor).
 
@@ -417,7 +424,7 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
         Dataset with Π_KE, Π_APE, ∫Π_KE dV, ∫Π_APE dV indexed by
         filter_length_scale.
     """
-    filtered_dimensions = ["x_caa", "y_aca"]
+    filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
     tensor_dimensions   = ("x_caa", "y_aca", "z_aac") if filter_in_2d else ("x_caa", "z_aac")
 
     if ds_filt is None:
@@ -430,13 +437,17 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
     ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 
     ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
-    strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
 
-    # Compute the full-field reference state once; reuse its sorted arrays in the loop
-    print("Computing full-field reference state (rho_sorted)...")
-    full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ",
-                                                         ape_method="precomputed_integral",
-                                                         use_numpy_version=True, n_workers=n_workers)
+    # Use pre-sorted reference state if provided; otherwise sort the full density field
+    if rho_sorted is not None and dz_sorted is not None:
+        print("Using pre-sorted reference density (skipping sort).")
+    else:
+        print("Computing full-field reference state (rho_sorted)...")
+        full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ",
+                                                             ape_method="precomputed_integral",
+                                                             use_numpy_version=True, n_workers=n_workers)
+        rho_sorted = full_local_pes.rho_sorted
+        dz_sorted  = full_local_pes.dz_sorted
 
     dV = ds_full.dV
     transfer_list = []
@@ -463,8 +474,8 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
         # Pass pre-sorted full-field reference state to avoid re-sorting each iteration
         ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
         filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                             rho_sorted=full_local_pes.rho_sorted,
-                                                             dz_sorted=full_local_pes.dz_sorted,
+                                                             rho_sorted=rho_sorted,
+                                                             dz_sorted=dz_sorted,
                                                              ape_method="precomputed_integral",
                                                              use_numpy_version=True, n_workers=n_workers)
         # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
