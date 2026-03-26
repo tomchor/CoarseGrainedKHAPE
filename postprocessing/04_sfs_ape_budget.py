@@ -62,7 +62,7 @@ print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
 
 sorted_density_filename = filename.replace(".nc", "_sorted_density.nc")
 t0 = time.time()
-full_local_pes = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
@@ -73,6 +73,11 @@ print("Calculating scale-independent fields...")
 t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
+
+t0 = time.time()
+full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
+                                                     density_name="ρ", n_workers=n_workers)
+print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Loop over filter scales and calculate budget terms
@@ -98,10 +103,8 @@ for ℓ in filter_length_scales:
     print(f"  ρ̄ calculated  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
-    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                         rho_sorted=full_local_pes.rho_sorted,
-                                                         dz_sorted=full_local_pes.dz_sorted,
-                                                         n_workers=n_workers)
+    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, full_local_pes.rho_sorted, full_local_pes.dz_sorted,
+                                                         density_name="ρ̄", n_workers=n_workers)
     print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()

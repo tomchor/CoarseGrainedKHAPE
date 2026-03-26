@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, filter_fields
-from aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries, local_potential_energies_timeseries
+from aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 #---
 
 #+++ Configuration
@@ -62,11 +62,8 @@ ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name=
 
 sorted_density = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=n_workers)
 
-full_local_pes = local_potential_energies_timeseries(ds_for_sort, sorted_density.rho_sorted, sorted_density.dz_sorted,
-                                                     density_name="ρ", n_workers=n_workers)
-
 sorted_density_filename = filename.replace(".nc", "_sorted_density.nc")
 with ProgressBar():
-    full_local_pes.to_netcdf(sorted_density_filename)
+    sorted_density.to_netcdf(sorted_density_filename)
 print(f"Sorted density saved to: {sorted_density_filename}")
 #---
