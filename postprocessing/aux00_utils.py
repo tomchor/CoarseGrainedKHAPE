@@ -1,7 +1,10 @@
 import os
+from pathlib import Path
 import numpy as np
 import xarray as xr
 import gcm_filters
+
+PP_OUTPUT = Path(__file__).resolve().parent / "output"
 
 #+++ Integrations and sums
 def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
@@ -236,6 +239,6 @@ class DaskParallelFilter:
 #+++ Pre-computed result loaders
 def load_energy_transfer(filename):
     """Load the *_energy_transfer.nc file produced by 02_energy_transfer.py."""
-    et_filename = filename.replace(".nc", "_energy_transfer.nc")
+    et_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.nc"))
     return xr.open_dataset(et_filename, decode_timedelta=False).chunk({"time": 1})
 #---

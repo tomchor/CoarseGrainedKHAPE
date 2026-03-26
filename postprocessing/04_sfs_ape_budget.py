@@ -30,6 +30,7 @@ parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
 #---
@@ -47,7 +48,7 @@ print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 print("\n" + "="*60)
 print("Loading pre-filtered fields and sorted density...")
 
-filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_length_scales = ds_filt.filter_length_scale.values
@@ -60,7 +61,7 @@ print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0
 print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: {'2D (x,y)' if filter_in_2d else '1D (x only)'}")
 
-sorted_density_filename = filename.replace(".nc", "_sorted_density.nc")
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
 t0 = time.time()
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
@@ -189,7 +190,7 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 
-output_filename = filename.replace(".nc", "_sfs_ape_budget.nc")
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
 with ProgressBar():
     sfs_ape_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")

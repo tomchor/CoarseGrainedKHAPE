@@ -22,6 +22,7 @@ parser.add_argument("--filename", default="output/khi_90x1x256.nc",
                     help="Path to simulation NetCDF file")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 #---
 
@@ -37,7 +38,7 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 
-filtered_filename = filename.replace(".nc", "_filtered_velocities.nc")
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_in_2d = int(ds_filt.attrs.get("filter_ndim", 2)) == 2
 filtered_dimensions = ["x_caa", "y_aca"] if filter_in_2d else ["x_caa"]
@@ -142,7 +143,7 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 
-output_filename = filename.replace(".nc", "_sfs_ke_budget.nc")
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget.nc"))
 with ProgressBar():
     sfs_ke_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
