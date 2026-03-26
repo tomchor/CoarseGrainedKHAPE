@@ -242,10 +242,9 @@ def _process_single_timestep(
 #---
 
 #+++ Local APE and TPE time series calculations
-def local_potential_energies_timeseries(ds, test=False, verbose_level=1, sorting_method="vertically_flattened",
-                                        ape_method="precomputed_integral", use_numpy_version=True,
+def local_potential_energies_timeseries(ds, verbose_level=1,
                                         density_name="rho", dV_name="dV", LxLy_name="LxLy",
-                                        z_min_name="z_min", Lz_name="Lz", z_name="z_aac",
+                                        z_min_name="z_min", z_name="z_aac",
                                         rho_sorted=None, dz_sorted=None, n_workers=None):
     """
     Calculate local APE and TPE fields for all time steps
@@ -520,7 +519,7 @@ def calculate_sfs_ape_tendency(subfilter_local_ape):
 
 #+++ SFS reference-tendency correction R_s
 def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted,
-                                filter, filter_dims=["x_caa", "y_aca"], z_name="z_aac"):
+                               filter, filter_dims=["x_caa", "y_aca"], z_name="z_aac"):
     """
     Compute the subfilter reference-tendency correction
 

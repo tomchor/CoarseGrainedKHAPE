@@ -60,9 +60,7 @@ ds_for_sort = ds[["b", "dV", "LxLy"]].copy()
 ds_for_sort.attrs.update(ds.attrs)
 ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name="b", density_name="ρ")
 
-full_local_pes = local_potential_energies_timeseries(ds_for_sort, density_name="ρ",
-                                                     ape_method="precomputed_integral",
-                                                     use_numpy_version=True, n_workers=n_workers)
+full_local_pes = local_potential_energies_timeseries(ds_for_sort, density_name="ρ", n_workers=n_workers)
 
 sorted_density_filename = filename.replace(".nc", "_sorted_density.nc")
 with ProgressBar():

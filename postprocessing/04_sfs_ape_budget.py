@@ -101,8 +101,7 @@ for ℓ in filter_length_scales:
     filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
                                                          rho_sorted=full_local_pes.rho_sorted,
                                                          dz_sorted=full_local_pes.dz_sorted,
-                                                         ape_method="precomputed_integral",
-                                                         use_numpy_version=True, n_workers=n_workers)
+                                                         n_workers=n_workers)
     print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()

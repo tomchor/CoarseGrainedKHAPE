@@ -302,8 +302,7 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
     else:
         print("Computing full-field reference state (rho_sorted)...")
         full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ",
-                                                             ape_method="precomputed_integral",
-                                                             use_numpy_version=True, n_workers=n_workers)
+                                                             n_workers=n_workers)
         rho_sorted = full_local_pes.rho_sorted
         dz_sorted  = full_local_pes.dz_sorted
 
@@ -334,8 +333,7 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
         filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
                                                              rho_sorted=rho_sorted,
                                                              dz_sorted=dz_sorted,
-                                                             ape_method="precomputed_integral",
-                                                             use_numpy_version=True, n_workers=n_workers)
+                                                             n_workers=n_workers)
         # Π_APE = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
         Π_APE = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
                                                gaussian_filter, filter_dims=filtered_dimensions,
