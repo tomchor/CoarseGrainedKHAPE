@@ -2,15 +2,29 @@ name: Tests
 
 on:
   push:
-  pull_request:
+    branches:
+      - main
+  issue_comment:
+    types: [created]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
+    # Run on push to main, or when a PR comment body is exactly "test"
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       github.event.comment.body == 'test')
+
     steps:
+      # For issue_comment events the default checkout is the default branch,
+      # so we explicitly check out the PR head instead.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || github.ref }}
 
       # -----------------------------------------------------------------------
       # Julia — run simulation
