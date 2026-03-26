@@ -9,6 +9,7 @@ from aux00_utils import (integrate, calculate_gradient,
                          condense_velocities, condense_uw_velocities,
                          make_gaussian_filter, filter_fields)
 from aux01_pe_functions import (calculate_density_fields_from_buoyancy,
+                                sorted_timeseries,
                                 local_potential_energies_timeseries,
                                 calculate_cross_scale_ape_flux)
 
@@ -301,10 +302,9 @@ def calculate_energy_transfer(ds, filter_length_scales, filter_in_2d=True,
         print("Using pre-sorted reference density (skipping sort).")
     else:
         print("Computing full-field reference state (rho_sorted)...")
-        full_local_pes = local_potential_energies_timeseries(ds_full, density_name="ρ",
-                                                             n_workers=n_workers)
-        rho_sorted = full_local_pes.rho_sorted
-        dz_sorted  = full_local_pes.dz_sorted
+        _full_sorted = sorted_timeseries(ds_full, field_to_sort="ρ", n_workers=n_workers)
+        rho_sorted = _full_sorted.rho_sorted
+        dz_sorted  = _full_sorted.dz_sorted
 
     dV = ds_full.dV
     transfer_list = []
