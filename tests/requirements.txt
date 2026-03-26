@@ -1,0 +1,8 @@
+numpy
+xarray
+scipy
+matplotlib
+dask
+netcdf4
+gcm_filters
+pytest
