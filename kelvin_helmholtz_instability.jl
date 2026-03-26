@@ -3,12 +3,28 @@
 using Oceananigans
 using CairoMakie
 using Printf
+using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation
 using Oceanostics.ProgressMessengers
 
 include("utils.jl")
+
+#+++ Parse command-line arguments
+let s = ArgParseSettings()
+    @add_arg_table! s begin
+        "--Nz"
+            help = "Number of vertical grid points (default: 512 on CPU, 4096 on GPU)"
+            arg_type = Int
+            required = false
+            default = has_cuda_gpu() ? 4096 : 512
+    end
+    global parsed_args = parse_args(s)
+end
+#---
+
+Nz = parsed_args["Nz"]
 
 #+++ Define simulation parameters
 params = (
@@ -25,7 +41,6 @@ params = (
 #+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
-    Nz = 4096
     x_aspect_ratio = 1   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
     ν = 5e-5
@@ -34,7 +49,6 @@ else
     @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
 
     arch = CPU()
-    Nz = 512
     x_aspect_ratio = 2   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
     ν = 2e-3
