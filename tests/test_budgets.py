@@ -43,13 +43,13 @@ def ke_budget():
     return load("sfs_ke_budget")
 
 
-@pytest.mark.parametrize("ℓ_idx", range(4))   # 4 filter scales set in 01_filter_and_prepare_fields.py
-def test_ke_budget_residual(ke_budget, ℓ_idx):
-    ℓ = ke_budget.filter_length_scale.values[ℓ_idx]
-    ds_ℓ = ke_budget.sel(filter_length_scale=ℓ)
-    rel = relative_residual(ds_ℓ, "residual_KE", KE_BUDGET_VARS)
+@pytest.mark.parametrize("l_idx", range(4))   # 4 filter scales set in 01_filter_and_prepare_fields.py
+def test_ke_budget_residual(ke_budget, l_idx):
+    l = ke_budget.filter_length_scale.values[l_idx]
+    ds_l = ke_budget.sel(filter_length_scale=l)
+    rel = relative_residual(ds_l, "residual_KE", KE_BUDGET_VARS)
     assert rel < THRESHOLD, (
-        f"KE budget residual too large at ℓ={ℓ:.4f}: "
+        f"KE budget residual too large at l={l:.4f}: "
         f"relative residual = {rel:.3%} > {THRESHOLD:.0%}"
     )
 
@@ -70,12 +70,12 @@ def ape_budget():
     return load("sfs_ape_budget")
 
 
-@pytest.mark.parametrize("ℓ_idx", range(4))
-def test_ape_budget_residual(ape_budget, ℓ_idx):
-    ℓ = ape_budget.filter_length_scale.values[ℓ_idx]
-    ds_ℓ = ape_budget.sel(filter_length_scale=ℓ)
-    rel = relative_residual(ds_ℓ, "residual_APE", APE_BUDGET_VARS)
+@pytest.mark.parametrize("l_idx", range(4))
+def test_ape_budget_residual(ape_budget, l_idx):
+    l = ape_budget.filter_length_scale.values[l_idx]
+    ds_l = ape_budget.sel(filter_length_scale=l)
+    rel = relative_residual(ds_l, "residual_APE", APE_BUDGET_VARS)
     assert rel < THRESHOLD, (
-        f"APE budget residual too large at ℓ={ℓ:.4f}: "
+        f"APE budget residual too large at l={l:.4f}: "
         f"relative residual = {rel:.3%} > {THRESHOLD:.0%}"
     )
