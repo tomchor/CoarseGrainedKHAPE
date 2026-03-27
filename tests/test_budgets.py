@@ -54,7 +54,7 @@ def ke_budget():
     return load("sfs_ke_budget")
 
 
-@pytest.mark.parametrize("l_idx", range(4))   # 4 filter scales set in 01_filter_and_prepare_fields.py
+@pytest.mark.parametrize("l_idx", range(len(load("sfs_ke_budget").filter_length_scale)))
 def test_ke_budget_residual(ke_budget, l_idx):
     l = ke_budget.filter_length_scale.values[l_idx]
     ds_l = ke_budget.sel(filter_length_scale=l)
@@ -83,7 +83,7 @@ def ape_budget():
     return load("sfs_ape_budget")
 
 
-@pytest.mark.parametrize("l_idx", range(4))
+@pytest.mark.parametrize("l_idx", range(len(load("sfs_ape_budget").filter_length_scale)))
 def test_ape_budget_residual(ape_budget, l_idx):
     l = ape_budget.filter_length_scale.values[l_idx]
     ds_l = ape_budget.sel(filter_length_scale=l)
