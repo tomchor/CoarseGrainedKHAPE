@@ -56,4 +56,4 @@ jobs:
       # Tests
       # -----------------------------------------------------------------------
       - name: Run budget closure tests
-        run: pytest tests/ -v
+        run: pytest tests/ -v -s
