@@ -4,15 +4,24 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:  # allows manual "Run workflow" from the Actions UI on any branch
+  issue_comment:
+    types: [created]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       github.event.comment.body == 'test')
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || github.ref }}
 
       # -----------------------------------------------------------------------
       # Julia — run simulation
