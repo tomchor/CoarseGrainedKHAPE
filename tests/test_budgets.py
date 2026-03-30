@@ -16,9 +16,13 @@ THRESHOLD = 0.05  # residual must be < 5% of the largest budget term
 
 
 def relative_residual(ds, residual_var, budget_vars):
-    """max(|residual|) / max over budget terms of max(|term|)"""
+    """max(|residual|) / min over budget terms of max(|term|)
+
+    Normalising by the smallest term ensures the residual is smaller than
+    every individual budget term, not just the largest.
+    """
     residual = np.nanmax(np.abs(ds[residual_var].values))
-    scale    = max(np.nanmax(np.abs(ds[v].values)) for v in budget_vars)
+    scale    = min(np.nanmax(np.abs(ds[v].values)) for v in budget_vars)
     return residual / scale
 
 
@@ -30,7 +34,7 @@ def print_budget_summary(ds, residual_var, budget_vars, rel):
     for v in budget_vars:
         print(f"  {v:<35}  {np.nanmax(np.abs(ds[v].values)):.4e}")
     print(f"  {residual_var:<35}  {np.nanmax(np.abs(ds[residual_var].values)):.4e}")
-    print(f"  {'relative residual':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
+    print(f"  {'residual / min(terms)':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
 
 
 def load(suffix):
