@@ -94,7 +94,7 @@ jobs:
         run: pip install -r tests/requirements.txt
 
       - name: Create output directories
-        run: mkdir -p figures postprocessing/output
+        run: mkdir -p figures animations postprocessing/output
 
       - name: Run postprocessing pipeline
         working-directory: postprocessing
@@ -106,6 +106,14 @@ jobs:
       - name: Run budget closure tests
         id: pytest
         run: pytest tests/ -v -s
+
+      - name: Upload simulation animation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-animation
+          path: animations/
+          if-no-files-found: warn
 
       - name: Upload budget plots
         if: always()
