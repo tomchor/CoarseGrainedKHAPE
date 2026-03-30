@@ -107,12 +107,20 @@ jobs:
         id: pytest
         run: pytest tests/ -v -s
 
+      - name: List output files
+        if: always()
+        run: |
+          echo "=== figures/ ==="
+          ls -la figures/ || echo "(directory missing)"
+          echo "=== animations/ ==="
+          ls -la animations/ || echo "(directory missing)"
+
       - name: Upload simulation animation
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: simulation-animation
-          path: animations/
+          path: animations/*.mp4
           if-no-files-found: warn
 
       - name: Upload budget plots
@@ -120,7 +128,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: budget-plots
-          path: figures/
+          path: figures/*.png
           if-no-files-found: warn
 
       # -----------------------------------------------------------------------
