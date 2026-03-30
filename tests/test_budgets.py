@@ -2,7 +2,7 @@
 Budget closure tests for SFS KE and APE budgets.
 
 For each filter scale, checks that the residual is small relative to
-the largest term in the budget: max(|residual|) / max(|terms|) < THRESHOLD.
+the smallest budget term: max(|residual|) / min_v(max(|term_v|)) < THRESHOLD.
 """
 
 import pytest
@@ -18,10 +18,11 @@ THRESHOLD = 0.12
 
 
 def relative_residual(ds, residual_var, budget_vars):
-    """max(|residual|) / min over budget terms of max(|term|)
+    """max(|residual|) / min_v(max(|term_v|))
 
-    Normalising by the smallest term ensures the residual is smaller than
-    every individual budget term, not just the largest.
+    The denominator is the smallest peak value among all budget terms
+    (each term's peak is its max absolute value over all time and space).
+    This provides a stricter normalisation than dividing by the largest term.
     """
     residual = np.nanmax(np.abs(ds[residual_var].values))
     scale    = min(np.nanmax(np.abs(ds[v].values)) for v in budget_vars)
