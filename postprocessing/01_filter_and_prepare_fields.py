@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
-filter_length_scales = np.geomspace(0.1, 2, 4) # Length scales for filtering
+filter_length_scales = np.geomspace(0.1, 10, 6) # Length scales for filtering
 #---
 
 #+++ Load data and grid
