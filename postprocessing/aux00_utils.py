@@ -57,7 +57,7 @@ def condense(ds, vlist, varname, dimname="i", indices=(1, 2, 3)):
     In the process, individual variables in `vlist` are removed from `ds`.
     """
     ds[varname] = ds[vlist].to_array(dim=dimname).assign_coords({dimname : list(indices)})
-    ds = ds.drop(vlist)
+    ds = ds.drop_vars(vlist)
     return ds
 
 def condense_velocities(ds, dimname="i", indices=(1, 2, 3)):
