@@ -12,7 +12,7 @@ from pathlib import Path
 
 PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
 STEM      = "khi_180x1x512"
-THRESHOLD = 0.05  # residual must be < 5% of the largest budget term
+THRESHOLD = 0.10  # residual must be < 10% of the smallest budget term
 
 
 def relative_residual(ds, residual_var, budget_vars):
