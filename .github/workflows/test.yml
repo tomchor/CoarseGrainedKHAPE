@@ -100,7 +100,7 @@ jobs:
 
       - name: Run postprocessing pipeline
         working-directory: postprocessing
-        run: bash 00_get_budgets.sh output/khi_180x1x512.nc
+        run: bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc
 
       # -----------------------------------------------------------------------
       # Tests
