@@ -19,19 +19,25 @@ let s = ArgParseSettings()
             arg_type = Int
             required = false
             default = has_cuda_gpu() ? 4096 : 512
+        "--Ri"
+            help = "Richardson number (default: 0.1)"
+            arg_type = Float64
+            required = false
+            default = 0.1
     end
     global parsed_args = parse_args(s)
 end
 #---
 
 Nz = parsed_args["Nz"]
+Ri = parsed_args["Ri"]
 
 #+++ Define simulation parameters
 params = (
     Lx = 10,
     Ly = 5,
     Lz = 14,
-    Ri = 0.1,
+    Ri = Ri,
     h = 1/4,
     perturbation_amplitude = 0.01,
     stop_time = 200.0,
