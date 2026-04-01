@@ -9,7 +9,7 @@ from aux03_plotting import budget_colors
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot local quantities from SFS budget output files")
-parser.add_argument("--filename", default="output/khi_128x1x256.nc",
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to base simulation NetCDF file (budget files are derived from this)")
 parser.add_argument("--time-stride", type=int, default=5,
                     help="Stride for time selection in plots")

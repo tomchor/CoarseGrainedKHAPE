@@ -24,7 +24,7 @@ from aux01_pe_functions import (
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/khi_90x1x256.nc",
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")

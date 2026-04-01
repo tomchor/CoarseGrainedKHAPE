@@ -150,7 +150,9 @@ vorticity = Field(∂z(u) - ∂x(w))
 outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄)
 
 using NCDatasets
-output_filename = "output/khi_$(params.Nx)x$(params.Ny)x$(params.Nz)"
+simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
+output_filename = "output/$(simulation_name).nc"
+
 if !(model.closure isa ScalarDiffusivity)
     ν = viscosity(model)
     κ = diffusivity(model, Val(:b))
@@ -165,7 +167,7 @@ simulation.output_writers[:fields] =
                  global_attributes = params,
                  overwrite_existing = true)
 
-output_filename_2d = "output/khi_$(params.Nx)x$(params.Ny)x$(params.Nz)_2d.nc"
+output_filename_2d = "output/$(simulation_name)_2d.nc"
 simulation.output_writers[:twod_fields] =
 NetCDFWriter(model, outputs,
             schedule = TimeInterval(2),
