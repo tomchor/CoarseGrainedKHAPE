@@ -10,7 +10,7 @@ from aux00_utils import load_dataset_and_grid, make_gaussian_filter
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--filename", default="output/khi_90x1x256.nc")
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
