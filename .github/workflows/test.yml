@@ -47,8 +47,8 @@ jobs:
       - name: Install Julia packages
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
-      - name: Run simulation (Nz=512, CPU)
-        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1
+      - name: Run simulation (Nz=256, CPU)
+        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 256 --Ri 0.1
 
       # -----------------------------------------------------------------------
       # Python — postprocessing pipeline
@@ -65,7 +65,7 @@ jobs:
 
       - name: Run postprocessing pipeline
         working-directory: postprocessing
-        run: bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc
+        run: bash 00_get_budgets.sh output/khi_Nz256_Ri0.10.nc
 
       # -----------------------------------------------------------------------
       # Tests
