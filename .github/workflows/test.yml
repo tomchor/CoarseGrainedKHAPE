@@ -4,9 +4,16 @@ on:
   push:
     branches:
       - main
-  issue_comment:
-    types: [created]
   workflow_dispatch:
+    inputs:
+      head_sha:
+        description: 'PR head SHA for status reporting (set by test_trigger.yml)'
+        required: false
+        default: ''
+      pr_number:
+        description: 'PR number for commenting (set by test_trigger.yml)'
+        required: false
+        default: ''
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -17,12 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
-    if: |
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.issue.pull_request != null &&
-       startsWith(github.event.comment.body, 'test'))
-
     permissions:
       contents: read
       issues: write
@@ -30,45 +31,9 @@ jobs:
       statuses: write
 
     steps:
-      - name: React to trigger comment
-        if: github.event_name == 'issue_comment'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: context.payload.comment.id,
-              content: 'rocket',
-            });
-
-      - name: Get PR head SHA
-        if: github.event_name == 'issue_comment'
-        id: sha
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} --jq '.head.sha')
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Set commit status to pending
-        if: github.event_name == 'issue_comment'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: '${{ steps.sha.outputs.sha }}',
-              state: 'pending',
-              target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
-              description: 'Tests running…',
-              context: 'Budget Closure Tests',
-            });
-
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'issue_comment' && steps.sha.outputs.sha || github.ref }}
+          ref: ${{ inputs.head_sha || github.sha }}
 
       # -----------------------------------------------------------------------
       # Julia — run simulation
@@ -83,7 +48,7 @@ jobs:
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
       - name: Run simulation (Nz=512, CPU)
-        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 512
+        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1
 
       # -----------------------------------------------------------------------
       # Python — postprocessing pipeline
@@ -100,7 +65,7 @@ jobs:
 
       - name: Run postprocessing pipeline
         working-directory: postprocessing
-        run: bash 00_get_budgets.sh output/khi_180x1x512.nc
+        run: bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc
 
       # -----------------------------------------------------------------------
       # Tests
@@ -134,10 +99,10 @@ jobs:
           if-no-files-found: warn
 
       # -----------------------------------------------------------------------
-      # Report back to PR
+      # Report back to PR (only when dispatched from test_trigger.yml)
       # -----------------------------------------------------------------------
       - name: Update commit status
-        if: github.event_name == 'issue_comment' && always()
+        if: inputs.head_sha != '' && always()
         uses: actions/github-script@v7
         with:
           script: |
@@ -145,7 +110,7 @@ jobs:
             github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ steps.sha.outputs.sha }}',
+              sha: '${{ inputs.head_sha }}',
               state: success ? 'success' : 'failure',
               target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
               description: success ? 'All budget tests passed' : 'Budget tests failed',
@@ -153,13 +118,13 @@ jobs:
             });
 
       - name: Comment on PR if tests failed
-        if: github.event_name == 'issue_comment' && always() && steps.pytest.outcome != 'success'
+        if: inputs.pr_number != '' && always() && steps.pytest.outcome != 'success'
         uses: actions/github-script@v7
         with:
           script: |
             const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: ${{ inputs.pr_number || 0 }},
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `❌ **Budget closure tests failed.** [View run](${runUrl}) for details.`,

@@ -10,7 +10,7 @@ from aux03_plotting import run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot cross-scale KE and APE transfer spectra")
-parser.add_argument("--filename", default="output/khi_90x1x256.nc",
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file (used to derive energy transfer filename)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
