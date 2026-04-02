@@ -10,10 +10,10 @@ import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux03_plotting import budget_colors, plot_sfs_budget
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     calculate_b_r,
+    calculate_b_r_simple,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
@@ -82,10 +82,7 @@ full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sort
 print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
 
 t0 = time.time()
-# b_r = calculate_b_r(ds_full.ρ, full_local_pes.rho_sorted)
-ds_sorted_on_z_aac = ds_sorted.rho_sorted.rename(z_1d_sorted="z_aac").interp(z_aac=ds_full.ρ.z_aac)
-b_r = -g*(ds_full.b - ds_sorted_on_z_aac) / ρ0
-
+b_r = calculate_b_r(ds_full.ρ, full_local_pes.rho_sorted)
 print(f"  b_r calculated  ({time.time()-t0:.1f}s)")
 #---
 
@@ -204,24 +201,4 @@ output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget.nc"))
 with ProgressBar():
     sfs_ape_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
-
-# Reload from disk so plots read pre-computed data rather than re-triggering the dask graph
-sfs_ape_budget_terms = xr.open_dataset(output_filename, decode_timedelta=False)
-#---
-
-#+++ Plot integrated budget terms
-print("\n" + "="*60)
-print("Creating plots...")
-print("="*60)
-
-integrated_vars = {
-    "∫-∂ₜ SFS APE dV":    budget_colors["tendency"],
-    "∫Π_APE dV":           budget_colors["flux"],
-    "∫-χₛ dV":             budget_colors["dissipation"],
-    "∫(SFS KE->APE) dV":   budget_colors["exchange"],
-    "∫Rˢ dV":              "C4",
-    "residual_APE":         budget_colors["residual"],
-}
-plot_sfs_budget(sfs_ape_budget_terms, integrated_vars, filter_length_scales,
-                output_filename, REPO_ROOT, "Integrated SFS APE Budget Terms")
 #---

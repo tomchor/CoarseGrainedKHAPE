@@ -12,6 +12,51 @@ def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
 #---
 
 #+++ Load data
+def _pad_domain_in_z(ds):
+    """Extend the z domain to twice its original height using edge-value padding.
+
+    Adds Nz//2 cells at the bottom (each filled with that field's bottom boundary
+    value) and Nz//2 cells at the top (each filled with the top boundary value),
+    doubling the domain height. Assumes a uniform z grid. Δz_aac is extended with
+    the same constant dz; dV and z-extent attributes are recomputed.
+    """
+    Nz     = ds.sizes["z_aac"]
+    Nz_pad = Nz // 2
+    dz     = float(ds.Δz_aac.isel(z_aac=0))
+
+    z_orig = ds.z_aac.values
+    z_bot  = z_orig[0]  - np.arange(Nz_pad, 0, -1) * dz
+    z_top  = z_orig[-1] + np.arange(1, Nz_pad + 1) * dz
+    z_new  = np.concatenate([z_bot, z_orig, z_top])
+
+    new_vars = {}
+    for name, da in ds.data_vars.items():
+        if name in {"Δz_aac", "dV"} or "z_aac" not in da.dims:
+            new_vars[name] = da
+            continue
+        # Use actual boundary values: multiply a zero slab by 0 then add boundary scalar
+        bot_slab = (da.isel(z_aac=slice(None, Nz_pad)) * 0
+                    + da.isel(z_aac=0)).assign_coords(z_aac=z_bot)
+        top_slab = (da.isel(z_aac=slice(-Nz_pad, None)) * 0
+                    + da.isel(z_aac=-1)).assign_coords(z_aac=z_top)
+        new_vars[name] = xr.concat([bot_slab, da, top_slab], dim="z_aac")
+
+    new_vars["Δz_aac"] = xr.DataArray(
+        np.full(len(z_new), dz), dims=["z_aac"],
+        coords={"z_aac": z_new}, attrs=ds["Δz_aac"].attrs,
+    )
+
+    other_coords = {k: v for k, v in ds.coords.items() if k != "z_aac"}
+    ds_new = xr.Dataset(new_vars, coords={**other_coords, "z_aac": z_new}, attrs=ds.attrs)
+    ds_new["dV"] = ds_new.Δx_caa * ds_new.Δy_aca * ds_new.Δz_aac
+
+    ds_new.attrs["z_min"] = float(z_new[0])  - dz / 2
+    ds_new.attrs["z_max"] = float(z_new[-1]) + dz / 2
+    ds_new.attrs["Lz"]    = ds_new.attrs["z_max"] - ds_new.attrs["z_min"]
+
+    return ds_new
+
+
 def load_dataset_and_grid(filename):
     """
     Load the simulation output and grid information
@@ -24,7 +69,8 @@ def load_dataset_and_grid(filename):
     Returns
     -------
     ds : xr.Dataset
-        Dataset with grid information added as attributes and variables
+        Dataset with grid information added as attributes and variables,
+        z domain padded to 2x its original height (1 at top, -1 at bottom).
     """
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False)
@@ -45,6 +91,9 @@ def load_dataset_and_grid(filename):
     # Add volume and area variables
     ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
     ds["LxLy"] = ds.Lx * ds.Ly
+
+    # Pad domain in z (double height using boundary values of each field)
+    ds = _pad_domain_in_z(ds)
 
     return ds
 #---

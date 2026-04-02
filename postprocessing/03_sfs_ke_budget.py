@@ -5,7 +5,6 @@ from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
-from aux03_plotting import budget_colors, plot_sfs_budget
 from aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
 from aux02_ke_functions import (
     calculate_sfs_stress_tensor,
@@ -158,23 +157,4 @@ output_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget.nc"))
 with ProgressBar():
     sfs_ke_budget_terms.to_netcdf(output_filename)
 print(f"\nResults saved to: {output_filename}")
-
-# Reload from disk so plots read pre-computed data rather than re-triggering the dask graph
-sfs_ke_budget_terms = xr.open_dataset(output_filename, decode_timedelta=False)
-#---
-
-#+++ Plot integrated KE decomposition
-print("\n" + "="*60)
-print("Creating plots...")
-print("="*60)
-
-integrated_vars = {
-    "∫-∂ₜ SFS KE dV":    budget_colors["tendency"],
-    "∫Π_KE dV":          budget_colors["flux"],
-    "∫-εₛ dV":           budget_colors["dissipation"],
-    "∫(SFS APE->KE) dV": budget_colors["exchange"],
-    "residual_KE":       budget_colors["residual"],
-}
-plot_sfs_budget(sfs_ke_budget_terms, integrated_vars, filter_length_scales,
-                output_filename, REPO_ROOT, "Integrated SFS KE Budget Terms")
 #---
