@@ -247,7 +247,7 @@ def filter_fields(ds, filter_length_scales):
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
     ds_filt.attrs.update(ds.attrs)
-    ds_filt.attrs["filter_ndim"] = 2
+    ds_filt.attrs["filter_dims"] = "x_caa,z_aac"
     return ds_filt
 #---
 
