@@ -13,14 +13,12 @@ from aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate
 from aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     calculate_b_r,
-    calculate_b_r_simple,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
     calculate_ape_to_ke_exchange_term,
 )
-from aux01_pe_functions import g, ρ0
 #---
 
 #+++ Configuration
