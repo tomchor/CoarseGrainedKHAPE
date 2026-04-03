@@ -98,6 +98,14 @@ jobs:
           path: figures/*.png
           if-no-files-found: warn
 
+      - name: Upload postprocessing NetCDF files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postprocessing-output
+          path: postprocessing/output/*.nc
+          if-no-files-found: warn
+
       # -----------------------------------------------------------------------
       # Report back to PR (only when dispatched from test_trigger.yml)
       # -----------------------------------------------------------------------
