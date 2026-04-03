@@ -12,7 +12,6 @@ from aux02_ke_functions import (
     calculate_sfs_ke_dissipation,
     calculate_sfs_ke_tendency,
 )
-from aux01_pe_functions import g, ρ0
 #---
 
 #+++ Configuration
@@ -60,8 +59,7 @@ print(f"Filter dimensions: x and z")
 print("\n" + "="*60)
 print("Calculating density and relative buoyancy...")
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
-b_r2 = calculate_b_r(ds_full.ρ, ds_sorted.rho_sorted)
-b_r = calculate_b_r_simple(ds_full.ρ, ds_sorted.rho_sorted)
+b_r = calculate_b_r(ds_full.ρ, ds_sorted.rho_sorted)
 print("Done!")
 #---
 
