@@ -36,8 +36,8 @@ stem = Path(filename).stem
 
 #+++ Load budgets
 print("Loading KE and APE budgets...")
-ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget.nc"),  decode_times=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget.nc"), decode_times=False)
+ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc"),  decode_times=False)
+ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc"), decode_times=False)
 
 ke_budget = ke_budget.sel(z_aac=slice(-3, +3))
 ape_budget = ape_budget.sel(z_aac=slice(-3, +3))

@@ -58,10 +58,10 @@ KE_BUDGET_VARS = [
 
 @pytest.fixture(scope="module")
 def ke_budget():
-    return load("sfs_ke_budget")
+    return load("sfs_ke_budget_integrated")
 
 
-@pytest.mark.parametrize("l_idx", range(len(load("sfs_ke_budget").filter_length_scale)))
+@pytest.mark.parametrize("l_idx", range(len(load("sfs_ke_budget_integrated").filter_length_scale)))
 def test_ke_budget_residual(ke_budget, l_idx):
     l = ke_budget.filter_length_scale.values[l_idx]
     ds_l = ke_budget.sel(filter_length_scale=l)
@@ -87,10 +87,10 @@ APE_BUDGET_VARS = [
 
 @pytest.fixture(scope="module")
 def ape_budget():
-    return load("sfs_ape_budget")
+    return load("sfs_ape_budget_integrated")
 
 
-@pytest.mark.parametrize("l_idx", range(len(load("sfs_ape_budget").filter_length_scale)))
+@pytest.mark.parametrize("l_idx", range(len(load("sfs_ape_budget_integrated").filter_length_scale)))
 def test_ape_budget_residual(ape_budget, l_idx):
     l = ape_budget.filter_length_scale.values[l_idx]
     ds_l = ape_budget.sel(filter_length_scale=l)
