@@ -70,7 +70,9 @@ def load_dataset_and_grid(filename):
     -------
     ds : xr.Dataset
         Dataset with grid information added as attributes and variables,
-        z domain padded to 2x its original height (1 at top, -1 at bottom).
+        with the z domain extended to 2x its original height by padding each
+        field with its bottom/top edge values and extending z coordinates by
+        the uniform grid spacing.
     """
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False, chunks={})
