@@ -49,7 +49,7 @@ params = (
     h = 1/4,
     perturbation_amplitude = 0.01,
     stop_time = stop_time,
-    Re₀ = 1e-3, # Reynolds number (ν = 1/Re)
+    Re₀ = 5e-4, # Reynolds number (ν = 1/Re)
     Pr = 1,     # Prandtl number (κ = ν/Pr)
 )
 
