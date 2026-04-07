@@ -61,8 +61,9 @@ for ℓ in filter_length_scales:
             (axes[row, 1], ape_budget, ape_vars, "Integrated SFS APE Budget"),
         ]:
             for var, color in vars_dict.items():
-                budget[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
-                    ax=ax, x="time", label=var, color=color)
+                data = budget[var].sel(filter_length_scale=ℓ).dropna("time")
+                lbl = f"{var}  [max|·| = {float(abs(data).max()):.2e}]" if "residual" in var else var
+                data.plot.line(ax=ax, x="time", label=lbl, color=color)
             ax.legend(fontsize=8)
             ax.set_ylabel("Budget Terms [W or J s⁻¹]")
             ax.set_title(f"{title}  (ℓ = {ℓ:.4f})")

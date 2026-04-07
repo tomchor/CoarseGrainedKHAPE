@@ -76,7 +76,6 @@ else
     arch = CPU()
     x_aspect_ratio = 2   # Δx / Δz ratio
     y_aspect_ratio = Inf # Δy / Δz ratio
-    params = (; params..., Re = 500) # Reduce Re for coarser CPU run
 end
 
 @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
