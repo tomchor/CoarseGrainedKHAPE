@@ -278,7 +278,7 @@ params_str = @sprintf("Re = %d,  Ri = %.2f,  Pr = %d", params.Re, params.Ri, par
 title = @lift @sprintf("Kelvin-Helmholtz Instability  (%s)\nt = %.1f", params_str, times[$n])
 fig[1, 1:4] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
 
-kwargs = (xlabel="x", ylabel="z", limits=((-5, 5), (-5, 5)), aspect=1)
+kwargs = (xlabel="x", ylabel="z", aspect=1)
 
 ax_ω = Axis(fig[2, 1]; title="Vorticity", kwargs...)
 ax_b = Axis(fig[2, 3]; title="Buoyancy", kwargs...)
