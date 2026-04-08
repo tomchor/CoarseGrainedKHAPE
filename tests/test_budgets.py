@@ -2,7 +2,7 @@
 Budget closure tests for SFS KE and APE budgets.
 
 For each filter scale, checks that the residual is small relative to
-the smallest budget term: max(|residual|) / min_v(max(|term_v|)) < THRESHOLD.
+the smallest budget term: rms(residual) / min_v(rms(term_v)) < THRESHOLD.
 """
 
 import pytest
@@ -14,29 +14,33 @@ PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
 STEM      = "khi_Nz512_Ri0.10"
 # Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with a
 # short, coarse simulation
-THRESHOLD = 0.15
+THRESHOLD = 0.05
+
+
+def rms(arr):
+    """Root mean square of an array, ignoring NaNs."""
+    return np.sqrt(np.nanmean(arr**2))
 
 
 def relative_residual(ds, residual_var, budget_vars):
-    """max(|residual|) / min_v(max(|term_v|))
+    """rms(residual) / min_v(rms(term_v))
 
-    The denominator is the smallest peak value among all budget terms
-    (each term's peak is its max absolute value over all time and space).
+    The denominator is the smallest RMS among all budget terms.
     This provides a stricter normalisation than dividing by the largest term.
     """
-    residual = np.nanmax(np.abs(ds[residual_var].values))
-    scale    = min(np.nanmax(np.abs(ds[v].values)) for v in budget_vars)
+    residual = rms(ds[residual_var].values)
+    scale    = min(rms(ds[v].values) for v in budget_vars)
     return residual / scale
 
 
 def print_budget_summary(ds, residual_var, budget_vars, rel):
-    """Print a table of max|term| values and the relative residual."""
+    """Print a table of rms(term) values and the relative residual."""
     print()
-    print(f"  {'term':<35}  max|term|")
+    print(f"  {'term':<35}  rms(term)")
     print(f"  {'-'*35}  {'-'*12}")
     for v in budget_vars:
-        print(f"  {v:<35}  {np.nanmax(np.abs(ds[v].values)):.4e}")
-    print(f"  {residual_var:<35}  {np.nanmax(np.abs(ds[residual_var].values)):.4e}")
+        print(f"  {v:<35}  {rms(ds[v].values):.4e}")
+    print(f"  {residual_var:<35}  {rms(ds[residual_var].values):.4e}")
     print(f"  {'residual / min(terms)':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
 
 
