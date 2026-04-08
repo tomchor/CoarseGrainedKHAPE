@@ -15,12 +15,14 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for density sorting (ThreadPoolExecutor)")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.2, 0.4, 0.8, 2],
+                    help="Filter length scales (default: 0.2 0.4 0.8 2)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
-filter_length_scales = [0.2, 0.4, 0.8, 2] # Length scales for filtering
+filter_length_scales = args.filter_scales
 #---
 
 #+++ Load data and grid

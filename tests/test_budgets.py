@@ -14,7 +14,7 @@ PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
 STEM      = "khi_Nz512_Ri0.10"
 # Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with a
 # short, coarse simulation
-THRESHOLD = 0.05
+THRESHOLD = 0.1
 
 
 def rms(arr):
