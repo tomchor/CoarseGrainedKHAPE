@@ -16,7 +16,7 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot 4-panel snapshot of local SFS budget terms")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
+parser.add_argument("--filename", default="output/khi_Nz4096_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--time", type=float, default=50.0,
                     help="Target time for snapshot (nearest available will be used)")
@@ -125,6 +125,11 @@ for ax, (field, title) in zip(axes.flat, panels):
     ax.set_ylabel("z")
     ax.set_title(title)
     ax.set_ylim(-2.5, +2.5)
+
+for ax, letter in zip(axes.flat, "abcd"):
+    ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
+            fontsize=12, fontweight="bold", va="top", ha="left",
+            bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
 
 label = run_label(ke_budget.attrs)
 suptitle = f"t = {t_sel:.1f},  ℓ = {ℓ_sel:.4f}"
