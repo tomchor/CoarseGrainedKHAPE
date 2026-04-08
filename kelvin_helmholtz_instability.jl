@@ -31,6 +31,12 @@ let s = ArgParseSettings()
             arg_type = Float64
             required = false
             default = 200.0
+
+        "--Re0"
+            help = "Base Reynolds number (default: 5e-4)"
+            arg_type = Float64
+            required = false
+            default = 5e-4
     end
     global parsed_args = parse_args(s)
 end
@@ -39,6 +45,7 @@ end
 Nz = parsed_args["Nz"]
 Ri = parsed_args["Ri"]
 stop_time = parsed_args["stop-time"]
+Re₀ = parsed_args["Re0"]
 
 #+++ Define simulation parameters
 params = (
@@ -49,7 +56,7 @@ params = (
     h = 1/4,
     perturbation_amplitude = 0.01,
     stop_time = stop_time,
-    Re₀ = 5e-4, # Reynolds number (ν = 1/Re)
+    Re₀ = Re₀,  # Reynolds number (ν = 1/Re)
     Pr = 1,     # Prandtl number (κ = ν/Pr)
 )
 
