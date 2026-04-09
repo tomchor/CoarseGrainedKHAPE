@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -197,7 +197,7 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄, ε, Ri=Ri_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
@@ -260,49 +260,8 @@ show_gpu_status()
 @info "Running Kelvin-Helmholtz instability simulation..."
 run!(simulation)
 
-#+++ Load and plot results
+#+++ Plot results
 @info "Creating animation..."
-
-filepath = simulation.output_writers[:twod_fields].filepath
-
-ω_timeseries = FieldTimeSeries(filepath, "ω", architecture=CPU())
-b_timeseries = FieldTimeSeries(filepath, "b", architecture=CPU())
-
-# The architecture of the FieldTimeSeries isn't working as expected, so we need to load the data on the CPU manually:
-ω_timeseries = on_architecture(CPU(), ω_timeseries)
-b_timeseries = on_architecture(CPU(), b_timeseries)
-
-times = ω_timeseries.times
-
-n = Observable(1)
-
-ωₙ = @lift view(ω_timeseries[$n], :, 1, :)
-bₙ = @lift view(b_timeseries[$n], :, 1, :)
-
-fig = Figure(size=(900, 500))
-
-params_str = @sprintf("Re = %d,  Ri = %.2f,  Pr = %d", params.Re, params.Ri, params.Pr)
-title = @lift @sprintf("Kelvin-Helmholtz Instability  (%s)\nt = %.1f", params_str, times[$n])
-fig[1, 1:4] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
-
-kwargs = (xlabel="x", ylabel="z", aspect=1)
-
-ax_ω = Axis(fig[2, 1]; title="Vorticity", kwargs...)
-ax_b = Axis(fig[2, 3]; title="Buoyancy", kwargs...)
-
-hm_ω = heatmap!(ax_ω, ωₙ; colormap=:balance, colorrange=(-1, 1))
-Colorbar(fig[2, 2], hm_ω)
-
-hm_b = heatmap!(ax_b, bₙ; colormap=:balance, colorrange=(-0.05, 0.05))
-Colorbar(fig[2, 4], hm_b)
-
-frames = 1:length(times)
-
-animation_filename = "animations/$(basename(output_filename)).mp4"
-record(fig, animation_filename, frames, framerate=12) do i
-    @info "Plotting frame $i of $(frames[end])..."
-    n[] = i
-end
-
-@info "Animation saved as $(animation_filename)"
+plot_filepath = output_filename_2d
+include("plot_kelvin_helmholtz_instability.jl")
 #---
