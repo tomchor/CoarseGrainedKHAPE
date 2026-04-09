@@ -37,6 +37,12 @@ let s = ArgParseSettings()
             arg_type = Float64
             required = false
             default = 5e-4
+
+        "--h"
+            help = "Buoyancy layer thickness (default: 0.25)"
+            arg_type = Float64
+            required = false
+            default = 0.25
     end
     global parsed_args = parse_args(s)
 end
@@ -46,6 +52,7 @@ Nz = parsed_args["Nz"]
 Ri = parsed_args["Ri"]
 stop_time = parsed_args["stop-time"]
 Re₀ = parsed_args["Re0"]
+h = parsed_args["h"]
 
 #+++ Define simulation parameters
 params = (
@@ -53,8 +60,8 @@ params = (
     Ly = 5,
     Lz = 14,
     Ri = Ri,
-    h = 1/4,
     perturbation_amplitude = 0.01,
+    h = h,
     stop_time = stop_time,
     Re₀ = Re₀,  # Reynolds number (ν = 1/Re)
     Pr = 1,     # Prandtl number (κ = ν/Pr)
