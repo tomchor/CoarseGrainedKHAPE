@@ -132,6 +132,8 @@ model = NonhydrostaticModel(grid;
                             tracers = :b)
 u, v, w = model.velocities
 b = model.tracers.b
+
+Ri_field = FlowDiagnostics.RichardsonNumber(model)
 #---
 
 #+++ Define initial conditions: shear flow with stratification and perturbation
