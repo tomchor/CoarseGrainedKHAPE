@@ -134,6 +134,7 @@ u, v, w = model.velocities
 b = model.tracers.b
 
 Ri_field = FlowDiagnostics.RichardsonNumber(model)
+S_field  = FlowDiagnostics.StrainRateTensorModulus(model)
 #---
 
 #+++ Define initial conditions: shear flow with stratification and perturbation
@@ -199,7 +200,7 @@ PE = Integral(pe)
 
 vorticity = Field(∂z(u) - ∂x(w))
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄, ε, Ri=Ri_field)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
