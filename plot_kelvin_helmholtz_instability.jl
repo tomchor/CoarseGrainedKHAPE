@@ -27,16 +27,14 @@ end
 
 #+++ Load timeseries
 @info "Loading timeseries..."
-ω_timeseries  = FieldTimeSeries(plot_filepath, "ω",  architecture=CPU())
-b_timeseries  = FieldTimeSeries(plot_filepath, "b",  architecture=CPU())
-Ri_timeseries = FieldTimeSeries(plot_filepath, "Ri", architecture=CPU())
-S_timeseries  = FieldTimeSeries(plot_filepath, "S",  architecture=CPU())
+ω_timeseries = FieldTimeSeries(plot_filepath, "ω", architecture=CPU())
+b_timeseries = FieldTimeSeries(plot_filepath, "b", architecture=CPU())
+S_timeseries = FieldTimeSeries(plot_filepath, "S", architecture=CPU())
 
 # The architecture of the FieldTimeSeries isn't working as expected, so load on CPU manually:
-ω_timeseries  = on_architecture(CPU(), ω_timeseries)
-b_timeseries  = on_architecture(CPU(), b_timeseries)
-Ri_timeseries = on_architecture(CPU(), Ri_timeseries)
-S_timeseries  = on_architecture(CPU(), S_timeseries)
+ω_timeseries = on_architecture(CPU(), ω_timeseries)
+b_timeseries = on_architecture(CPU(), b_timeseries)
+S_timeseries = on_architecture(CPU(), S_timeseries)
 
 times = ω_timeseries.times
 #---
@@ -44,23 +42,21 @@ times = ω_timeseries.times
 #+++ Build figure
 n = Observable(1)
 
-ωₙ  = @lift view(ω_timeseries[$n],  :, 1, :)
-bₙ  = @lift view(b_timeseries[$n],  :, 1, :)
-Riₙ = @lift view(Ri_timeseries[$n], :, 1, :)
-Sₙ  = @lift view(S_timeseries[$n],  :, 1, :)
+ωₙ = @lift view(ω_timeseries[$n], :, 1, :)
+bₙ = @lift view(b_timeseries[$n], :, 1, :)
+Sₙ = @lift view(S_timeseries[$n], :, 1, :)
 
-fig = Figure(size=(900, 900))
+fig = Figure(size=(1200, 500))
 
 params_str = @sprintf("Re = %d,  Ri = %.2f,  Pr = %d", Re, Ri, Pr)
 title = @lift @sprintf("Kelvin-Helmholtz Instability  (%s)\nt = %.1f", params_str, times[$n])
-fig[1, 1:4] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
+fig[1, 1:6] = Label(fig, title, fontsize=20, tellwidth=false, justification=:center)
 
 kwargs = (xlabel="x", ylabel="z", aspect=1)
 
-ax_ω  = Axis(fig[2, 1]; title="Vorticity",          kwargs...)
-ax_b  = Axis(fig[2, 3]; title="Buoyancy",           kwargs...)
-ax_Ri = Axis(fig[3, 1]; title="Richardson number",  kwargs...)
-ax_S  = Axis(fig[3, 3]; title="Strain rate (S)",    kwargs...)
+ax_ω = Axis(fig[2, 1]; title="Vorticity",       kwargs...)
+ax_b = Axis(fig[2, 3]; title="Buoyancy",         kwargs...)
+ax_S = Axis(fig[2, 5]; title="Strain rate (S)",  kwargs...)
 
 hm_ω = heatmap!(ax_ω, ωₙ; colormap=:balance, colorrange=(-1, 1))
 Colorbar(fig[2, 2], hm_ω)
@@ -68,11 +64,8 @@ Colorbar(fig[2, 2], hm_ω)
 hm_b = heatmap!(ax_b, bₙ; colormap=:balance, colorrange=(-0.08, 0.08))
 Colorbar(fig[2, 4], hm_b)
 
-hm_Ri = heatmap!(ax_Ri, Riₙ; colormap=:balance, colorrange=(-1, 1))
-Colorbar(fig[3, 2], hm_Ri)
-
 hm_S = heatmap!(ax_S, Sₙ; colormap=:thermal)
-Colorbar(fig[3, 4], hm_S)
+Colorbar(fig[2, 6], hm_S)
 #---
 
 #+++ Record animation
