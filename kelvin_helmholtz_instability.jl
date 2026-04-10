@@ -68,13 +68,12 @@ params = (; parsed_args...)
 #---
 
 #+++ Define simulation parameters
-# Theoretical most unstable wavenumber for the KH instability.
-# Velocity profile: u = U₀·tanh(z/h), shear layer scale δ_u = h.
-# Michalke (1964): k_max · δ_u = 0.4446 for the inviscid, unstratified case.
-# Hazel (1972): approximate stratification correction ∝ √(1 − 4·Ri).
+# Theoretical most unstable wavenumber for the KH instability taken from
+# Kaminski and Smyth (2019): https://doi.org/10.1016/j.ocemod.2019.04.005
+# which in turn refers to Miles (1961).
+# We refer to Michalke (1964)'s resuts: k_max · δ_u = 0.4446 which seems to also match.
 let
-    # Note that Kaminski and Smyth ignore the Richardson-number correction, so their k_max is different.
-    k_max = 0.4446 / params.h * sqrt(max(0.0, 1 - 4*params.Ri))
+    k_max = 0.4446 / params.h
     λ_max = 2π / k_max
 
     Lx = λ_max
