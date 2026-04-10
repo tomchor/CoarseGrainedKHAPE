@@ -30,13 +30,13 @@ end
 ω_timeseries  = FieldTimeSeries(plot_filepath, "ω",  architecture=CPU())
 b_timeseries  = FieldTimeSeries(plot_filepath, "b",  architecture=CPU())
 Ri_timeseries = FieldTimeSeries(plot_filepath, "Ri", architecture=CPU())
-ε_timeseries  = FieldTimeSeries(plot_filepath, "ε",  architecture=CPU())
+S_timeseries  = FieldTimeSeries(plot_filepath, "S",  architecture=CPU())
 
 # The architecture of the FieldTimeSeries isn't working as expected, so load on CPU manually:
 ω_timeseries  = on_architecture(CPU(), ω_timeseries)
 b_timeseries  = on_architecture(CPU(), b_timeseries)
 Ri_timeseries = on_architecture(CPU(), Ri_timeseries)
-ε_timeseries  = on_architecture(CPU(), ε_timeseries)
+S_timeseries  = on_architecture(CPU(), S_timeseries)
 
 times = ω_timeseries.times
 #---
@@ -47,7 +47,7 @@ n = Observable(1)
 ωₙ  = @lift view(ω_timeseries[$n],  :, 1, :)
 bₙ  = @lift view(b_timeseries[$n],  :, 1, :)
 Riₙ = @lift view(Ri_timeseries[$n], :, 1, :)
-εₙ  = @lift view(ε_timeseries[$n],  :, 1, :)
+Sₙ  = @lift view(S_timeseries[$n],  :, 1, :)
 
 fig = Figure(size=(900, 900))
 
@@ -57,22 +57,22 @@ fig[1, 1:4] = Label(fig, title, fontsize=20, tellwidth=false, justification=:cen
 
 kwargs = (xlabel="x", ylabel="z", aspect=1)
 
-ax_ω  = Axis(fig[2, 1]; title="Vorticity",            kwargs...)
-ax_b  = Axis(fig[2, 3]; title="Buoyancy",             kwargs...)
-ax_Ri = Axis(fig[3, 1]; title="Richardson number",    kwargs...)
-ax_ε  = Axis(fig[3, 3]; title="Dissipation rate (ε)", kwargs...)
+ax_ω  = Axis(fig[2, 1]; title="Vorticity",          kwargs...)
+ax_b  = Axis(fig[2, 3]; title="Buoyancy",           kwargs...)
+ax_Ri = Axis(fig[3, 1]; title="Richardson number",  kwargs...)
+ax_S  = Axis(fig[3, 3]; title="Strain rate (S)",    kwargs...)
 
 hm_ω = heatmap!(ax_ω, ωₙ; colormap=:balance, colorrange=(-1, 1))
 Colorbar(fig[2, 2], hm_ω)
 
-hm_b = heatmap!(ax_b, bₙ; colormap=:balance, colorrange=(-0.05, 0.05))
+hm_b = heatmap!(ax_b, bₙ; colormap=:balance, colorrange=(-0.08, 0.08))
 Colorbar(fig[2, 4], hm_b)
 
-hm_Ri = heatmap!(ax_Ri, Riₙ; colormap=:balance, colorrange=(-0.5, 0.5))
+hm_Ri = heatmap!(ax_Ri, Riₙ; colormap=:balance, colorrange=(-1, 1))
 Colorbar(fig[3, 2], hm_Ri)
 
-hm_ε = heatmap!(ax_ε, εₙ; colormap=:thermal, colorscale=log10)
-Colorbar(fig[3, 4], hm_ε)
+hm_S = heatmap!(ax_S, Sₙ; colormap=:thermal)
+Colorbar(fig[3, 4], hm_S)
 #---
 
 #+++ Record animation
