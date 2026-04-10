@@ -146,7 +146,7 @@ b = model.tracers.b
 #+++ Define initial conditions: shear flow with stratification and perturbation
 shear_flow(x, z) = params.U * tanh(z / params.h) # Base shear flow
 stratification(x, z) = params.B₀ * tanh(z / params.h) # Base stratification
-perturbation(x, z) = params.perturbation_amplitude * exp(-z^2)# * sin(x * params.k_max) # Small perturbation to trigger instability
+perturbation(x, z) = params.perturbation_amplitude * randn() * exp(-z^2)# * sin(x * params.k_max) # Small perturbation to trigger instability
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
@@ -156,7 +156,11 @@ set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 #---
 
 #+++ Setup simulation
-simulation = Simulation(model, Δt=0.01, stop_time=params.stop_time)
+#+++ Set initial Δt to 10% of the CFL condition using params.U
+Δx = minimum_xspacing(grid)
+initial_Δt = 0.1 * Δx / params.U
+simulation = Simulation(model, Δt=initial_Δt, stop_time=params.stop_time)
+#---
 
 #+++ Add progress messenger
 walltime_per_timestep = StepDuration(with_prefix=false)
