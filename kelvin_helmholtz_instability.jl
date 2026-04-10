@@ -174,7 +174,7 @@ progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=f
                               + TimeStep()
                               + "CFL = " * AdvectiveCFLNumber(with_prefix=false)
                               + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
-                              + MaxUVelocity()
+                              + MaxWVelocity()
                               + "step dur = " * walltime_per_timestep
                               + (sim -> @sprintf("Kolmogorov length/Δx = %.2f", minimum(η) / Δx))
                               )(simulation)
