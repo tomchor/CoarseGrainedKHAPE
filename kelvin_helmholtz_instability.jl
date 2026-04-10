@@ -20,13 +20,13 @@ let s = ArgParseSettings()
             required = false
             default = has_cuda_gpu() ? 4096 : 512
 
-        "--Ri"
-            help = "Richardson number (default: 0.1)"
+        "--U"
+            help = "Velocity profile amplitude U₀ (default: 1.0)"
             arg_type = Float64
             required = false
-            default = 0.1
+            default = 1
 
-        "--stop-time"
+        "--stop_time"
             help = "Simulation stop time (default: 200.0)"
             arg_type = Float64
             required = false
@@ -38,45 +38,54 @@ let s = ArgParseSettings()
             required = false
             default = 5e-4
 
-        "--h"
-            help = "Buoyancy layer thickness (default: 0.25)"
+        "--Ri"
+            help = "Base Richardson number (default: 0.1)"
             arg_type = Float64
             required = false
-            default = 0.25
+            default = 0.1
+
+        "--Pr"
+            help = "Prandtl number (default: 1.0)"
+            arg_type = Float64
+            required = false
+            default = 1
+
+        "--h"
+            help = "Buoyancy layer half-width relative to velocity half-width (default: 1.0, i.e. same scale for both)"
+            arg_type = Float64
+            required = false
+            default = 1
+
+        "--perturbation_amplitude"
+            help = "Perturbation amplitude (default: 0.05)"
+            arg_type = Float64
+            required = false
+            default = 0.05
     end
-    global parsed_args = parse_args(s)
+    global parsed_args = parse_args(s, as_symbols=true)
 end
+params = (; parsed_args...)
 #---
 
-Nz = parsed_args["Nz"]
-Ri = parsed_args["Ri"]
-stop_time = parsed_args["stop-time"]
-Re₀ = parsed_args["Re0"]
-h = parsed_args["h"]
-
 #+++ Define simulation parameters
-params = (
-    Lx = 10,
-    Ly = 5,
-    Lz = 14,
-    Ri = Ri,
-    perturbation_amplitude = 0.01,
-    h = h,
-    stop_time = stop_time,
-    Re₀ = Re₀,  # Reynolds number (ν = 1/Re)
-    Pr = 1,     # Prandtl number (κ = ν/Pr)
-)
-
 # Theoretical most unstable wavenumber for the KH instability.
-# Velocity profile: u = tanh(z), shear layer scale δ_u = 1 (implicit).
+# Velocity profile: u = U₀·tanh(z/h), shear layer scale δ_u = h.
 # Michalke (1964): k_max · δ_u = 0.4446 for the inviscid, unstratified case.
-# Hazel (1972): approximate stratification correction ∝ √(1 − 4·Ri)
-#               (exact for same-scale profiles R = δ_b/δ_u = 1; here R = h = 1/4, so approximate).
-let k_max = 0.4446 * sqrt(max(0.0, 1 - 4*params.Ri))
-    global params = (; params..., k_max_KH = k_max, λ_max_KH = 2π / k_max)
+# Hazel (1972): approximate stratification correction ∝ √(1 − 4·Ri).
+let
+    # Note that Kaminski and Smyth ignore the Richardson-number correction, so their k_max is different.
+    k_max = 0.4446 / params.h * sqrt(max(0.0, 1 - 4*params.Ri))
+    λ_max = 2π / k_max
+
+    Lx = λ_max
+    Ly = λ_max / 3
+    Lz = 25 * params.h
+    Re₀ = params.Re0
+    B₀ = params.U^2 * params.Ri / params.h
+    global params = (; params..., k_max, λ_max, Lx, Ly, Lz, B₀, Re₀)
 end
 @info @sprintf("Most unstable KH wavenumber: k_max = %.4f  (λ_max = %.2f, Lx = %.1f)",
-               params.k_max_KH, params.λ_max_KH, params.Lx)
+               params.k_max, params.λ_max, params.Lx)
 #---
 
 #+++ Create grid
@@ -95,14 +104,14 @@ end
 @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
 
 # Calculate horizontal resolutions based on aspect ratios
-Nx = round(Int, Nz * (params.Lx / params.Lz) / x_aspect_ratio)
-Ny = isinf(y_aspect_ratio) ? 1 : round(Int, Nz * (params.Ly / params.Lz) / y_aspect_ratio)
+Nx = round(Int, params.Nz * (params.Lx / params.Lz) / x_aspect_ratio)
+Ny = isinf(y_aspect_ratio) ? 1 : round(Int, params.Nz * (params.Ly / params.Lz) / y_aspect_ratio)
 
 # Adjust grid sizes to be factorizable by 2, 3, and 5 (for FFT performance)
 Nx = closest_factor_number((2, 3, 5), Nx)
 Ny = closest_factor_number((2, 3, 5), Ny)
 
-params = (; params..., Nx, Ny, Nz)
+params = (; params..., Nx, Ny)
 
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
@@ -118,7 +127,7 @@ let
     else
         Re = params.Re₀ * params.Nz^(4/3) # Double check this
     end
-    ν = 1 / Re
+    ν = params.U * params.h / Re
     κ = ν / params.Pr
     global params = merge(params, (; ν, κ, Re))
 end
@@ -132,21 +141,17 @@ model = NonhydrostaticModel(grid;
                             tracers = :b)
 u, v, w = model.velocities
 b = model.tracers.b
-
-Ri_field = FlowDiagnostics.RichardsonNumber(model)
-S_field  = FlowDiagnostics.StrainRateTensorModulus(model)
 #---
 
 #+++ Define initial conditions: shear flow with stratification and perturbation
-shear_flow(x, z) = tanh(z) # Base shear flow
-stratification(x, z) = params.h * params.Ri * tanh(z / params.h) # Base stratification
-perturbation(x, z) = params.perturbation_amplitude * sin(2π * x / 10) * exp(-z^2 / 2) # Small perturbation to trigger instability
+shear_flow(x, z) = params.U * tanh(z / params.h) # Base shear flow
+stratification(x, z) = params.B₀ * tanh(z / params.h) # Base stratification
+perturbation(x, z) = params.perturbation_amplitude * exp(-z^2) * sin(x * params.k_max) # Small perturbation to trigger instability
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
 bᵢ(x, y, z) = stratification(x, z)
-wᵢ(x, y, z) = params.perturbation_amplitude * cos(2π * x / 10 + π/2) * exp(-z^2 / 2)
-
+wᵢ(x, y, z) = perturbation(x, z)
 set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
 #---
 
@@ -192,6 +197,9 @@ conjure_time_step_wizard!(simulation, IterationInterval(1);
 u_center = @at (Center, Center, Center) u
 v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
+
+Ri_field = FlowDiagnostics.RichardsonNumber(model)
+S_field  = FlowDiagnostics.StrainRateTensorModulus(model)
 
 ρ₀ = 1025 # kg/ m^3
 pe = ρ₀ * PotentialEnergyEquation.PotentialEnergy(model)
