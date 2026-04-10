@@ -48,7 +48,7 @@ jobs:
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
       - name: Run simulation (Nz=512, CPU)
-        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop-time 70 --Re0 1e-3
+        run: julia --project -t 4 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3
 
       # -----------------------------------------------------------------------
       # Python — postprocessing pipeline
