@@ -145,7 +145,7 @@ b = model.tracers.b
 #+++ Define initial conditions: shear flow with stratification and perturbation
 shear_flow(x, z) = params.U * tanh(z / params.h) # Base shear flow
 stratification(x, z) = params.B₀ * tanh(z / params.h) # Base stratification
-perturbation(x, z) = params.perturbation_amplitude * abs(randn()) * exp(-z^2) * sin(x * params.k_max) # Small perturbation to trigger instability
+perturbation(x, z) = params.perturbation_amplitude * abs(randn()) * exp(-z^2) * sin(x * params.k_max - π) # Small perturbation to trigger instability
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
