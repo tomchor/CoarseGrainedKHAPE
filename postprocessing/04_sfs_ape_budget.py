@@ -31,11 +31,14 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
+fixed_reference = args.fixed_reference
 #---
 
 #+++ Load data and grid
@@ -63,7 +66,8 @@ print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0
 print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: x and z")
 
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
+ref_suffix = "_fixed_ref" if fixed_reference else ""
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 t0 = time.time()
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
@@ -77,7 +81,7 @@ t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
-full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + "_full_local_pes_checkpoint.nc")
+full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + f"_full_local_pes_checkpoint{ref_suffix}.nc")
 if full_local_pes_checkpoint.exists():
     print(f"  Loading full_local_pes from checkpoint: {full_local_pes_checkpoint.name}")
     t0 = time.time()
@@ -118,7 +122,7 @@ budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
 
 for ℓ in filter_length_scales:
-    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}.nc")
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
     checkpoint_files.append(checkpoint_path)
 
     if checkpoint_path.exists():
@@ -236,8 +240,8 @@ print("Saving results...")
 integrated_vars = [v for v in sfs_ape_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
 local_vars      = [v for v in sfs_ape_budget_terms.data_vars if v not in integrated_vars]
 
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_fields.nc"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ape_budget_integrated.nc"))
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_fields{ref_suffix}.nc"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
 
 print("  Saving local fields...")
 with ProgressBar():

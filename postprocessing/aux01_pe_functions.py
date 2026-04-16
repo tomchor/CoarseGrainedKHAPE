@@ -242,7 +242,8 @@ def _sort_single_timestep(rho_np, dz_flat_np, z_min):
 
 
 def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
-                      z_min_name="z_min", n_workers=None, verbose_level=1):
+                      z_min_name="z_min", n_workers=None, verbose_level=1,
+                      fixed_reference=False):
     """
     Compute the sorted reference-density profile for every timestep.
 
@@ -265,6 +266,11 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
         Thread-pool workers; None uses os.cpu_count(); 1 disables parallelism.
     verbose_level : int
         0 = quiet, 1 = progress messages.
+    fixed_reference : bool
+        If True, sort only the first time step (t=0) and broadcast that
+        reference profile to all time steps, yielding a time-invariant
+        reference state.  If False (default), sort each time step
+        independently.
 
     Returns
     -------
@@ -277,24 +283,30 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
     rho_all  = ds[field_to_sort].values                    # (time, …)
     dz_flat  = (ds[dV_name] / ds[LxLy_name]).values       # (…)
 
-    def _run(i):
+    if fixed_reference:
         if verbose_level > 0:
-            print(f"  Sorting time step {i+1}/{n_times}", end="\r")
-        return _sort_single_timestep(rho_all[i], dz_flat, z_min)
-
-    if n_workers == 1 or n_times == 1:
-        results = [_run(i) for i in range(n_times)]
+            print("  Sorting t=0 only (fixed reference profile)...")
+        t0_result = _sort_single_timestep(rho_all[0], dz_flat, z_min)
+        results = [t0_result] * n_times
     else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
-            futures = {pool.submit(_sort_single_timestep, rho_all[i], dz_flat, z_min): i
-                       for i in range(n_times)}
-            results_unordered = {}
-            for fut in concurrent.futures.as_completed(futures):
-                i = futures[fut]
-                results_unordered[i] = fut.result()
-                if verbose_level > 0:
-                    print(f"  Sorted time step {len(results_unordered)}/{n_times}", end="\r")
-        results = [results_unordered[i] for i in range(n_times)]
+        def _run(i):
+            if verbose_level > 0:
+                print(f"  Sorting time step {i+1}/{n_times}", end="\r")
+            return _sort_single_timestep(rho_all[i], dz_flat, z_min)
+
+        if n_workers == 1 or n_times == 1:
+            results = [_run(i) for i in range(n_times)]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+                futures = {pool.submit(_sort_single_timestep, rho_all[i], dz_flat, z_min): i
+                           for i in range(n_times)}
+                results_unordered = {}
+                for fut in concurrent.futures.as_completed(futures):
+                    i = futures[fut]
+                    results_unordered[i] = fut.result()
+                    if verbose_level > 0:
+                        print(f"  Sorted time step {len(results_unordered)}/{n_times}", end="\r")
+            results = [results_unordered[i] for i in range(n_times)]
 
     if verbose_level > 0:
         print("\nDone!")

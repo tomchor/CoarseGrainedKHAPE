@@ -17,12 +17,15 @@ parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for density sorting (ThreadPoolExecutor)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.2, 0.4, 0.8, 2],
                     help="Filter length scales (default: 0.2 0.4 0.8 2)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Use the t=0 density field as a fixed-in-time reference profile")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
 filter_length_scales = args.filter_scales
+fixed_reference = args.fixed_reference
 #---
 
 #+++ Load data and grid
@@ -59,10 +62,12 @@ ds_for_sort = ds[["b", "dV", "LxLy"]].copy()
 ds_for_sort.attrs.update(ds.attrs)
 ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name="b", density_name="ρ")
 
-sorted_density = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=n_workers)
+sorted_density = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=n_workers,
+                                   fixed_reference=fixed_reference)
 sorted_density.attrs.update(ds.attrs)
 
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
+ref_suffix = "_fixed_ref" if fixed_reference else ""
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 with ProgressBar():
     sorted_density.to_netcdf(sorted_density_filename)
 print(f"Sorted density saved to: {sorted_density_filename}")
