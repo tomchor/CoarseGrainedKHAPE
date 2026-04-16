@@ -241,3 +241,34 @@ jobs:
               repo: context.repo.repo,
               body: `❌ **Budget closure tests (fixed ref) failed.** [View run](${runUrl}) for details.`,
             });
+
+  # ---------------------------------------------------------------------------
+  # Combined report — updates the original 'Budget Closure Tests' context that
+  # test_trigger.yml sets to pending, so the PR check resolves.
+  # ---------------------------------------------------------------------------
+  report:
+    name: Report combined status
+    needs: [test-time-varying, test-fixed-ref]
+    runs-on: ubuntu-latest
+    if: inputs.head_sha != '' && always()
+
+    permissions:
+      statuses: write
+
+    steps:
+      - name: Update combined commit status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tv = '${{ needs.test-time-varying.result }}';
+            const fr = '${{ needs.test-fixed-ref.result }}';
+            const success = tv === 'success' && fr === 'success';
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ inputs.head_sha }}',
+              state: success ? 'success' : 'failure',
+              target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              description: success ? 'All budget tests passed' : 'One or more budget tests failed',
+              context: 'Budget Closure Tests',
+            });
