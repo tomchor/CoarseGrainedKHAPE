@@ -49,6 +49,7 @@ jobs:
         with:
           name: simulation-output
           path: output/khi_Nz512_Ri0.10.nc
+          compression-level: 9
 
   # ---------------------------------------------------------------------------
   # Test job template — instantiated twice below (time-varying / fixed-ref).
