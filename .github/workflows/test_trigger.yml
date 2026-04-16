@@ -42,18 +42,19 @@ jobs:
           echo "branch=$(echo "$PR" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
           echo "sha=$(echo "$PR" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
 
-      - name: Set commit status to pending
+      - name: Set commit statuses to pending
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.repos.createCommitStatus({
+            const params = {
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: '${{ steps.pr.outputs.sha }}',
               state: 'pending',
               description: 'Tests dispatched…',
-              context: 'Budget Closure Tests',
-            });
+            };
+            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (time-varying ref)' });
+            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (fixed ref)' });
 
       - name: Dispatch test workflow on PR branch
         env:

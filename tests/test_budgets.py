@@ -17,6 +17,11 @@ STEM      = "khi_Nz512_Ri0.10"
 THRESHOLD = 0.1
 
 
+@pytest.fixture(scope="session")
+def ref_suffix(request):
+    return request.config.getoption("--ref-suffix")
+
+
 def rms(arr):
     """Root mean square of an array, ignoring NaNs."""
     return np.sqrt(np.nanmean(arr**2))
@@ -44,8 +49,8 @@ def print_budget_summary(ds, residual_var, budget_vars, rel):
     print(f"  {'residual / min(terms)':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
 
 
-def load(suffix):
-    path = PP_OUTPUT / f"{STEM}_{suffix}.nc"
+def load(suffix, ref_suffix=""):
+    path = PP_OUTPUT / f"{STEM}_{suffix}{ref_suffix}.nc"
     assert path.exists(), f"Output file not found: {path}"
     return xr.open_dataset(path, decode_timedelta=False)
 
@@ -61,8 +66,8 @@ KE_BUDGET_VARS = [
 ]
 
 @pytest.fixture(scope="module")
-def ke_budget():
-    return load("sfs_ke_budget_integrated")
+def ke_budget(ref_suffix):
+    return load("sfs_ke_budget_integrated", ref_suffix)
 
 
 @pytest.mark.parametrize("l_idx", range(len(load("sfs_ke_budget_integrated").filter_length_scale)))
@@ -90,8 +95,8 @@ APE_BUDGET_VARS = [
 ]
 
 @pytest.fixture(scope="module")
-def ape_budget():
-    return load("sfs_ape_budget_integrated")
+def ape_budget(ref_suffix):
+    return load("sfs_ape_budget_integrated", ref_suffix)
 
 
 @pytest.mark.parametrize("l_idx", range(len(load("sfs_ape_budget_integrated").filter_length_scale)))
