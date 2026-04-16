@@ -109,8 +109,8 @@ print("Calculating budget terms for each filter scale...")
 
 energy_transfer = load_energy_transfer(filename)
 
-ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_fields.nc"))
-ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.nc"))
+ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
+ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
 ke_budget = xr.merge([
     xr.open_dataset(ke_fields_filename,     decode_times=False).chunk({"time": 1}),
     xr.open_dataset(ke_integrated_filename, decode_times=False).chunk({"time": 1}),

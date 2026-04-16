@@ -16,10 +16,13 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
+fixed_reference = args.fixed_reference
 n_workers = args.n_workers
 #---
 
@@ -44,7 +47,8 @@ print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: x and z")
 
 t0 = time.time()
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
+ref_suffix = "_fixed_ref" if fixed_reference else ""
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---

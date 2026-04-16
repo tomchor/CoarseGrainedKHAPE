@@ -17,7 +17,7 @@ for arg in "$@"; do
 done
 
 python 01_filter_and_prepare_fields.py --filename "$FILENAME" "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}" $FIXED_REF_FLAG
-python 02_energy_transfer.py           --filename "$FILENAME"
-python 03_sfs_ke_budget.py             --filename "$FILENAME"
+python 02_energy_transfer.py           --filename "$FILENAME" $FIXED_REF_FLAG
+python 03_sfs_ke_budget.py             --filename "$FILENAME" $FIXED_REF_FLAG
 python 04_sfs_ape_budget.py            --filename "$FILENAME" $FIXED_REF_FLAG
-python 05_plot_budgets.py              --filename "$FILENAME"
+python 05_plot_budgets.py              --filename "$FILENAME" $FIXED_REF_FLAG
