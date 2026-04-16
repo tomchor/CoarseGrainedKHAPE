@@ -30,11 +30,16 @@ def rms(arr):
 def relative_residual(ds, residual_var, budget_vars):
     """rms(residual) / min_v(rms(term_v))
 
-    The denominator is the smallest RMS among all budget terms.
-    This provides a stricter normalisation than dividing by the largest term.
+    The denominator is the smallest non-zero RMS among all budget terms.
+    Zero-rms terms (e.g. Rˢ with a fixed reference profile) are excluded
+    because they do not set a meaningful scale.
     """
-    residual = rms(ds[residual_var].values)
-    scale    = min(rms(ds[v].values) for v in budget_vars)
+    residual   = rms(ds[residual_var].values)
+    term_norms = [rms(ds[v].values) for v in budget_vars]
+    nonzero    = [s for s in term_norms if s > 0]
+    if not nonzero:
+        raise ValueError(f"All budget terms have zero RMS — cannot normalise residual.")
+    scale = min(nonzero)
     return residual / scale
 
 
