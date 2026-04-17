@@ -225,7 +225,7 @@ end
 
 simulation.output_writers[:fields] =
     NetCDFWriter(model, outputs,
-                 schedule = ConsecutiveIterations(TimeInterval(4)), # Consecutive iterations every 4 periods to calculate time derivatives
+                 schedule = ConsecutiveIterations(TimeInterval(2)), # Consecutive iterations every 4 periods to calculate time derivatives
                  filename = output_filename,
                  array_type = Array{Float64},
                  global_attributes = params,
@@ -234,12 +234,12 @@ simulation.output_writers[:fields] =
 output_filename_2d = "output/$(simulation_name)_2d.nc"
 simulation.output_writers[:twod_fields] =
 NetCDFWriter(model, outputs,
-            schedule = TimeInterval(2),
-            filename = output_filename_2d,
-            array_type = Array{Float32},
-            indices = (:, 1, :),
-            global_attributes = params,
-            overwrite_existing = true)
+             schedule = TimeInterval(2),
+             filename = output_filename_2d,
+             array_type = Array{Float32},
+             indices = (:, 1, :),
+             global_attributes = params,
+             overwrite_existing = true)
 
 
 @info "Output will be saved to: $(output_filename).nc"
