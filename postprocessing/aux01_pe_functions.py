@@ -483,7 +483,17 @@ def calculate_drho_star_dt(rho_sorted):
 #---
 
 #+++ Reference-tendency correction R
-def calculate_R_reference_tendency(z0, drho_star_dt, dz_sorted, z_name="z_aac"):
+def _compute_R_single_timestep(z0_t, F_t, z_sorted_vals, z_name):
+    """Compute R for a single time step (called in parallel by calculate_R_reference_tendency)."""
+    z_3d    = (xr.zeros_like(z0_t) + z0_t[z_name]).values.ravel()
+    z0_flat = z0_t.values.ravel()
+    iz  = np.clip(np.searchsorted(z_sorted_vals, z_3d),   0, len(F_t) - 1)
+    iz0 = np.clip(np.searchsorted(z_sorted_vals, z0_flat), 0, len(F_t) - 1)
+    R_flat = -(g / ρ0) * (F_t[iz] - F_t[iz0])
+    return xr.DataArray(R_flat.reshape(z0_t.shape), dims=z0_t.dims, coords=z0_t.coords)
+
+
+def calculate_R_reference_tendency(z0, drho_star_dt, dz_sorted, z_name="z_aac", n_workers=None):
     """
     Compute the reference-tendency correction term
 
@@ -510,6 +520,8 @@ def calculate_R_reference_tendency(z0, drho_star_dt, dz_sorted, z_name="z_aac"):
         e.g. local_potential_energies_ds.dz_sorted.
     z_name : str
         Name of the vertical coordinate in z0.
+    n_workers : int or None
+        Thread-pool workers; None uses os.cpu_count(); 1 disables parallelism.
 
     Returns
     -------
@@ -521,25 +533,15 @@ def calculate_R_reference_tendency(z0, drho_star_dt, dz_sorted, z_name="z_aac"):
 
     z_sorted_vals = drho_star_dt.z_1d_sorted.values  # monotonically increasing physical z
 
-    R_list = []
-    for time in drho_star_dt.time:
-        z0_t = z0.sel(time=time)       # (x, y, z)
-        F_t = F.sel(time=time).values  # 1D, length nz_sorted
+    times = list(drho_star_dt.time)
+    task_args = [(z0.sel(time=t), F.sel(time=t).values, z_sorted_vals, z_name) for t in times]
 
-        # Physical z of each grid cell, broadcast to full (x, y, z) shape
-        z_3d = (xr.zeros_like(z0_t) + z0_t[z_name]).values.ravel()
-        z0_flat = z0_t.values.ravel()
-
-        # Nearest-index lookup in the sorted z grid
-        iz  = np.clip(np.searchsorted(z_sorted_vals, z_3d),   0, len(F_t) - 1)
-        iz0 = np.clip(np.searchsorted(z_sorted_vals, z0_flat), 0, len(F_t) - 1)
-
-        R_flat = -(g / ρ0) * (F_t[iz] - F_t[iz0])
-        R_list.append(xr.DataArray(
-            R_flat.reshape(z0_t.shape),
-            dims=z0_t.dims,
-            coords=z0_t.coords,
-        ))
+    if n_workers == 1 or len(times) == 1:
+        R_list = [_compute_R_single_timestep(*a) for a in task_args]
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = [pool.submit(_compute_R_single_timestep, *a) for a in task_args]
+            R_list = [f.result() for f in futures]
 
     R = xr.concat(R_list, dim="time")
     R["time"] = drho_star_dt.time
@@ -569,7 +571,8 @@ def calculate_sfs_ape_tendency(subfilter_local_ape):
 
 #+++ SFS reference-tendency correction R_s
 def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted,
-                               filter, filter_dims=["x_caa", "y_aca"], z_name="z_aac"):
+                               filter, filter_dims=["x_caa", "y_aca"], z_name="z_aac",
+                               n_workers=None):
     """
     Compute the subfilter reference-tendency correction
 
@@ -606,8 +609,8 @@ def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted
         4D subfilter correction R_s (time, x, y, z).
     """
     drho_star_dt = calculate_drho_star_dt(full_rho_sorted)
-    R_full = calculate_R_reference_tendency(full_z0, drho_star_dt, full_dz_sorted, z_name=z_name)
-    R_l    = calculate_R_reference_tendency(filt_z0, drho_star_dt, full_dz_sorted, z_name=z_name)
+    R_full = calculate_R_reference_tendency(full_z0, drho_star_dt, full_dz_sorted, z_name=z_name, n_workers=n_workers)
+    R_l    = calculate_R_reference_tendency(filt_z0, drho_star_dt, full_dz_sorted, z_name=z_name, n_workers=n_workers)
     return filter.apply(R_full, dims=filter_dims) - R_l
 #---
 

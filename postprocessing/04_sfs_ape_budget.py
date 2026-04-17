@@ -162,7 +162,7 @@ for ℓ in filter_length_scales:
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
                                      full_local_pes.dz_sorted, gaussian_filter,
-                                     filter_dims=filtered_dimensions)
+                                     filter_dims=filtered_dimensions, n_workers=n_workers)
     print(f"  R_s  ({time.time()-t0:.1f}s)")
 
     dAPE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
