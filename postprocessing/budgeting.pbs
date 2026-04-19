@@ -3,7 +3,8 @@
 #PBS -N budgeting_Nz2048_Ri0.10
 #PBS -o logs/budgeting_Nz2048_Ri0.10.log
 #PBS -e logs/budgeting_Nz2048_Ri0.10.log
-# Note: job name and log paths above are defaults; qalter below updates them at runtime based on NZ/FIXED_REF
+# Note: job name above is a default; qalter below updates it at runtime based on NZ/FIXED_REF
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
 #PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -M tchor@umd.edu
@@ -18,7 +19,7 @@ PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
 FIXED_REF=${FIXED_REF:-0}
 [ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
 JOB_NAME="budgeting_Nz${NZ}_Ri0.10${REF_SUFFIX}"
-qalter -N "$JOB_NAME" -o "logs/${JOB_NAME}.log" -e "logs/${JOB_NAME}.log" "$PBS_JOBID"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 # Clear the environment from any previously loaded modules
 module li
