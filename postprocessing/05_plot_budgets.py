@@ -10,12 +10,12 @@ from aux03_plotting import budget_colors, run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot SFS KE and APE budget terms from saved budget files")
-parser.add_argument("--filename", default="output/khi_90x1x256.nc",
+parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc",
                     help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False,
                     help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
 args = parser.parse_args()
-print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename

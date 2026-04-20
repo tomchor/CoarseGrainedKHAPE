@@ -20,7 +20,7 @@ parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.2, 0.4,
 parser.add_argument("--fixed-reference", action="store_true", default=False,
                     help="Use the t=0 density field as a fixed-in-time reference profile")
 args = parser.parse_args()
-print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
