@@ -16,13 +16,14 @@ parser.add_argument("--fixed-reference", action="store_true", default=False,
                     help="Load output produced with the fixed-in-time reference profile")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 #---
 
 #+++ Load energy transfer data
 print("Loading energy transfer data...")
-input_filename = filename.replace(".nc", f"_energy_transfer_sweep{ref_suffix}.nc")
+input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 et = xr.open_dataset(input_filename, decode_timedelta=False)
 
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis

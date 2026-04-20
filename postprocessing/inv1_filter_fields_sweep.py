@@ -14,6 +14,7 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 filter_length_scales = np.geomspace(0.01, 10, 30) # Length scales for filtering
 #---
@@ -40,8 +41,9 @@ print("Done!")
 print("\n" + "="*60)
 print("Saving filtered fields...")
 
-output_filename = filename.replace(".nc", "_filtered_velocities_sweep.nc")
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
 with ProgressBar():
     ds_filt.to_netcdf(output_filename)
+os.sync()
 print(f"Filtered fields saved to: {output_filename}")
 #---
