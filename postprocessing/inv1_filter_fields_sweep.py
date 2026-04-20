@@ -42,7 +42,7 @@ print("\n" + "="*60)
 print("Saving filtered fields...")
 
 output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
-with ProgressBar():
+with ProgressBar(minimum=5, dt=5):
     ds_filt.to_netcdf(output_filename)
 os.sync()
 print(f"Filtered fields saved to: {output_filename}")

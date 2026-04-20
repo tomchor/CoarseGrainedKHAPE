@@ -49,7 +49,7 @@ print("\n" + "="*60)
 print("Saving filtered fields...")
 
 output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
-with ProgressBar():
+with ProgressBar(minimum=5, dt=5):
     ds_filt.to_netcdf(output_filename)
 print(f"Filtered fields saved to: {output_filename}")
 #---
@@ -68,7 +68,7 @@ sorted_density.attrs.update(ds.attrs)
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
-with ProgressBar():
+with ProgressBar(minimum=5, dt=5):
     sorted_density.to_netcdf(sorted_density_filename)
 print(f"Sorted density saved to: {sorted_density_filename}")
 #---

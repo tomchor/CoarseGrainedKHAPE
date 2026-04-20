@@ -94,7 +94,7 @@ else:
     print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
     print(f"  Saving full_local_pes checkpoint...")
     t0 = time.time()
-    with ProgressBar():
+    with ProgressBar(minimum=5, dt=5):
         full_local_pes.to_netcdf(str(full_local_pes_checkpoint))
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
     del full_local_pes
@@ -210,7 +210,7 @@ for ℓ in filter_length_scales:
 
     print(f"  Saving checkpoint...")
     t0 = time.time()
-    with ProgressBar():
+    with ProgressBar(minimum=5, dt=5):
         budget_ℓ.to_netcdf(str(checkpoint_path))
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
 
@@ -244,12 +244,12 @@ fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_f
 integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
 
 print("  Saving local fields...")
-with ProgressBar():
+with ProgressBar(minimum=5, dt=5):
     sfs_ape_budget_terms[local_vars].to_netcdf(fields_filename)
 print(f"  Fields saved to:     {fields_filename}")
 
 print("  Saving integrated timeseries...")
-with ProgressBar():
+with ProgressBar(minimum=5, dt=5):
     sfs_ape_budget_terms[integrated_vars].to_netcdf(integrated_filename)
 print(f"  Integrated saved to: {integrated_filename}")
 

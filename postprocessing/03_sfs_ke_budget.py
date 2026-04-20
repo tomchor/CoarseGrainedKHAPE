@@ -162,12 +162,12 @@ fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fi
 integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
 
 print("  Saving local fields...")
-with ProgressBar():
+with ProgressBar(minimum=5, dt=5):
     sfs_ke_budget_terms[local_vars].to_netcdf(fields_filename)
 print(f"  Fields saved to:     {fields_filename}")
 
 print("  Saving integrated timeseries...")
-with ProgressBar():
+with ProgressBar(minimum=5, dt=5):
     sfs_ke_budget_terms[integrated_vars].to_netcdf(integrated_filename)
 print(f"  Integrated saved to: {integrated_filename}")
 #---
