@@ -16,11 +16,16 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18,
                     help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
+fixed_reference = args.fixed_reference
 n_workers = args.n_workers
 chunks = dict(time=1)
+ref_suffix = "_fixed_ref" if fixed_reference else ""
 #---
 
 #+++ Load data and grid
@@ -46,11 +51,24 @@ print(f"  Filter length scales: {filter_length_scales}")
 print(f"  Filter dimensions: x and z")
 #---
 
+#+++ Load sorted density (only when using fixed reference)
+rho_sorted = dz_sorted = None
+if fixed_reference:
+    sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
+    ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk(chunks)
+    ds_sorted = ds_sorted.reindex(time=ds_filt.time)
+    rho_sorted = ds_sorted.rho_sorted
+    dz_sorted  = ds_sorted.dz_sorted
+    print(f"  Sorted density loaded from: {sorted_density_filename}")
+#---
+
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
 energy_transfer = calculate_energy_transfer(ds, filter_length_scales,
                                             ds_filt=ds_filt,
+                                            rho_sorted=rho_sorted,
+                                            dz_sorted=dz_sorted,
                                             n_workers=n_workers)
 print("\nDone!")
 #---
@@ -59,7 +77,7 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
-output_filename = filename.replace(".nc", "_energy_transfer_sweep.nc")
+output_filename = filename.replace(".nc", f"_energy_transfer_sweep{ref_suffix}.nc")
 with ProgressBar():
     energy_transfer.to_netcdf(output_filename)
 print(f"Results saved to: {output_filename}")
