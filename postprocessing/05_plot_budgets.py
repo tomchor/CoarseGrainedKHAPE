@@ -80,10 +80,16 @@ for ℓ in filter_length_scales:
     axes[1, 0].set_ylim(ymin, ymax)
     axes[1, 1].set_ylim(ymin, ymax)
 
-    if label:
+    if label and fixed_reference:
+        fig.suptitle(f"{label} (fixed reference)", fontsize=11)
+    elif label:
         fig.suptitle(label, fontsize=11)
+    elif fixed_reference:
+        fig.suptitle("(fixed reference)", fontsize=11)
 
-    plot_filename = str(REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}.png"))
+    plot_filename = str(
+        REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}{ref_suffix}.png")
+    )
     fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Plot saved to: {plot_filename}")
