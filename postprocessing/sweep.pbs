@@ -14,6 +14,8 @@
 NZ=${NZ:-4096}
 SIM=khi_Nz${NZ}_Ri0.10
 PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
+FIXED_REF=${FIXED_REF:-0}
+[ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" || FIXED_REF_FLAG=""
 
 # Clear the environment from any previously loaded modules
 module li
@@ -33,10 +35,10 @@ time $PYTHON -u inv1_filter_fields_sweep.py --filename output/${SIM}.nc 2>&1
 qstat -f $PBS_JOBID >> logs/inv1_filter_fields_sweep_${SIM}.log
 qstat -f $PBS_JOBID >> logs/inv1_filter_fields_sweep_${SIM}.out
 
-time $PYTHON -u inv2_energy_transfer_sweep.py --filename output/${SIM}.nc --n-workers 18 2>&1
+time $PYTHON -u inv2_energy_transfer_sweep.py --filename output/${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1
 qstat -f $PBS_JOBID >> logs/inv2_energy_transfer_sweep_${SIM}.log
 qstat -f $PBS_JOBID >> logs/inv2_energy_transfer_sweep_${SIM}.out
 
-time $PYTHON -u inv3_plot_transfer_spectrum.py --filename output/${SIM}.nc 2>&1
+time $PYTHON -u inv3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1
 qstat -f $PBS_JOBID >> logs/inv3_plot_transfer_spectrum_${SIM}.log
 qstat -f $PBS_JOBID >> logs/inv3_plot_transfer_spectrum_${SIM}.out

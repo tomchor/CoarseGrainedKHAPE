@@ -19,6 +19,8 @@ Computes Available Potential Energy (APE) from Kelvin-Helmholtz instability simu
 
 Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files directly — the wrappers ensure job names and log files reflect the run parameters.
 
+Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are optional and fall back to their defaults if omitted.
+
 ### Run everything (simulation + post-processing + sweep)
 
 ```bash
@@ -26,10 +28,10 @@ Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files direc
 bash submit_all_pbs.sh
 
 # Custom resolution
-bash submit_all_pbs.sh 1024
+bash submit_all_pbs.sh NZ=1024
 
 # Custom resolution with fixed-in-time reference profile
-bash submit_all_pbs.sh 1024 1
+bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 ```
 
 Jobs are chained: post-processing only starts after the simulation succeeds, and the sweep only starts after post-processing succeeds.
@@ -41,7 +43,7 @@ Jobs are chained: post-processing only starts after the simulation succeeds, and
 bash submit_simulation.sh
 
 # Custom resolution
-bash submit_simulation.sh 2048
+bash submit_simulation.sh NZ=2048
 ```
 
 ### Run post-processing only
@@ -52,13 +54,13 @@ cd postprocessing
 bash submit_budgeting.sh
 
 # Custom resolution
-bash submit_budgeting.sh 1024
+bash submit_budgeting.sh NZ=1024
 
 # With fixed-in-time reference profile
-bash submit_budgeting.sh 1024 1
+bash submit_budgeting.sh NZ=2048 FIXED_REF=1
 ```
 
-The `FIXED_REF` flag controls how the reference (sorted) density profile is computed:
+The `FIXED_REF` argument controls how the reference (sorted) density profile is computed:
 - `0` (default) — reference profile is recomputed at every time step
 - `1` — reference profile is fixed to the `t=0` density field
 
@@ -68,9 +70,12 @@ Output files are suffixed with `_fixed_ref` when `FIXED_REF=1`.
 
 ```bash
 cd postprocessing
-bash submit_sweep.sh        # default Nz=4096
-bash submit_sweep.sh 2048
+bash submit_sweep.sh                        # default Nz=4096
+bash submit_sweep.sh NZ=2048
+bash submit_sweep.sh NZ=2048 FIXED_REF=1   # fixed-in-time reference profile
 ```
+
+When `FIXED_REF=1`, the sweep loads the pre-sorted reference density from `_sorted_density_fixed_ref.nc` (produced by the budgeting pipeline's `01_filter_and_prepare_fields.py`) instead of computing the sort from scratch. Run the budgeting pipeline with `FIXED_REF=1` first.
 
 ## Logs
 
