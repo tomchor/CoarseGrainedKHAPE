@@ -1,9 +1,9 @@
 #!/bin/bash -l
 #PBS -A UMCP0028
-#PBS -N sweep_Nz4096_Ri0.10
-#PBS -o logs/sweep_Nz4096_Ri0.10.log
-#PBS -e logs/sweep_Nz4096_Ri0.10.log
-# Note: job name above is a default; qalter below updates it at runtime based on NZ/FIXED_REF
+#PBS -N sweep_filter_Nz4096_Ri0.10
+#PBS -o logs/sweep_filter_Nz4096_Ri0.10.log
+#PBS -e logs/sweep_filter_Nz4096_Ri0.10.log
+# Note: job name above is a default; qalter below updates it at runtime based on NZ
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
 #PBS -l walltime=23:59:00
 #PBS -q casper
@@ -16,9 +16,7 @@
 NZ=${NZ:-4096}
 SIM=khi_Nz${NZ}_Ri0.10
 PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
-FIXED_REF=${FIXED_REF:-0}
-[ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
-JOB_NAME="sweep_Nz${NZ}_Ri0.10${REF_SUFFIX}"
+JOB_NAME="sweep_filter_Nz${NZ}_Ri0.10"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 # Clear the environment from any previously loaded modules
@@ -36,7 +34,5 @@ export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
 time $PYTHON -u inv1_filter_fields_sweep.py --filename output/${SIM}.nc 2>&1 | tee logs/${JOB_NAME}.out
-time $PYTHON -u inv2_energy_transfer_sweep.py --filename output/${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u inv3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

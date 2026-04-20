@@ -6,7 +6,9 @@ Computes Available Potential Energy (APE) from Kelvin-Helmholtz instability simu
 
 1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU and writes NetCDF output
 2. **Post-processing** (`postprocessing/budgeting.pbs`) — filters fields, computes energy transfer and SFS budgets
-3. **Sweep** (`postprocessing/sweep.pbs`) — parameter sweep over filter scales
+3. **Sweep** — parameter sweep over filter scales, split into two jobs:
+   - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
+   - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant)
 
 ## Submitting jobs
 
@@ -34,7 +36,7 @@ bash submit_all_pbs.sh NZ=1024
 bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 ```
 
-Jobs are chained: post-processing only starts after the simulation succeeds, and the sweep only starts after post-processing succeeds.
+Jobs are chained: budgeting starts after simulation, sweep filter starts after budgeting, and sweep transfer starts after the filter job. When `FIXED_REF=1`, the transfer job loads the pre-sorted reference density produced by budgeting.
 
 ### Run simulation only
 
@@ -68,14 +70,19 @@ Output files are suffixed with `_fixed_ref` when `FIXED_REF=1`.
 
 ### Run sweep only
 
+The sweep is split into two PBS jobs to avoid race conditions when running both `FIXED_REF` variants simultaneously: the field-filtering step (`inv1`) runs once and is shared, while the energy transfer and plotting steps (`inv2`+`inv3`) run separately per variant.
+
 ```bash
 cd postprocessing
-bash submit_sweep.sh                        # default Nz=4096
-bash submit_sweep.sh NZ=2048
-bash submit_sweep.sh NZ=2048 FIXED_REF=1   # fixed-in-time reference profile
+bash submit_sweep.sh                          # default Nz=2048, FIXED_REF=0
+bash submit_sweep.sh NZ=4096
+bash submit_sweep.sh NZ=2048 FIXED_REF=1     # fixed-in-time reference profile
+bash submit_sweep.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs only once
 ```
 
-When `FIXED_REF=1`, the sweep loads the pre-sorted reference density from `_sorted_density_fixed_ref.nc` (produced by the budgeting pipeline's `01_filter_and_prepare_fields.py`) instead of computing the sort from scratch. Run the budgeting pipeline with `FIXED_REF=1` first.
+`FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job.
+
+When `FIXED_REF=1`, the transfer job loads the pre-sorted reference density from `_sorted_density_fixed_ref.nc` (produced by the budgeting pipeline). Run budgeting with `FIXED_REF=1` before submitting the sweep with `FIXED_REF=1`.
 
 ## Logs
 
@@ -83,4 +90,4 @@ All job logs are written to the `logs/` subdirectory next to the submit script:
 - `logs/<job_name>.log` — PBS stdout/stderr (written by PBS after job ends)
 - `logs/<job_name>.out` — Python script output (written live via `tee`)
 
-Job names follow the pattern `budgeting_Nz<NZ>_Ri0.10[_fixed_ref]`.
+Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10_fixed_ref`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref`.

@@ -28,10 +28,22 @@ PP_JOB=$(qsub -N "$PP_NAME" \
               -W depend=afterok:$SIM_JOB budgeting.pbs)
 echo "Submitted post-processing (depends on $SIM_JOB): $PP_JOB"
 
-SWEEP_NAME="sweep_Nz${NZ}_Ri0.10${REF_SUFFIX}"
-SWEEP_JOB=$(qsub -N "$SWEEP_NAME" \
-                 -o "logs/${SWEEP_NAME}.log" \
-                 -e "logs/${SWEEP_NAME}.log" \
-                 -v NZ=$NZ,FIXED_REF=$FIXED_REF \
-                 -W depend=afterok:$PP_JOB sweep.pbs)
-echo "Submitted sweep (depends on $PP_JOB): $SWEEP_JOB"
+
+FILTER_NAME="sweep_filter_Nz${NZ}_Ri0.10"
+FILTER_JOB=$(qsub -N "$FILTER_NAME" \
+                  -o "logs/${FILTER_NAME}.log" \
+                  -e "logs/${FILTER_NAME}.log" \
+                  -v NZ=$NZ \
+                  -W depend=afterok:$PP_JOB \
+                  sweep_filter.pbs)
+echo "Submitted sweep filter (depends on $PP_JOB): $FILTER_JOB"
+
+TRANSFER_NAME="sweep_transfer_Nz${NZ}_Ri0.10${REF_SUFFIX}"
+TRANSFER_JOB=$(qsub -N "$TRANSFER_NAME" \
+                    -o "logs/${TRANSFER_NAME}.log" \
+                    -e "logs/${TRANSFER_NAME}.log" \
+                    -v NZ=$NZ,FIXED_REF=$FIXED_REF \
+                    -W depend=afterok:$FILTER_JOB \
+                    sweep_transfer.pbs)
+echo "Submitted sweep transfer (depends on $FILTER_JOB): $TRANSFER_JOB"
+cd ..

@@ -68,6 +68,10 @@ Outputs `kelvin_helmholtz_ape.nc` with TPE, RPE, APE, KE time series.
   #---
   ```
 
+## Maintenance Rules
+
+- **Always update `README.md` when the job submission scheme changes.** This includes: adding/removing/renaming PBS scripts or wrapper scripts, changing argument names or defaults, adding new pipeline stages, or changing job dependency chains. The README is the authoritative reference for how to submit jobs.
+
 ## Notes
 
 - Output files are excluded from git (`.nc`, `.mp4`, `.pdf`, `.png`, `.jld2`).
