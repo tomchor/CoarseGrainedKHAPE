@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser(description="Filter velocity and buoyancy field
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
 args = parser.parse_args()
+print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
