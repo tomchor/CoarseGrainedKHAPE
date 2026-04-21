@@ -108,7 +108,7 @@ else:
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer = load_energy_transfer(filename)
+energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
 
 ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
 ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))

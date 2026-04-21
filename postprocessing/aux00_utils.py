@@ -281,8 +281,8 @@ class DaskParallelFilter:
 #---
 
 #+++ Pre-computed result loaders
-def load_energy_transfer(filename):
+def load_energy_transfer(filename, ref_suffix=""):
     """Load the *_energy_transfer.nc file produced by 02_energy_transfer.py."""
-    et_filename = str(PP_OUTPUT / (Path(filename).stem + "_energy_transfer.nc"))
+    et_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{ref_suffix}.nc"))
     return xr.open_dataset(et_filename, decode_timedelta=False).chunk({"time": 1})
 #---
