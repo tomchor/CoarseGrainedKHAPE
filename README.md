@@ -5,7 +5,9 @@ Computes Available Potential Energy (APE) from Kelvin-Helmholtz instability simu
 ## Pipeline overview
 
 1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU and writes NetCDF output
-2. **Post-processing** (`postprocessing/budgeting.pbs`) — filters fields, computes energy transfer and SFS budgets
+2. **Post-processing** — filters fields, sorts density, computes energy transfer and SFS budgets, split into two jobs:
+   - `postprocessing/budgeting_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
+   - `postprocessing/budgeting.pbs` — sorts density, computes all budget terms and plots (per `FIXED_REF` variant)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
    - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant)
@@ -36,7 +38,7 @@ bash submit_all_pbs.sh NZ=1024
 bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 ```
 
-Jobs are chained: budgeting starts after simulation, sweep filter starts after budgeting, and sweep transfer starts after the filter job. When `FIXED_REF=1`, the transfer job loads the pre-sorted reference density produced by budgeting.
+Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
 
 ### Run simulation only
 
@@ -50,17 +52,17 @@ bash submit_simulation.sh NZ=2048
 
 ### Run post-processing only
 
+The budgeting pipeline is split into two PBS jobs to avoid race conditions when running both `FIXED_REF` variants simultaneously: the field-filtering step (`01`) runs once and is shared, while the density sort and budget steps (`02`–`06`) run separately per variant.
+
 ```bash
-# Default (Nz=2048), time-varying reference profile
 cd postprocessing
-bash submit_budgeting.sh
-
-# Custom resolution
+bash submit_budgeting.sh                          # default Nz=2048, FIXED_REF=0
 bash submit_budgeting.sh NZ=1024
-
-# With fixed-in-time reference profile
-bash submit_budgeting.sh NZ=2048 FIXED_REF=1
+bash submit_budgeting.sh NZ=2048 FIXED_REF=1     # fixed-in-time reference profile
+bash submit_budgeting.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs only once
 ```
+
+`FIXED_REF=both` submits the filter job once and two budget jobs (one for each variant) that both depend on the single filter job.
 
 The `FIXED_REF` argument controls how the reference (sorted) density profile is computed:
 - `0` (default) — reference profile is recomputed at every time step

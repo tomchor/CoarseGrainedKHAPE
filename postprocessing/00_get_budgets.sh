@@ -16,8 +16,9 @@ for arg in "$@"; do
     fi
 done
 
-python 01_filter_and_prepare_fields.py --filename "$FILENAME" "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}" $FIXED_REF_FLAG
-python 02_energy_transfer.py           --filename "$FILENAME" $FIXED_REF_FLAG --n-workers "${N_WORKERS:-1}"
-python 03_sfs_ke_budget.py             --filename "$FILENAME" $FIXED_REF_FLAG
-python 04_sfs_ape_budget.py            --filename "$FILENAME" $FIXED_REF_FLAG --n-workers "${N_WORKERS:-1}"
-python 05_plot_budgets.py              --filename "$FILENAME" $FIXED_REF_FLAG
+python 01_filter_fields.py    --filename "$FILENAME" "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}"
+python 02_sort_density.py     --filename "$FILENAME" $FIXED_REF_FLAG --n-workers "${N_WORKERS:-1}"
+python 03_energy_transfer.py  --filename "$FILENAME" $FIXED_REF_FLAG --n-workers "${N_WORKERS:-1}"
+python 04_sfs_ke_budget.py    --filename "$FILENAME" $FIXED_REF_FLAG
+python 05_sfs_ape_budget.py   --filename "$FILENAME" $FIXED_REF_FLAG --n-workers "${N_WORKERS:-1}"
+python 06_plot_budgets.py     --filename "$FILENAME" $FIXED_REF_FLAG
