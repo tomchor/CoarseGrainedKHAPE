@@ -2,6 +2,7 @@
 #+++ Imports
 import os
 from pathlib import Path
+import numpy as np
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, filter_fields
 #---
@@ -11,7 +12,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for SFS budgets")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
                     help="Path to simulation NetCDF file")
-parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.2, 0.4, 0.8, 2],
+parser.add_argument("--filter-scales", type=float, nargs="+", default=np.geomspace(0.01, 10, 30),
                     help="Filter length scales (default: 0.2 0.4 0.8 2)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)

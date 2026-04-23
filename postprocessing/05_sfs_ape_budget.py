@@ -161,8 +161,8 @@ for ℓ in filter_length_scales:
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
-    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_length_scale=ℓ)
-    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_length_scale=ℓ)
+    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
 
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
@@ -176,8 +176,8 @@ for ℓ in filter_length_scales:
     int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
     int_R_s                 = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
-    Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ)
-    int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ)
+    Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
     residual    = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
