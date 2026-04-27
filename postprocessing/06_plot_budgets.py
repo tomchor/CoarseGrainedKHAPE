@@ -56,7 +56,7 @@ print("\nCreating plots...")
 label = run_label(ke_budget.attrs)
 
 for ℓ in filter_length_scales:
-    fig, axes = plt.subplots(rows=2, cols=1, figsize=(10, 10), constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
 
     for ax, budget, vars_dict, title in [
         (axes[0], ke_budget,  ke_vars,  "Integrated SFS KE Budget"),
