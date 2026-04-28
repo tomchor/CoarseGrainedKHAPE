@@ -18,8 +18,8 @@ from aux00_utils import GaussianFilter
 FIGURES_DIR = Path(__file__).resolve().parent.parent / "figures"
 
 #+++ Parameters
-Nx, Nz = 512, 128
-Lx, Lz = 14.0, 25.0
+Nx, Nz = 512, 512
+Lx, Lz = 14.0, 14.0
 dx, dz = Lx / Nx, Lz / Nz
 FILTER_SCALE = 1.0  # FWHM passed to GaussianFilter
 _FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
