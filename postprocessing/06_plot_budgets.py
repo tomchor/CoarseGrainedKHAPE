@@ -10,10 +10,8 @@ from aux03_plotting import budget_colors, run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot SFS KE and APE budget terms from saved budget files")
-parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc",
-                    help="Path to simulation NetCDF file (used to derive budget filenames)")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
+parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -53,32 +51,30 @@ ape_vars = {
 }
 #---
 
-#+++ Plot one figure per filter scale (KE and APE side by side)
+#+++ Plot one figure per filter scale (KE on top, APE on bottom)
 print("\nCreating plots...")
 label = run_label(ke_budget.attrs)
 
 for ℓ in filter_length_scales:
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12), constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
 
-    for row in range(2):
-        for ax, budget, vars_dict, title in [
-            (axes[row, 0], ke_budget,  ke_vars,  "Integrated SFS KE Budget"),
-            (axes[row, 1], ape_budget, ape_vars, "Integrated SFS APE Budget"),
-        ]:
-            for var, color in vars_dict.items():
-                data = budget[var].sel(filter_length_scale=ℓ).dropna("time")
-                lbl = f"{var}  [max|·| = {float(abs(data).max()):.2e}]" if "residual" in var else var
-                data.plot.line(ax=ax, x="time", label=lbl, color=color)
-            ax.legend(fontsize=8)
-            ax.set_ylabel("Budget Terms [W or J s⁻¹]")
-            ax.set_title(f"{title}  (ℓ = {ℓ:.4f})")
-            ax.grid(True, alpha=0.3)
+    for ax, budget, vars_dict, title in [
+        (axes[0], ke_budget,  ke_vars,  "Integrated SFS KE Budget"),
+        (axes[1], ape_budget, ape_vars, "Integrated SFS APE Budget"),
+    ]:
+        for var, color in vars_dict.items():
+            data = budget[var].sel(filter_length_scale=ℓ).dropna("time")
+            lbl = f"{var}  [max|·| = {float(abs(data).max()):.2e}]" if "residual" in var else var
+            data.plot.line(ax=ax, x="time", label=lbl, color=color)
+        ax.legend(fontsize=8)
+        ax.set_ylabel("Budget Terms [W or J s⁻¹]")
+        ax.set_title(f"{title}  (ℓ = {ℓ:.4f})")
+        ax.grid(True, alpha=0.3)
 
-    # Share y-axis scale across both columns in the bottom row only
-    ymin = min(axes[1, 0].get_ylim()[0], axes[1, 1].get_ylim()[0])
-    ymax = max(axes[1, 0].get_ylim()[1], axes[1, 1].get_ylim()[1])
-    axes[1, 0].set_ylim(ymin, ymax)
-    axes[1, 1].set_ylim(ymin, ymax)
+    ymin = min(axes[0].get_ylim()[0], axes[1].get_ylim()[0])
+    ymax = max(axes[0].get_ylim()[1], axes[1].get_ylim()[1])
+    axes[0].set_ylim(ymin, ymax)
+    axes[1].set_ylim(ymin, ymax)
 
     if label and fixed_reference:
         fig.suptitle(f"{label} (fixed reference)", fontsize=11)
@@ -87,9 +83,7 @@ for ℓ in filter_length_scales:
     elif fixed_reference:
         fig.suptitle("(fixed reference)", fontsize=11)
 
-    plot_filename = str(
-        REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}{ref_suffix}.png")
-    )
+    plot_filename = str(REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}{ref_suffix}.png"))
     fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Plot saved to: {plot_filename}")

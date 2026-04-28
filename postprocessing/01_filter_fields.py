@@ -15,6 +15,7 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
 parser.add_argument("--filter-scales", type=float, nargs="+", default=np.geomspace(0.01, 10, 30),
                     help="Filter length scales (default: 0.2 0.4 0.8 2)")
 args = parser.parse_args()
+
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"

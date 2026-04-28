@@ -55,6 +55,7 @@ jobs:
             };
             await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (time-varying ref)' });
             await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (fixed ref)' });
+            await github.rest.repos.createCommitStatus({ ...params, context: 'Gaussian Filter Test' });
 
       - name: Dispatch test workflow on PR branch
         env:

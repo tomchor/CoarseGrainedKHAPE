@@ -48,8 +48,68 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: simulation-output
-          path: output/khi_Nz512_Ri0.10.nc
+          path: |
+            output/khi_Nz512_Ri0.10.nc
+            output/khi_Nz512_Ri0.10_2d.nc
           compression-level: 9
+
+  # ---------------------------------------------------------------------------
+  # Standalone filter test — no simulation needed, runs in parallel.
+  # ---------------------------------------------------------------------------
+  test-gaussian-filter:
+    name: Test Gaussian filter
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_sha || github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python packages
+        run: pip install -r tests/requirements.txt
+
+      - name: Create output directories
+        run: mkdir -p figures
+
+      - name: Run Gaussian filter tests
+        id: pytest
+        run: pytest tests/test_gaussian_filter.py -v -s
+
+      - name: Upload filter test figure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaussian-filter-test
+          path: figures/test_gaussian_filter.png
+          if-no-files-found: warn
+
+      - name: Update commit status
+        if: inputs.head_sha != '' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const success = '${{ steps.pytest.outcome }}' === 'success';
+            github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ inputs.head_sha }}',
+              state: success ? 'success' : 'failure',
+              target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              description: success ? 'Gaussian filter test passed' : 'Gaussian filter test failed',
+              context: 'Gaussian Filter Test',
+            });
+
 
   # ---------------------------------------------------------------------------
   # Test job template — instantiated twice below (time-varying / fixed-ref).
@@ -95,11 +155,22 @@ jobs:
         id: pytest
         run: pytest tests/ -v -s
 
+      - name: Install ffmpeg
+        if: always() && steps.pytest.outcome == 'success'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Generate animation
+        if: always() && steps.pytest.outcome == 'success'
+        working-directory: postprocessing
+        run: python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale 0.8 --dpi 100 --fps 8
+
       - name: List output files
         if: always()
         run: |
           echo "=== figures/ ==="
           ls -la figures/ || echo "(directory missing)"
+          echo "=== animations/ ==="
+          ls -la animations/ || echo "(directory missing)"
           echo "=== postprocessing/output/ ==="
           ls -la postprocessing/output/ || echo "(directory missing)"
 
@@ -109,6 +180,14 @@ jobs:
         with:
           name: budget-plots-time-varying
           path: figures/*.png
+          if-no-files-found: warn
+
+      - name: Upload animation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: animation-time-varying
+          path: animations/*.mp4
           if-no-files-found: warn
 
       - name: Upload postprocessing NetCDF files
@@ -189,11 +268,22 @@ jobs:
         id: pytest
         run: pytest tests/ -v -s --ref-suffix _fixed_ref
 
+      - name: Install ffmpeg
+        if: always() && steps.pytest.outcome == 'success'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Generate animation (fixed reference)
+        if: always() && steps.pytest.outcome == 'success'
+        working-directory: postprocessing
+        run: python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale 0.8 --dpi 100 --fps 8 --fixed-reference
+
       - name: List output files
         if: always()
         run: |
           echo "=== figures/ ==="
           ls -la figures/ || echo "(directory missing)"
+          echo "=== animations/ ==="
+          ls -la animations/ || echo "(directory missing)"
           echo "=== postprocessing/output/ ==="
           ls -la postprocessing/output/ || echo "(directory missing)"
 
@@ -203,6 +293,14 @@ jobs:
         with:
           name: budget-plots-fixed-ref
           path: figures/*.png
+          if-no-files-found: warn
+
+      - name: Upload animation (fixed reference)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: animation-fixed-ref
+          path: animations/*.mp4
           if-no-files-found: warn
 
       - name: Upload postprocessing NetCDF files
@@ -235,7 +333,7 @@ jobs:
   # ---------------------------------------------------------------------------
   report:
     name: Report combined status
-    needs: [test-time-varying, test-fixed-ref]
+    needs: [test-time-varying, test-fixed-ref, test-gaussian-filter]
     runs-on: ubuntu-latest
     if: inputs.head_sha != '' && always()
 
@@ -249,7 +347,8 @@ jobs:
           script: |
             const tv = '${{ needs.test-time-varying.result }}';
             const fr = '${{ needs.test-fixed-ref.result }}';
-            const success = tv === 'success' && fr === 'success';
+            const gf = '${{ needs.test-gaussian-filter.result }}';
+            const success = tv === 'success' && fr === 'success' && gf === 'success';
             github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,

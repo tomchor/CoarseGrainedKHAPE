@@ -10,12 +10,10 @@ from aux03_plotting import run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot cross-scale KE and APE transfer spectra")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
-                    help="Path to simulation NetCDF file (used to derive energy transfer filename)")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load output produced with the fixed-in-time reference profile")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
 args = parser.parse_args()
-print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
@@ -41,7 +39,7 @@ for ax, var in zip(axes, ["∫Π_KE dV", "∫Π_APE dV"]):
     et[var].plot.line(x="inv_scale", hue="time", ax=ax)
     ax.axhline(0, color="k", lw=0.8, ls="--")
     ax.set_xscale("log")
-    ax.set_yscale("symlog", linthresh=1e-4)
+    ax.set_yscale("symlog", linthresh=1e-2)
     ax.grid(True, alpha=0.3)
     ax2 = ax.secondary_xaxis("top", functions=(lambda x: 1/x, lambda x: 1/x))
     ax2.set_xlabel("ℓ  [m]")

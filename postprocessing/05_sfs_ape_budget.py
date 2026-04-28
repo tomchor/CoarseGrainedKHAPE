@@ -27,13 +27,11 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelvin-Helmholtz simulation output")
-parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
-parser.add_argument("--n-workers", type=int, default=18,
-                    help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
+parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 args = parser.parse_args()
+
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"

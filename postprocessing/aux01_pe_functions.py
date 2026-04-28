@@ -710,9 +710,9 @@ def calculate_subfilter_tracer_flux(rho, u_i, filter, filter_dims=["x_caa", "y_a
 def calculate_ape_to_ke_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca"],
                                       filtered_w=None, filtered_b=None):
     """
-    Calculate the SFS KE->APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
+    Calculate the SFS APE->KE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
 
-    This represents the SFS flux of KE to APE: the rate at which small-scale KE is converted to APE.
+    Positive values mean sub-filter buoyancy does positive work (APE converted to KE).
 
     Parameters
     ----------
@@ -732,13 +732,13 @@ def calculate_ape_to_ke_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca
     Returns
     -------
     xr.DataArray
-        SFS KE->APE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
+        SFS APE->KE exchange term +(filtered(w·b) - filtered(w)·filtered(b))
     """
     result = calculate_sfs_flux_tensor(w, b, filter,
                                        filter_dims=filter_dims,
                                        filtered_a=filtered_w,
                                        filtered_b=filtered_b)
-    result.name = "SFS KE->APE exchange"
+    result.name = "SFS APE->KE exchange"
     return result
 #---
 

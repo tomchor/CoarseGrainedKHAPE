@@ -16,17 +16,13 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot 4-panel snapshot of local SFS budget terms")
-parser.add_argument("--filename", default="output/khi_Nz4096_Ri0.10.nc",
-                    help="Path to simulation NetCDF file")
-parser.add_argument("--time", type=float, default=50.0,
-                    help="Target time for snapshot (nearest available will be used)")
-parser.add_argument("--filter-scale", type=float, default=0.5,
-                    help="Target filter length scale (nearest available will be used)")
-parser.add_argument("--clim-percentile", type=float, default=98.0,
-                    help="Percentile of |data| used to set symmetric color limits")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--time", type=float, default=50, help="Target time for snapshot (nearest available will be used)")
+parser.add_argument("--filter-scale", type=float, default=0.4, help="Target filter length scale (nearest available will be used)")
+parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
-print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
 
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 FIGURES   = REPO_ROOT / "figures"
@@ -40,8 +36,8 @@ print("Loading KE and APE budgets...")
 ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc"),  decode_times=False)
 ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc"), decode_times=False)
 
-ke_budget = ke_budget.sel(z_aac=slice(-3, +3))
-ape_budget = ape_budget.sel(z_aac=slice(-3, +3))
+ke_budget = ke_budget.sel(z_aac=slice(-4, +4))
+ape_budget = ape_budget.sel(z_aac=slice(-4, +4))
 print("Done.")
 #---
 
@@ -65,7 +61,7 @@ chi_s    = ape_budget["χₛ"].sel(**sel).squeeze()                # APE dissipa
 #+++ Load buoyancy field for contours
 print("Loading buoyancy field...")
 ds = load_dataset_and_grid(filename)
-b = ds["b"].sel(time=t_sel, method="nearest").sel(z_aac=slice(-3, +3)).squeeze()
+b = ds["b"].sel(time=t_sel, method="nearest").squeeze()
 print("Done.")
 #---
 
@@ -78,7 +74,7 @@ panels = [
     (chi_s,    r"$\chi_s$  (Small-scale APE dissipation)"),
 ]
 
-fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(12, 7), constrained_layout=True, gridspec_kw=dict(wspace=0, hspace=0))
 
 x_dim = next(d for d in pi_ke.dims if "x" in d)
 z_dim = next(d for d in pi_ke.dims if "z" in d)
@@ -110,33 +106,44 @@ for ax, (field, title) in zip(axes.flat, panels):
         cmap = "inferno"
         vmin = 0
         vmax = np.nanpercentile(data, args.clim_percentile)
-    elif field is pi_ape:
-        cmap = "RdBu_r"
-        vmin, vmax = -pi_ape_vmax, pi_ape_vmax
     else:
         cmap = "RdBu_r"
         vmin, vmax = -pi_ke_vmax, pi_ke_vmax
 
     im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
-    fig.colorbar(im, ax=ax, shrink=0.8, label="[m² s⁻³]")
+    cax = ax.inset_axes([0.3, 0.09, 0.4, 0.03])
+    tick_color = "white" if is_dissipation else "black"
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal")
+    cax.tick_params(colors=tick_color)
+    for spine in cax.spines.values():
+        spine.set_edgecolor(tick_color)
 
-    ax.contour(bx, bz, bdata, levels=blevels, colors="k", linewidths=0.6, alpha=0.5)
+    contour_color = "white" if is_dissipation else "k"
+    ax.contour(bx, bz, bdata, levels=blevels, colors=contour_color, linewidths=0.6, alpha=0.5)
 
-    ax.set_xlabel("x")
-    ax.set_ylabel("z")
-    ax.set_title(title)
-    ax.set_ylim(-2.5, +2.5)
+    title_color = "white" if is_dissipation else "black"
+    ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=11, ha="center", va="top", color=title_color, bbox=dict(facecolor="black" if is_dissipation else "white", edgecolor="none", pad=2, alpha=0.6))
+    ax.set_title("")
+    ax.set_ylim(-4, +4)
+    ax.set_aspect("equal")
+
+for ax in axes.flat:
+    ax.set_yticks([-3, -1, 1, 3])
+
+for row in range(2):
+    axes[row, 0].set_ylabel("z")
+    axes[row, 1].set_ylabel("")
+    axes[row, 1].tick_params(labelleft=False, left=False)
+
+for col in range(2):
+    axes[0, col].set_xlabel("")
+    axes[0, col].tick_params(labelbottom=False, bottom=False)
+    axes[1, col].set_xlabel("x")
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
             fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
-
-label = run_label(ke_budget.attrs)
-suptitle = f"t = {t_sel:.1f},  ℓ = {ℓ_sel:.4f}"
-if label:
-    suptitle += f"\n{label}"
-fig.suptitle(suptitle, fontsize=11)
 
 outfile = str(FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
