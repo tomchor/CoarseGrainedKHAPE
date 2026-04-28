@@ -35,7 +35,7 @@ print(f"  Time step: {et.time.values}   Filter scales: {et.filter_length_scale.v
 #---
 
 #+++ Plot
-fig, ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
+fig, ax = plt.subplots(figsize=(6, 3.5), constrained_layout=True)
 
 for var, color, label_str in [("∫Π_KE dV", "#2166ac", r"$\Pi_{KE}$"), ("∫Π_APE dV", "#d6604d", r"$\Pi_{APE}$")]:
     ax.plot(et.inv_scale, et[var].values, color=color, label=label_str)
