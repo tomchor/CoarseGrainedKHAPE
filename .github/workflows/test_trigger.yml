@@ -64,5 +64,4 @@ jobs:
           gh workflow run test.yml \
             --repo ${{ github.repository }} \
             --ref "${{ steps.pr.outputs.branch }}" \
-            -f head_sha="${{ steps.pr.outputs.sha }}" \
-            -f pr_number="${{ github.event.issue.number }}"
+            -f head_sha="${{ steps.pr.outputs.sha }}"
