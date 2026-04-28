@@ -160,6 +160,9 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
 #---
 
 #+++ Gaussian filter (x: periodic, z: bounded)
+# FWHM = 2√(2 ln 2) · σ  →  σ = FWHM / (2√(2 ln 2))
+_FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+
 class GaussianFilter:
     """Gaussian filter in x (periodic) and z (bounded) directions.
 
@@ -167,11 +170,11 @@ class GaussianFilter:
       - x: mode='wrap'    — periodic BC
       - z: mode='nearest' — extends with boundary value beyond domain walls
 
-    sigma = ℓ / dx_min in grid units, so the physical-space sigma equals ℓ.
+    ℓ is the FWHM of the kernel; σ = ℓ · _FWHM_TO_SIGMA is derived internally.
     """
     def __init__(self, ℓ, dx_min, dz_min):
-        self._sigma_x = ℓ / dx_min
-        self._sigma_z = ℓ / dz_min
+        self._sigma_x = ℓ * _FWHM_TO_SIGMA / dx_min
+        self._sigma_z = ℓ * _FWHM_TO_SIGMA / dz_min
 
     def apply(self, da, dims):
         """Apply filter in dims[0] (x, periodic) then dims[1] (z, bounded).
@@ -205,12 +208,12 @@ class GaussianFilter:
 
 
 def make_gaussian_filter(ℓ, ds):
-    """Return a GaussianFilter for length scale ℓ using grid spacing from ds.
+    """Return a GaussianFilter for FWHM ℓ using grid spacing from ds.
 
     Parameters
     ----------
     ℓ : float
-        Filter length scale in physical units.
+        Filter length scale (FWHM) in physical units.
     ds : xr.Dataset
         Simulation dataset (must contain Δx_caa and Δz_aac).
     """
@@ -227,7 +230,7 @@ def filter_fields(ds, filter_length_scales):
     ds : xr.Dataset
         Dataset with velocity components (u, w) and buoyancy b.
     filter_length_scales : array-like
-        Physical length scales at which to apply the filter.
+        Filter length scales (FWHM) in physical units.
 
     Returns
     -------
