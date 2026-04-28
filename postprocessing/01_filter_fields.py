@@ -10,7 +10,7 @@ from aux00_utils import load_dataset_and_grid, filter_fields
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for SFS budgets")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.2, 0.4, 1.0, 5], help="Filter length scales as FWHM (default: 0.2 0.4 1.0 5)")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.5, 1.0, 7.0], help="Filter length scales as FWHM (default: 0.5 1.0 7.0)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
