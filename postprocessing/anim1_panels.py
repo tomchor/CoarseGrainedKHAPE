@@ -45,8 +45,8 @@ ds_2d = xr.open_dataset(filename_2d, decode_times=False)
 ds_2d = ds_2d.sel(z_aac=slice(-args.zlim, args.zlim), z_aaf=slice(-args.zlim, args.zlim))
 
 print("Loading KE and APE budget fields...")
-ke_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc"), decode_times=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc"), decode_times=False)
+ke_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields{ref_suffix}.nc"), decode_times=False)
+ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_suffix}.nc"), decode_times=False)
 ke_budget = ke_budget.sel(z_aac=slice(-args.zlim, args.zlim))
 ape_budget = ape_budget.sel(z_aac=slice(-args.zlim, args.zlim))
 

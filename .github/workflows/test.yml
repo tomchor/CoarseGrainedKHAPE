@@ -155,6 +155,10 @@ jobs:
         id: pytest
         run: pytest tests/ -v -s
 
+      - name: Install ffmpeg
+        if: always() && steps.pytest.outcome == 'success'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: Generate animation
         if: always() && steps.pytest.outcome == 'success'
         working-directory: postprocessing
@@ -263,6 +267,10 @@ jobs:
       - name: Run budget closure tests (fixed reference)
         id: pytest
         run: pytest tests/ -v -s --ref-suffix _fixed_ref
+
+      - name: Install ffmpeg
+        if: always() && steps.pytest.outcome == 'success'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Generate animation (fixed reference)
         if: always() && steps.pytest.outcome == 'success'
