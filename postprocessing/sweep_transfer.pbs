@@ -36,6 +36,6 @@ export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
 time $PYTHON -u inv2_energy_transfer_sweep.py --filename output/${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
-time $PYTHON -u inv3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u inv3_plot_transfer_spectrum_sweep.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
