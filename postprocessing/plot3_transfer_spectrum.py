@@ -25,7 +25,7 @@ ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 print("Loading energy transfer data...")
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 et = xr.open_dataset(input_filename, decode_timedelta=False)
-et = et.sel(time=50, method="nearest")
+et = et.sel(time=40, method="nearest")
 
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis
 et = et.assign_coords(inv_scale=("filter_length_scale", 1.0 / et.filter_length_scale.values))
@@ -40,7 +40,7 @@ fig, ax = plt.subplots(figsize=(6, 3.5), constrained_layout=True)
 for var, color, label_str in [("∫Π_KE dV", "#2166ac", r"$\Pi_{KE}$"), ("∫Π_APE dV", "#d6604d", r"$\Pi_{APE}$")]:
     ax.plot(et.inv_scale, et[var].values, color=color, label=label_str)
 ax.axhline(0, color="k", lw=0.8, ls="--")
-for ℓ in [0.5, 7]:
+for ℓ in [1, 7]:
     ax.axvline(1.0 / ℓ, color="k", lw=0.8, ls="--")
 ax.set_xscale("log")
 ax.set_yscale("symlog", linthresh=1e-2)

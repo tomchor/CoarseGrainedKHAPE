@@ -12,7 +12,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--filter-scales", type=float, nargs=2, default=[0.5, 7.0], help="Two filter length scales for left and right columns")
+parser.add_argument("--filter-scales", type=float, nargs=2, default=[1, 7], help="Two filter length scales for left and right columns")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -55,19 +55,18 @@ print("Creating 2×2 budget panel plot...")
 fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
 
 budget_configs = [
-    (0, ke_budget,  ke_terms,  "SFS KE budget terms"),
-    (1, ape_budget, ape_terms, "SFS APE budget terms"),
+    (0, ke_budget,  ke_terms,  "residual_KE",  "SFS KE budget terms"),
+    (1, ape_budget, ape_terms, "residual_APE", "SFS APE budget terms"),
 ]
 
-for row, budget, terms, row_title in budget_configs:
+for row, budget, terms, residual_var, row_title in budget_configs:
     for col, ℓ in enumerate([ℓ_right, ℓ_left]):
         ax = axes[row, col]
-        ax.axhline(0, color="k", lw=0.8, ls="--", zorder=0)
         for label, (var, color) in terms.items():
             data = budget[var].sel(filter_length_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
-            ls = "--" if "residual" in var else "-"
-            lw = 1.0 if "residual" in var else 1.5
-            ax.plot(data.time, data.values, label=label, color=color, ls=ls, lw=lw)
+            ax.plot(data.time, data.values, label=label, color=color, lw=1.5)
+        residual = budget[residual_var].sel(filter_length_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
+        ax.plot(residual.time, residual.values, label="residual", color="k", ls="--", lw=1.0, zorder=0)
 
         if col == 0:
             ax.set_ylabel(row_title, fontsize=13)
