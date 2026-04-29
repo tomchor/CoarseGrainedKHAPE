@@ -18,7 +18,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 4-panel snapshot of local SFS budget terms")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--time", type=float, default=50, help="Target time for snapshot (nearest available will be used)")
-parser.add_argument("--filter-scale", type=float, default=0.4, help="Target filter length scale (nearest available will be used)")
+parser.add_argument("--filter-scale", type=float, default=0.5, help="Target filter length scale (nearest available will be used)")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
 
@@ -111,7 +111,7 @@ for ax, (field, title) in zip(axes.flat, panels):
         vmin, vmax = -pi_ke_vmax, pi_ke_vmax
 
     im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
-    cax = ax.inset_axes([0.3, 0.09, 0.4, 0.03])
+    cax = ax.inset_axes([0.2, 0.09, 0.6, 0.03])
     tick_color = "white" if is_dissipation else "black"
     cb = fig.colorbar(im, cax=cax, orientation="horizontal")
     cax.tick_params(colors=tick_color)

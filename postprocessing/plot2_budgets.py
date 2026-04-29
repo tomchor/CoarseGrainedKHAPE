@@ -12,7 +12,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--filter-scales", type=float, nargs=2, default=[0.4, 5.0], help="Two filter length scales for left and right columns (default: 0.4 5)")
+parser.add_argument("--filter-scales", type=float, nargs=2, default=[0.5, 7.0], help="Two filter length scales for left and right columns")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)

@@ -35,12 +35,12 @@ print(f"  Time step: {et.time.values}   Filter scales: {et.filter_length_scale.v
 #---
 
 #+++ Plot
-fig, ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
+fig, ax = plt.subplots(figsize=(6, 3.5), constrained_layout=True)
 
 for var, color, label_str in [("∫Π_KE dV", "#2166ac", r"$\Pi_{KE}$"), ("∫Π_APE dV", "#d6604d", r"$\Pi_{APE}$")]:
     ax.plot(et.inv_scale, et[var].values, color=color, label=label_str)
 ax.axhline(0, color="k", lw=0.8, ls="--")
-for ℓ in [0.4, 5.0]:
+for ℓ in [0.5, 7]:
     ax.axvline(1.0 / ℓ, color="k", lw=0.8, ls="--")
 ax.set_xscale("log")
 ax.set_yscale("symlog", linthresh=1e-2)
@@ -57,7 +57,7 @@ if label:
 info_parts.append(f"$t = {float(et.time.values):.0f}$")
 ax.text(0.98, 0.04, ",  ".join(info_parts), transform=ax.transAxes, fontsize=10, ha="right", va="bottom", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
 
-plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace(".nc", ".png"))
+plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "cross-scale_transfer_spectrum").replace(".nc", ".png"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
 #---

@@ -1,8 +1,9 @@
 """
 Test that the Gaussian filter reproduces the analytical response to a 2D Dirac delta.
 
+GaussianFilter takes the FWHM (ℓ) and derives σ = ℓ / (2√(2 ln 2)) internally.
 Filtering a point impulse δ(x)δ(z) should yield the 2D Gaussian kernel:
-  G(x, z) = 1/(2πℓ²) · exp(-(x² + z²) / (2ℓ²))
+  G(x, z) = 1/(2πσ²) · exp(-(x² + z²) / (2σ²))
 """
 
 import sys
@@ -17,10 +18,12 @@ from aux00_utils import GaussianFilter
 FIGURES_DIR = Path(__file__).resolve().parent.parent / "figures"
 
 #+++ Parameters
-Nx, Nz = 512, 128
-Lx, Lz = 14.0, 25.0
+Nx, Nz = 512, 512
+Lx, Lz = 14.0, 14.0
 dx, dz = Lx / Nx, Lz / Nz
-FILTER_SCALE = 1.0
+FILTER_SCALE = 1.0  # FWHM passed to GaussianFilter
+_FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+SIGMA = FILTER_SCALE * _FWHM_TO_SIGMA  # actual Gaussian σ used internally
 RTOL = 0.02
 ATOL = 0.01  # ~6% of peak; covers tails where filtered rounds to zero
 #---
@@ -47,7 +50,7 @@ def test_transect_z0(filtered_delta):
     """Transect at z=0: filtered vs analytical Gaussian in x."""
     x = filtered_delta.x_caa.values
     filtered = filtered_delta.sel(z_aac=0, method="nearest").values
-    expected = analytical_2d_gaussian(x, 0, FILTER_SCALE)
+    expected = analytical_2d_gaussian(x, 0, SIGMA)
     np.testing.assert_allclose(filtered, expected, rtol=RTOL, atol=ATOL)
 
 
@@ -55,14 +58,14 @@ def test_transect_x0(filtered_delta):
     """Transect at x=0: filtered vs analytical Gaussian in z."""
     z = filtered_delta.z_aac.values
     filtered = filtered_delta.sel(x_caa=0, method="nearest").values
-    expected = analytical_2d_gaussian(0, z, FILTER_SCALE)
+    expected = analytical_2d_gaussian(0, z, SIGMA)
     np.testing.assert_allclose(filtered, expected, rtol=RTOL, atol=ATOL)
 
 
 def test_peak_value(filtered_delta):
-    """Peak value at origin should match 1/(2πℓ²)."""
+    """Peak value at origin should match 1/(2πσ²)."""
     peak = float(filtered_delta.sel(x_caa=0, z_aac=0, method="nearest"))
-    expected = 1.0 / (2 * np.pi * FILTER_SCALE**2)
+    expected = 1.0 / (2 * np.pi * SIGMA**2)
     assert abs(peak - expected) / expected < RTOL
 
 
@@ -82,7 +85,7 @@ def save_figure(filtered_delta):
 
     x = filtered_delta.x_caa.values
     z = filtered_delta.z_aac.values
-    ℓ = FILTER_SCALE
+    ℓ = SIGMA
     da_orig = xr.DataArray(np.zeros((Nx, Nz)), dims=["x_caa", "z_aac"], coords={"x_caa": x, "z_aac": z})
     da_orig.values[Nx // 2, Nz // 2] = 1.0 / (dx * dz)
 
@@ -92,7 +95,7 @@ def save_figure(filtered_delta):
     da_orig.plot(ax=axes[0, 0], **kw)
     axes[0, 0].set_title("Original (Dirac delta)")
     filtered_delta.plot(ax=axes[0, 1], **kw)
-    axes[0, 1].set_title(f"Filtered (ℓ = {ℓ})")
+    axes[0, 1].set_title(f"Filtered (FWHM = {FILTER_SCALE}, σ = {ℓ:.4f})")
     for ax in axes[0, :]:
         ax.set_aspect("equal")
 
