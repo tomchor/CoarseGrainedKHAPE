@@ -11,6 +11,8 @@
 #PBS -l select=1:ncpus=8:ngpus=1:gpu_type=a100:mem=64GB
 #PBS -l job_priority=regular
 
+set -eo pipefail
+
 # Clear the environment from any previously loaded modules
 module li
 module --force purge
