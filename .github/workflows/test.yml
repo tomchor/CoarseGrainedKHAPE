@@ -10,6 +10,10 @@ on:
         description: 'PR head SHA for status reporting (set by test_trigger.yml)'
         required: false
         default: ''
+      pr_number:
+        description: 'PR number (passed by main-branch test_trigger.yml; unused here)'
+        required: false
+        default: ''
 
 
 env:
