@@ -17,7 +17,7 @@ def str2bool(s):
     if s.lower() in ("false", "0", "no"):  return False
     raise argparse.ArgumentTypeError(f"Expected boolean, got {s!r}")
 parser.add_argument("--time", type=float, default=40, help="Snapshot time (nearest available will be used; ignored if --time-average true)")
-parser.add_argument("--time-average", type=str2bool, default=False, metavar="BOOL", help="Average transfer terms over the whole time range (true/false)")
+parser.add_argument("--time-average", type=str2bool, default=True, metavar="BOOL", help="Average transfer terms over the whole time range (true/false)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
