@@ -11,7 +11,7 @@ from aux00_utils import load_dataset_and_grid, filter_fields
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for cross-scale energy transfer sweep")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--n-time-skip", type=int, default=2, help="Keep every n-th (consecutive) time step (default: 2)")
+parser.add_argument("--n-time-skip", type=int, default=1, help="Keep every n-th (consecutive) time step")
 args = parser.parse_args()
 
 print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\\n" + "="*70)
