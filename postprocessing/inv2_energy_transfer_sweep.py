@@ -43,7 +43,7 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 t0 = time.time()
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(chunks)
+ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(dict(time=1, filter_length_scale=1))
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 
 filter_length_scales = ds_filt.filter_length_scale.values
