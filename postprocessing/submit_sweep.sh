@@ -2,14 +2,14 @@
 # Submit sweep jobs: shared filter step (inv1) once, then per-FIXED_REF transfer steps (inv2+inv3).
 # Usage: bash submit_sweep.sh [NZ=2048] [FIXED_REF=0|1|both]
 #   FIXED_REF=both  submits transfer jobs for both 0 and 1 (filter runs only once)
-NZ=2048; FIXED_REF=0
-for arg in "$@"; do case $arg in NZ=*) NZ="${arg#*=}";; FIXED_REF=*) FIXED_REF="${arg#*=}";; esac; done
+NZ=2048; FIXED_REF=0; N_TIME_SKIP=2
+for arg in "$@"; do case $arg in NZ=*) NZ="${arg#*=}";; FIXED_REF=*) FIXED_REF="${arg#*=}";; N_TIME_SKIP=*) N_TIME_SKIP="${arg#*=}";; esac; done
 
 FILTER_NAME="sweep_filter_Nz${NZ}_Ri0.10"
 FILTER_JOB=$(qsub -N "$FILTER_NAME" \
                   -o "logs/${FILTER_NAME}.log" \
                   -e "logs/${FILTER_NAME}.log" \
-                  -v NZ=$NZ \
+                  -v NZ=$NZ,N_TIME_SKIP=$N_TIME_SKIP \
                   sweep_filter.pbs)
 echo "Submitted filter job (Nz=$NZ): $FILTER_JOB"
 

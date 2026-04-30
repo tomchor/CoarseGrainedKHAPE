@@ -16,6 +16,7 @@
 set -eo pipefail
 
 NZ=${NZ:-4096}
+N_TIME_SKIP=${N_TIME_SKIP:-2}
 SIM=khi_Nz${NZ}_Ri0.10
 PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
 JOB_NAME="sweep_filter_Nz${NZ}_Ri0.10"
@@ -35,6 +36,6 @@ export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 juliaup default 1.12
 
-time $PYTHON -u inv1_filter_fields_sweep.py --filename output/${SIM}.nc 2>&1 | tee logs/${JOB_NAME}.out
+time $PYTHON -u inv1_filter_fields_sweep.py --filename output/${SIM}.nc --n-time-skip $N_TIME_SKIP 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
