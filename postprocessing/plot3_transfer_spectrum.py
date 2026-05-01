@@ -18,6 +18,7 @@ def str2bool(s):
     raise argparse.ArgumentTypeError(f"Expected boolean, got {s!r}")
 parser.add_argument("--time", type=float, default=40, help="Snapshot time (nearest available will be used; ignored if --time-average true)")
 parser.add_argument("--time-average", type=str2bool, default=True, metavar="BOOL", help="Average transfer terms over the whole time range (true/false)")
+parser.add_argument("--max-average-time", type=float, default=140.0, help="Latest time included when averaging (only used if --time-average true)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -32,6 +33,7 @@ print("Loading energy transfer data...")
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
 et = xr.open_dataset(input_filename, decode_timedelta=False).chunk(dict(time=1))
 if args.time_average:
+    et = et.sel(time=slice(None, args.max_average_time))
     t0, t1 = float(et.time.min()), float(et.time.max())
     et = et.mean("time", keep_attrs=True)
     time_label = f"$t \\in [{t0:.0f}, {t1:.0f}]$"
