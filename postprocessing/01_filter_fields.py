@@ -2,7 +2,6 @@
 #+++ Imports
 import os
 from pathlib import Path
-import numpy as np
 from dask.diagnostics.progress import ProgressBar
 from aux00_utils import load_dataset_and_grid, filter_fields
 #---
