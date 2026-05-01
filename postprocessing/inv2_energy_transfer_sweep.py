@@ -43,12 +43,12 @@ print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 t0 = time.time()
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(dict(time=1, filter_length_scale=1))
+ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(dict(time=1, filter_scale=1))
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
 
-filter_length_scales = ds_filt.filter_length_scale.values
+filter_scales = ds_filt.filter_scale.values
 print(f"  Loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
-print(f"  Filter length scales: {filter_length_scales}")
+print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
 #---
 
@@ -66,7 +66,7 @@ if fixed_reference:
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
-energy_transfer = calculate_energy_transfer(ds, filter_length_scales,
+energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
                                             rho_sorted=rho_sorted,
                                             dz_sorted=dz_sorted,

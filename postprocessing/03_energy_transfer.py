@@ -40,9 +40,9 @@ print("Loading pre-filtered fields and sorted density...")
 t0 = time.time()
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
-filter_length_scales = ds_filt.filter_length_scale.values
+filter_scales = ds_filt.filter_scale.values
 print(f"  Filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
-print(f"  Filter length scales: {filter_length_scales}")
+print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
 
 t0 = time.time()
@@ -55,7 +55,7 @@ print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
-energy_transfer = calculate_energy_transfer(ds, filter_length_scales,
+energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
                                             rho_sorted=ds_sorted.rho_sorted,
                                             dz_sorted=ds_sorted.dz_sorted,

@@ -18,7 +18,7 @@ print("\\n" + "="*70 + f"\\n  {Path(__file__).name}\\n  " + "  ".join(f"{k}={v}"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-filter_length_scales = np.geomspace(0.02, 20, 30) # Length scales for filtering
+filter_scales = np.geomspace(0.02, 20, 30) # Length scales for filtering
 #---
 
 #+++ Load data and grid
@@ -37,7 +37,7 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Filtering velocity and buoyancy fields in x and z...")
 
-ds_filt = filter_fields(ds, filter_length_scales)
+ds_filt = filter_fields(ds, filter_scales)
 print("Done!")
 #---
 

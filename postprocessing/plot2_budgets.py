@@ -31,7 +31,7 @@ ref_suffix = "_fixed_ref" if fixed_reference else ""
 print("Loading budget data...")
 ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated{ref_suffix}.nc"),  decode_timedelta=False)
 ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
-print(f"  Filter scales available: {ke_budget.filter_length_scale.values}")
+print(f"  Filter scales available: {ke_budget.filter_scale.values}")
 #---
 
 #+++ Define budget terms (shared colors across all panels)
@@ -63,9 +63,9 @@ for row, budget, terms, residual_var, row_title in budget_configs:
     for col, ℓ in enumerate([ℓ_right, ℓ_left]):
         ax = axes[row, col]
         for label, (var, color) in terms.items():
-            data = budget[var].sel(filter_length_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
+            data = budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
             ax.plot(data.time, data.values, label=label, color=color, lw=1.5)
-        residual = budget[residual_var].sel(filter_length_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
+        residual = budget[residual_var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
         ax.plot(residual.time, residual.values, label="residual", color="k", ls="--", lw=1.0, zorder=0)
 
         if col == 0:
@@ -82,7 +82,7 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         ax.set_title("")
 
 for col, ℓ in enumerate([ℓ_right, ℓ_left]):
-    actual_ℓ = float(ke_budget.filter_length_scale.sel(filter_length_scale=ℓ, method="nearest"))
+    actual_ℓ = float(ke_budget.filter_scale.sel(filter_scale=ℓ, method="nearest"))
     axes[0, col].set_title(f"$\\ell = {actual_ℓ:.1f}$", fontsize=14)
 #---
 

@@ -25,4 +25,4 @@ def pytest_generate_tests(metafunc):
         ref_suffix = metafunc.config.getoption("--ref-suffix")
         path = PP_OUTPUT / f"{STEM}_sfs_ke_budget_integrated{ref_suffix}.nc"
         ds = xr.open_dataset(path, decode_timedelta=False)
-        metafunc.parametrize("l_idx", range(len(ds.filter_length_scale)))
+        metafunc.parametrize("l_idx", range(len(ds.filter_scale)))

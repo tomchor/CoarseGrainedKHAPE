@@ -76,8 +76,8 @@ def ke_budget(ref_suffix):
 
 
 def test_ke_budget_residual(ke_budget, l_idx):
-    l = ke_budget.filter_length_scale.values[l_idx]
-    ds_l = ke_budget.sel(filter_length_scale=l)
+    l = ke_budget.filter_scale.values[l_idx]
+    ds_l = ke_budget.sel(filter_scale=l)
     rel = relative_residual(ds_l, "residual_KE", KE_BUDGET_VARS)
     print(f"\nKE budget  (l={l:.4f})")
     print_budget_summary(ds_l, "residual_KE", KE_BUDGET_VARS, rel)
@@ -104,8 +104,8 @@ def ape_budget(ref_suffix):
 
 
 def test_ape_budget_residual(ape_budget, l_idx):
-    l = ape_budget.filter_length_scale.values[l_idx]
-    ds_l = ape_budget.sel(filter_length_scale=l)
+    l = ape_budget.filter_scale.values[l_idx]
+    ds_l = ape_budget.sel(filter_scale=l)
     rel = relative_residual(ds_l, "residual_APE", APE_BUDGET_VARS)
     print(f"\nAPE budget  (l={l:.4f})")
     print_budget_summary(ds_l, "residual_APE", APE_BUDGET_VARS, rel)

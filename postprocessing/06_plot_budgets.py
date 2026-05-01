@@ -27,10 +27,10 @@ ke_filename  = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrate
 ape_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
 ke_budget  = xr.open_dataset(ke_filename,  decode_timedelta=False)
 ape_budget = xr.open_dataset(ape_filename, decode_timedelta=False)
-filter_length_scales = ke_budget.filter_length_scale.values
+filter_scales = ke_budget.filter_scale.values
 print(f"  KE  budget: {ke_filename}")
 print(f"  APE budget: {ape_filename}")
-print(f"  Filter scales: {filter_length_scales}")
+print(f"  Filter scales: {filter_scales}")
 #---
 
 #+++ Define budget terms and colors
@@ -55,7 +55,7 @@ ape_vars = {
 print("\nCreating plots...")
 label = run_label(ke_budget.attrs)
 
-for ℓ in filter_length_scales:
+for ℓ in filter_scales:
     fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
 
     for ax, budget, vars_dict, title in [
@@ -63,7 +63,7 @@ for ℓ in filter_length_scales:
         (axes[1], ape_budget, ape_vars, "Integrated SFS APE Budget"),
     ]:
         for var, color in vars_dict.items():
-            data = budget[var].sel(filter_length_scale=ℓ).dropna("time")
+            data = budget[var].sel(filter_scale=ℓ).dropna("time")
             lbl = f"{var}  [max|·| = {float(abs(data).max()):.2e}]" if "residual" in var else var
             data.plot.line(ax=ax, x="time", label=lbl, color=color)
         ax.legend(fontsize=8)

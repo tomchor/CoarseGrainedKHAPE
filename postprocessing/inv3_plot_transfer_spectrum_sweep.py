@@ -27,10 +27,10 @@ input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep
 et = xr.open_dataset(input_filename, decode_timedelta=False)
 
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis
-et = et.assign_coords(inv_scale=("filter_length_scale", 1.0 / et.filter_length_scale.values))
+et = et.assign_coords(inv_scale=("filter_scale", 1.0 / et.filter_scale.values))
 et["inv_scale"].attrs = {"long_name": "1/ℓ", "units": "m⁻¹"}
 print(f"  Loaded: {input_filename}")
-print(f"  Time steps: {len(et.time)}   Filter scales: {len(et.filter_length_scale)}")
+print(f"  Time steps: {len(et.time)}   Filter scales: {len(et.filter_scale)}")
 #---
 
 #+++ Plot
@@ -38,7 +38,7 @@ fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True, sharey=
 
 vmax = float(max(abs(et["∫Π_KE dV"]).max(), abs(et["∫Π_APE dV"]).max()))
 for ax, var in zip(axes, ["∫Π_KE dV", "∫Π_APE dV"]):
-    et[var].plot.pcolormesh(x="time", y="filter_length_scale", ax=ax,
+    et[var].plot.pcolormesh(x="time", y="filter_scale", ax=ax,
                             cmap="RdBu_r", vmin=-vmax, vmax=vmax,
                             norm=plt.matplotlib.colors.SymLogNorm(linthresh=1e-2, vmin=-vmax, vmax=vmax))
     ax.set_yscale("log")

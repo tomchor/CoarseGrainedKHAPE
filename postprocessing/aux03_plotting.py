@@ -26,16 +26,16 @@ budget_colors = {
 }
 
 #+++ SFS budget plotting
-def plot_sfs_budget(budget_terms, integrated_vars, filter_length_scales, output_filename, repo_root, title):
+def plot_sfs_budget(budget_terms, integrated_vars, filter_scales, output_filename, repo_root, title):
     """Plot integrated SFS budget terms vs time for each filter scale.
 
     Parameters
     ----------
     budget_terms : xr.Dataset
-        Dataset with budget variables indexed by filter_length_scale and time.
+        Dataset with budget variables indexed by filter_scale and time.
     integrated_vars : dict
         Mapping of variable name → matplotlib color.
-    filter_length_scales : array-like
+    filter_scales : array-like
         Filter length scales to iterate over.
     output_filename : str
         Path to the saved NetCDF file; used to derive the plot filename.
@@ -45,10 +45,10 @@ def plot_sfs_budget(budget_terms, integrated_vars, filter_length_scales, output_
         Base title string, e.g. "Integrated SFS KE Budget Terms".
     """
     import os
-    for ℓ in filter_length_scales:
+    for ℓ in filter_scales:
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
         for var, color in integrated_vars.items():
-            budget_terms[var].sel(filter_length_scale=ℓ).dropna("time").plot.line(
+            budget_terms[var].sel(filter_scale=ℓ).dropna("time").plot.line(
                 ax=ax, x="time", label=var, color=color)
         ax.legend()
         ax.set_ylabel("Budget Terms [W or J s⁻¹]")

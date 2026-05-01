@@ -56,13 +56,13 @@ print("Loading pre-filtered fields and sorted density...")
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
-filter_length_scales = ds_filt.filter_length_scale.values
+filter_scales = ds_filt.filter_scale.values
 filtered_dimensions = ["x_caa", "z_aac"]
 
 ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
-print(f"  Filter length scales: {filter_length_scales}")
+print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
@@ -120,20 +120,20 @@ dV = ds_full.dV
 budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
 
-for ℓ in filter_length_scales:
+for ℓ in filter_scales:
     checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
     checkpoint_files.append(checkpoint_path)
 
     if checkpoint_path.exists():
-        print(f"\n--- filter_length_scale = {ℓ:.4f} (loading from checkpoint) ---")
+        print(f"\n--- filter_scale = {ℓ:.4f} (loading from checkpoint) ---")
         budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
         continue
 
-    print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
+    print(f"\n--- filter_scale = {ℓ:.4f} ---")
 
     gaussian_filter = make_gaussian_filter(ℓ, ds)
 
-    ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
+    ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ).drop_vars("filter_scale")
     ds_filt_ℓ["LxLy"] = ds["LxLy"]
     ds_filt_ℓ.attrs.update(ds.attrs)
 
@@ -159,8 +159,8 @@ for ℓ in filter_length_scales:
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
-    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
-    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
+    ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
 
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
@@ -174,8 +174,8 @@ for ℓ in filter_length_scales:
     int_sfs_ape_dissipation = integrate(sfs_ape_dissipation.reindex(time=dAPE_dt.time), dV)
     int_R_s                 = integrate(R_s.reindex(time=dAPE_dt.time), dV)
 
-    Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
-    int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
+    Π_APE_ℓ     = energy_transfer["Π_APE"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_APE_ℓ = energy_transfer["∫Π_APE dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
     residual    = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_APE_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
 
     budget_ℓ = xr.Dataset({
@@ -223,11 +223,11 @@ for ℓ in filter_length_scales:
 
     budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
 
-sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
-                                                               dims="filter_length_scale",
-                                                               name="filter_length_scale"))
+sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
+                                                               dims="filter_scale",
+                                                               name="filter_scale"))
 sfs_ape_budget_terms.attrs.update(ds.attrs)
-# Scale-independent fields don't need filter_length_scale dimension
+# Scale-independent fields don't need filter_scale dimension
 sfs_ape_budget_terms["ρ"] = ds_full.ρ
 print("\nDone!")
 #---

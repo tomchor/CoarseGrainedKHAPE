@@ -42,10 +42,10 @@ else:
     time_label = f"$t = {float(et.time.values):.0f}$"
 
 # Add 1/ℓ as a non-dimension coordinate so plot.line can use it as the x axis
-et = et.assign_coords(inv_scale=("filter_length_scale", 1.0 / et.filter_length_scale.values))
+et = et.assign_coords(inv_scale=("filter_scale", 1.0 / et.filter_scale.values))
 et["inv_scale"].attrs = {"long_name": "Inverse of filter scale 1/ℓ",}
 print(f"  Loaded: {input_filename}")
-print(f"  Filter scales: {et.filter_length_scale.values}")
+print(f"  Filter scales: {et.filter_scale.values}")
 #---
 
 #+++ Plot

@@ -222,35 +222,35 @@ def make_gaussian_filter(ℓ, ds):
     return GaussianFilter(ℓ, dx_min, dz_min)
 
 
-def filter_fields(ds, filter_length_scales):
+def filter_fields(ds, filter_scales):
     """Filter velocity and buoyancy fields at each length scale in x and z.
 
     Parameters
     ----------
     ds : xr.Dataset
         Dataset with velocity components (u, w) and buoyancy b.
-    filter_length_scales : array-like
+    filter_scales : array-like
         Filter length scales (FWHM) in physical units.
 
     Returns
     -------
     ds_filt : xr.Dataset
-        Dataset with filtered fields ūᵢ and b̄ at each filter_length_scale,
+        Dataset with filtered fields ūᵢ and b̄ at each filter_scale,
         plus dV (scale-independent).
     """
     ds = condense_uw_velocities(ds, indices=(1, 3))
 
     ds_filt_list = []
-    for ℓ in filter_length_scales:
-        print(f"  filter_length_scale = {ℓ:.4f}...")
+    for ℓ in filter_scales:
+        print(f"  filter_scale = {ℓ:.4f}...")
         gf = make_gaussian_filter(ℓ, ds)
         ds_filt_list.append(xr.Dataset({
             "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "z_aac"]),
             "b̄":  gf.apply(ds["b"],  dims=["x_caa", "z_aac"]),
         }))
 
-    scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
-                               name="filter_length_scale")
+    scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
+                               name="filter_scale")
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
     ds_filt.attrs.update(ds.attrs)

@@ -43,14 +43,14 @@ print("Done.")
 
 #+++ Select nearest time and filter scale
 t_sel = float(ke_budget.time.sel(time=args.time, method="nearest").values)
-ℓ_sel = float(ke_budget.filter_length_scale.sel(filter_length_scale=args.filter_scale, method="nearest").values)
+ℓ_sel = float(ke_budget.filter_scale.sel(filter_scale=args.filter_scale, method="nearest").values)
 print(f"Selected time = {t_sel:.3f}  (requested {args.time})")
 print(f"Selected ℓ   = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 #---
 
 #+++ Load fields at selected time and filter scale
 print("Selecting fields...")
-sel = dict(time=t_sel, filter_length_scale=ℓ_sel, method="nearest")
+sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
 pi_ke    = ke_budget["Π_KE"].sel(**sel).squeeze()               # cross-scale KE flux
 exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze() # APE->KE exchange

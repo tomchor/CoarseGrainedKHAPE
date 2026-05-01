@@ -251,7 +251,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #---
 
 #+++ Cross-scale energy transfer pipeline
-def calculate_energy_transfer(ds, filter_length_scales,
+def calculate_energy_transfer(ds, filter_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
@@ -260,10 +260,10 @@ def calculate_energy_transfer(ds, filter_length_scales,
     ds : xr.Dataset
         Full (unfiltered) simulation dataset. Must contain velocity components
         (u, w), buoyancy b, and grid variables dV, LxLy.
-    filter_length_scales : array-like
+    filter_scales : array-like
         Physical length scales at which to compute the transfer terms.
     ds_filt : xr.Dataset, optional
-        Pre-computed filtered fields (ūᵢ, b̄) indexed by filter_length_scale.
+        Pre-computed filtered fields (ūᵢ, b̄) indexed by filter_scale.
         If None, filter_fields() is called internally.
     rho_sorted : xr.DataArray, optional
         Pre-sorted reference density (time, z_1d_sorted), e.g. loaded from a
@@ -279,13 +279,13 @@ def calculate_energy_transfer(ds, filter_length_scales,
     -------
     xr.Dataset
         Dataset with Π_KE, Π_APE, ∫Π_KE dV, ∫Π_APE dV indexed by
-        filter_length_scale.
+        filter_scale.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
     tensor_dimensions   = ("x_caa", "z_aac")
 
     if ds_filt is None:
-        ds_filt = filter_fields(ds, filter_length_scales)
+        ds_filt = filter_fields(ds, filter_scales)
 
     ds = condense_uw_velocities(ds, indices=(1, 3))
     ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
@@ -304,11 +304,11 @@ def calculate_energy_transfer(ds, filter_length_scales,
     dV = ds_full.dV
     transfer_list = []
 
-    for ℓ in filter_length_scales:
-        print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
+    for ℓ in filter_scales:
+        print(f"\n--- filter_scale = {ℓ:.4f} ---")
         gaussian_filter = make_gaussian_filter(ℓ, ds)
 
-        ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ).drop_vars("filter_length_scale")
+        ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ).drop_vars("filter_scale")
         ds_filt_ℓ["LxLy"] = ds["LxLy"]
         ds_filt_ℓ.attrs.update(ds.attrs)
 
@@ -345,7 +345,7 @@ def calculate_energy_transfer(ds, filter_length_scales,
             "∫Π_APE dV": int_Π_APE,
         }))
 
-    scale_coord = xr.DataArray(filter_length_scales, dims="filter_length_scale",
-                               name="filter_length_scale")
+    scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
+                               name="filter_scale")
     return xr.concat(transfer_list, dim=scale_coord)
 #---

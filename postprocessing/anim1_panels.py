@@ -50,16 +50,16 @@ ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_
 ke_budget = ke_budget.sel(z_aac=slice(-args.zlim, args.zlim))
 ape_budget = ape_budget.sel(z_aac=slice(-args.zlim, args.zlim))
 
-ℓ_sel = float(ke_budget.filter_length_scale.sel(filter_length_scale=args.filter_scale, method="nearest"))
+ℓ_sel = float(ke_budget.filter_scale.sel(filter_scale=args.filter_scale, method="nearest"))
 print(f"Selected filter scale: ℓ = {ℓ_sel:.4f}  (requested {args.filter_scale})")
-ke_budget = ke_budget.sel(filter_length_scale=ℓ_sel)
-ape_budget = ape_budget.sel(filter_length_scale=ℓ_sel)
+ke_budget = ke_budget.sel(filter_scale=ℓ_sel)
+ape_budget = ape_budget.sel(filter_scale=ℓ_sel)
 
 print("Loading integrated budgets...")
 ke_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
 ape_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
-ke_int = ke_int.sel(filter_length_scale=ℓ_sel, method="nearest")
-ape_int = ape_int.sel(filter_length_scale=ℓ_sel, method="nearest")
+ke_int = ke_int.sel(filter_scale=ℓ_sel, method="nearest")
+ape_int = ape_int.sel(filter_scale=ℓ_sel, method="nearest")
 #---
 
 #+++ Reindex 2D data to budget time coordinate

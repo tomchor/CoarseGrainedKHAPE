@@ -42,7 +42,7 @@ print("Loading pre-filtered fields...")
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filtered_dimensions = ["x_caa", "z_aac"]
-filter_length_scales = ds_filt.filter_length_scale.values
+filter_scales = ds_filt.filter_scale.values
 tensor_dimensions = ("x_caa", "z_aac")
 
 ds = condense_uw_velocities(ds, indices=[1, 3])
@@ -54,7 +54,7 @@ ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Sorted density loaded from: {sorted_density_filename}")
-print(f"Filter length scales: {filter_length_scales}")
+print(f"Filter length scales: {filter_scales}")
 print(f"Filter dimensions: x and z")
 #---
 
@@ -82,12 +82,12 @@ energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
 dV = ds_full.dV
 budget_list = []
 
-for ℓ in filter_length_scales:
-    print(f"\n--- filter_length_scale = {ℓ:.4f} ---")
+for ℓ in filter_scales:
+    print(f"\n--- filter_scale = {ℓ:.4f} ---")
 
     gaussian_filter = make_gaussian_filter(ℓ, ds)
 
-    ds_filt_ℓ = ds_filt.sel(filter_length_scale=ℓ)
+    ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ)
 
     # τⁱʲ = filter(uⁱ uʲ) - ūⁱ ūʲ   shape: (i, j, time, z, y, x)
     print("  SFS stress tensor...")
@@ -121,8 +121,8 @@ for ℓ in filter_length_scales:
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-    Π_KE_ℓ     = energy_transfer["Π_KE"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
-    int_Π_KE_ℓ = energy_transfer["∫Π_KE dV"].sel(filter_length_scale=ℓ, method="nearest", tolerance=1e-6)
+    Π_KE_ℓ     = energy_transfer["Π_KE"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    int_Π_KE_ℓ = energy_transfer["∫Π_KE dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
     residual   = -int_dKE_dt + int_Π_KE_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
 
     budget_ℓ = xr.Dataset({
@@ -143,9 +143,9 @@ for ℓ in filter_length_scales:
 
     budget_list.append(budget_ℓ)
 
-sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_length_scales,
-                                                              dims="filter_length_scale",
-                                                              name="filter_length_scale"))
+sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
+                                                              dims="filter_scale",
+                                                              name="filter_scale"))
 sfs_ke_budget_terms.attrs.update(ds.attrs)
 print("\nDone!")
 #---
