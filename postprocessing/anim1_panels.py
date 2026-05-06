@@ -8,6 +8,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.animation import FuncAnimation, FFMpegWriter
+from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r
 from src.aux03_plotting import run_label, budget_colors
 #---
 
@@ -17,7 +18,7 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Animate 2×3 panels: vorticity, buoyancy, and SFS budget fields")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=0.4, help="Target filter length scale")
 parser.add_argument("--clim-percentile", type=float, default=99, help="Percentile of |data| used to set symmetric color limits")
 parser.add_argument("--zlim", type=float, default=3.5, help="Vertical extent for z-axis (symmetric around 0)")
@@ -59,6 +60,11 @@ ke_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated{ref_s
 ape_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
 ke_int = ke_int.sel(filter_scale=ℓ_sel, method="nearest")
 ape_int = ape_int.sel(filter_scale=ℓ_sel, method="nearest")
+
+print("Loading sorted density and computing b_r...")
+ds_sorted = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sorted_density{ref_suffix}.nc"), decode_times=False)
+_ds_for_rho = calculate_density_fields_from_buoyancy(ds_2d[["b"]].copy(), buoyancy_name="b", density_name="ρ")
+ds_2d["b_r"] = calculate_b_r(_ds_for_rho["ρ"], ds_sorted["rho_sorted"]).transpose(*_ds_for_rho["ρ"].dims)
 #---
 
 #+++ Reindex 2D data to budget time coordinate
@@ -89,14 +95,17 @@ pct = args.clim_percentile
 
 omega_vmax = global_clim_symmetric(ds_2d["ω"].squeeze("y_aca", drop=True), sample_idx, pct)
 b_vmax = global_clim_symmetric(ds_2d["b"].squeeze("y_aca", drop=True), sample_idx, pct)
+b_r_vmax = global_clim_symmetric(ds_2d["b_r"].squeeze("y_aca", drop=True), sample_idx, pct)
+w_vmax = global_clim_symmetric(ds_2d["w"].squeeze("y_aca", drop=True), sample_idx, pct)
 
 Π_K_vmax = max(global_clim_symmetric(ke_budget["Π_K"].squeeze("y_aca"), sample_idx, pct),
                global_clim_symmetric(ke_budget["SFS APE->KE exchange"].squeeze("y_aca"), sample_idx, pct))
 Π_A_vmax = global_clim_symmetric(ape_budget["Π_A"].squeeze("y_aca"), sample_idx, pct)
 ε_Aˢ_vmax = global_clim_positive(ape_budget["ε_Aˢ"].squeeze("y_aca"), sample_idx, pct)
+Rˢ_vmax = global_clim_symmetric(ape_budget["Rˢ"].squeeze("y_aca"), sample_idx, pct)
 
-print(f"  ω: ±{omega_vmax:.3e},  b: ±{b_vmax:.3e}")
-print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_Aˢ: 0–{ε_Aˢ_vmax:.3e}")
+print(f"  ω: ±{omega_vmax:.3e},  b: ±{b_vmax:.3e},  b_r: ±{b_r_vmax:.3e},  w: ±{w_vmax:.3e}")
+print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_Aˢ: 0–{ε_Aˢ_vmax:.3e},  Rˢ: ±{Rˢ_vmax:.3e}")
 #---
 
 #+++ Helper functions
@@ -114,13 +123,13 @@ def get_frame(ds, var, xdim, zdim, idx):
 
 #+++ Set up figure with GridSpec (2 snapshot rows + 2 budget rows)
 print("Setting up figure...")
-fig = plt.figure(figsize=(16, 13))
-gs = gridspec.GridSpec(4, 3, figure=fig, height_ratios=[1, 1, 0.7, 0.7],
-                       hspace=0.22, wspace=0.05, left=0.06, right=0.99, top=0.95, bottom=0.05)
+fig = plt.figure(figsize=(16, 15))
+gs = gridspec.GridSpec(5, 3, figure=fig, height_ratios=[1, 1, 1, 0.7, 0.7],
+                       hspace=0.22, wspace=0.05, left=0.06, right=0.99, top=0.96, bottom=0.04)
 
-snapshot_axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(2)])
-ax_ke_budget = fig.add_subplot(gs[2, :])
-ax_ape_budget = fig.add_subplot(gs[3, :])
+snapshot_axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(3)])
+ax_ke_budget = fig.add_subplot(gs[3, :])
+ax_ape_budget = fig.add_subplot(gs[4, :])
 #---
 
 #+++ Snapshot panels (rows 0–1)
@@ -131,6 +140,9 @@ panel_specs = [
     (1, 0, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",         "RdBu_r",  -Π_A_vmax, Π_A_vmax),
     (1, 1, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",        "RdBu_r",  -Π_K_vmax, Π_K_vmax),
     (1, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "inferno", 0,    ε_Aˢ_vmax),
+    (2, 0, ds_2d,      "b_r",                  r"Relative buoyancy ($b_r$)",              "RdBu_r",  -b_r_vmax, b_r_vmax),
+    (2, 1, ds_2d,      "w",                    r"Vertical velocity ($w$)",                "RdBu_r",  -w_vmax,   w_vmax),
+    (2, 2, ape_budget, "Rˢ",                   r"$R^s$ (reference-tendency correction)",  "RdBu_r",  -Rˢ_vmax,  Rˢ_vmax),
 ]
 
 meshes = []
@@ -144,13 +156,13 @@ for row, col, ds, var, title, cmap, vmin, vmax in panel_specs:
     fig.colorbar(im, ax=ax, shrink=0.7, pad=0.02, aspect=20)
     ax.set_title(title, fontsize=11)
     ax.set_ylim(-args.zlim, args.zlim)
-    ax.set_aspect("auto")
+    ax.set_aspect("equal")
     ax.set_ylabel("z" if col == 0 else "")
     ax.set_xlabel("")
-    ax.tick_params(labelbottom=(row == 1))
+    ax.tick_params(labelbottom=(row == 2))
     meshes.append(im)
 
-for ax, letter in zip(snapshot_axes.flat, "abcdef"):
+for ax, letter in zip(snapshot_axes.flat, "abcdefghi"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
 #---
@@ -196,9 +208,9 @@ ax_ape_budget.set_ylim(ymin, ymax)
 ke_vline = ax_ke_budget.axvline(times[0], color="k", ls=":", lw=1.5, alpha=0.7)
 ape_vline = ax_ape_budget.axvline(times[0], color="k", ls=":", lw=1.5, alpha=0.7)
 
-ax_ke_budget.text(0.01, 0.95, "(g)", transform=ax_ke_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
+ax_ke_budget.text(0.01, 0.95, "(j)", transform=ax_ke_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
                   bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
-ax_ape_budget.text(0.01, 0.95, "(h)", transform=ax_ape_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
+ax_ape_budget.text(0.01, 0.95, "(k)", transform=ax_ape_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
                    bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
 #---
 
