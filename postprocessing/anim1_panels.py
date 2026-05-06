@@ -103,6 +103,9 @@ w_vmax = global_clim_symmetric(ds_2d["w"].squeeze("y_aca", drop=True), sample_id
 Π_A_vmax = global_clim_symmetric(ape_budget["Π_A"].squeeze("y_aca"), sample_idx, pct)
 ε_Aˢ_vmax = global_clim_positive(ape_budget["ε_Aˢ"].squeeze("y_aca"), sample_idx, pct)
 Rˢ_vmax = global_clim_symmetric(ape_budget["Rˢ"].squeeze("y_aca"), sample_idx, pct)
+KE_sfs_vmax = global_clim_positive(ke_budget["KE_of_sfs_flow"].squeeze("y_aca"), sample_idx, pct)
+APE_sfs_vmax = global_clim_positive(ape_budget["Eaˢ(ρ, z)"].squeeze("y_aca"), sample_idx, pct)
+ε_Kˢ_vmax = global_clim_positive(ke_budget["ε_Kˢ"].squeeze("y_aca"), sample_idx, pct)
 
 print(f"  ω: ±{omega_vmax:.3e},  b: ±{b_vmax:.3e},  b_r: ±{b_r_vmax:.3e},  w: ±{w_vmax:.3e}")
 print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_Aˢ: 0–{ε_Aˢ_vmax:.3e},  Rˢ: ±{Rˢ_vmax:.3e}")
@@ -123,13 +126,13 @@ def get_frame(ds, var, xdim, zdim, idx):
 
 #+++ Set up figure with GridSpec (2 snapshot rows + 2 budget rows)
 print("Setting up figure...")
-fig = plt.figure(figsize=(16, 15))
-gs = gridspec.GridSpec(5, 3, figure=fig, height_ratios=[1, 1, 1, 0.7, 0.7],
+fig = plt.figure(figsize=(16, 18))
+gs = gridspec.GridSpec(6, 3, figure=fig, height_ratios=[1, 1, 1, 1, 0.7, 0.7],
                        hspace=0.22, wspace=0.05, left=0.06, right=0.99, top=0.96, bottom=0.04)
 
-snapshot_axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(3)])
-ax_ke_budget = fig.add_subplot(gs[3, :])
-ax_ape_budget = fig.add_subplot(gs[4, :])
+snapshot_axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(4)])
+ax_ke_budget = fig.add_subplot(gs[4, :])
+ax_ape_budget = fig.add_subplot(gs[5, :])
 #---
 
 #+++ Snapshot panels (rows 0–1)
@@ -143,6 +146,9 @@ panel_specs = [
     (2, 0, ds_2d,      "b_r",                  r"Relative buoyancy ($b_r$)",              "RdBu_r",  -b_r_vmax, b_r_vmax),
     (2, 1, ds_2d,      "w",                    r"Vertical velocity ($w$)",                "RdBu_r",  -w_vmax,   w_vmax),
     (2, 2, ape_budget, "Rˢ",                   r"$R^s$ (reference-tendency correction)",  "RdBu_r",  -Rˢ_vmax,  Rˢ_vmax),
+    (3, 0, ke_budget,  "KE_of_sfs_flow",       r"SFS KE",                                 "inferno", 0,         KE_sfs_vmax),
+    (3, 1, ape_budget, "Eaˢ(ρ, z)",            r"SFS APE",                                "inferno", 0,         APE_sfs_vmax),
+    (3, 2, ke_budget,  "ε_Kˢ",                 r"$\varepsilon_K^s$ (small-scale KE dissipation)", "inferno", 0, ε_Kˢ_vmax),
 ]
 
 meshes = []
@@ -159,10 +165,10 @@ for row, col, ds, var, title, cmap, vmin, vmax in panel_specs:
     ax.set_aspect("equal")
     ax.set_ylabel("z" if col == 0 else "")
     ax.set_xlabel("")
-    ax.tick_params(labelbottom=(row == 2))
+    ax.tick_params(labelbottom=(row == 3))
     meshes.append(im)
 
-for ax, letter in zip(snapshot_axes.flat, "abcdefghi"):
+for ax, letter in zip(snapshot_axes.flat, "abcdefghijkl"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
 #---
@@ -185,8 +191,8 @@ ape_terms = {
 }
 
 for ax, budget_ds, terms, ylabel in [
-    (ax_ke_budget,  ke_int,  ke_terms,  "SFS KE budget [W]"),
-    (ax_ape_budget, ape_int, ape_terms, "SFS APE budget [W]"),
+    (ax_ke_budget,  ke_int,  ke_terms,  "SFS KE budget"),
+    (ax_ape_budget, ape_int, ape_terms, "SFS APE budget"),
 ]:
     for label_str, (var, color) in terms.items():
         data = budget_ds[var].dropna("time")
@@ -208,9 +214,9 @@ ax_ape_budget.set_ylim(ymin, ymax)
 ke_vline = ax_ke_budget.axvline(times[0], color="k", ls=":", lw=1.5, alpha=0.7)
 ape_vline = ax_ape_budget.axvline(times[0], color="k", ls=":", lw=1.5, alpha=0.7)
 
-ax_ke_budget.text(0.01, 0.95, "(j)", transform=ax_ke_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
+ax_ke_budget.text(0.01, 0.95, "(m)", transform=ax_ke_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
                   bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
-ax_ape_budget.text(0.01, 0.95, "(k)", transform=ax_ape_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
+ax_ape_budget.text(0.01, 0.95, "(n)", transform=ax_ape_budget.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
                    bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
 #---
 
@@ -238,6 +244,7 @@ def update(frame):
 #+++ Save animation
 outfile = str(ANIMATIONS / f"{stem}_panels_l{ℓ_sel:.4f}{ref_suffix}.mp4")
 print(f"Recording {len(times)} frames at {args.fps} fps...")
+pause
 writer = FFMpegWriter(fps=args.fps, metadata=dict(title=f"SFS budgets ℓ={ℓ_sel:.4f}"))
 anim = FuncAnimation(fig, update, frames=len(times), blit=False, cache_frame_data=False)
 anim.save(outfile, writer=writer, dpi=args.dpi)
