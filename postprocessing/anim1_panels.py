@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from matplotlib.ticker import MaxNLocator
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r
 from src.aux03_plotting import run_label, budget_colors
@@ -18,10 +19,10 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Animate 2×3 panels: vorticity, buoyancy, and SFS budget fields")
-parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=0.4, help="Target filter length scale")
 parser.add_argument("--clim-percentile", type=float, default=99, help="Percentile of |data| used to set symmetric color limits")
-parser.add_argument("--zlim", type=float, default=3.5, help="Vertical extent for z-axis (symmetric around 0)")
+parser.add_argument("--zlim", type=float, default=3.8, help="Vertical extent for z-axis (symmetric around 0)")
 parser.add_argument("--fps", type=int, default=12, help="Frames per second")
 parser.add_argument("--dpi", type=int, default=150, help="DPI for output video")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
@@ -124,33 +125,37 @@ def get_frame(ds, var, xdim, zdim, idx):
     return ds[var].isel(time=idx).squeeze().transpose(zdim, xdim).values
 #---
 
-#+++ Set up figure with GridSpec (2 snapshot rows + 2 budget rows)
+#+++ Set up figure with GridSpec (3 snapshot rows × 4 cols + 2 budget rows)
 print("Setting up figure...")
-fig = plt.figure(figsize=(16, 18))
-gs = gridspec.GridSpec(6, 3, figure=fig, height_ratios=[1, 1, 1, 1, 0.7, 0.7],
-                       hspace=0.22, wspace=0.05, left=0.06, right=0.99, top=0.96, bottom=0.04)
+fig = plt.figure(figsize=(20, 14))
+gs = gridspec.GridSpec(5, 4, figure=fig, height_ratios=[1, 1, 1, 0.7, 0.7],
+                       hspace=0.04, wspace=0.02, left=0.05, right=0.995, top=0.96, bottom=0.05)
 
-snapshot_axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(4)])
-ax_ke_budget = fig.add_subplot(gs[4, :])
-ax_ape_budget = fig.add_subplot(gs[5, :])
+snapshot_axes = np.array([[fig.add_subplot(gs[r, c]) for c in range(4)] for r in range(3)])
+ax_ke_budget = fig.add_subplot(gs[3, :])
+ax_ape_budget = fig.add_subplot(gs[4, :])
 #---
 
-#+++ Snapshot panels (rows 0–1)
+#+++ Snapshot panels (3 rows × 4 cols)
 panel_specs = [
-    (0, 0, ds_2d,      "ω",                    r"Vorticity ($\omega$)",                   "RdBu_r",  -omega_vmax, omega_vmax),
-    (0, 1, ds_2d,      "b",                    r"Buoyancy ($b$)",                         "RdBu_r",  -b_vmax,     b_vmax),
-    (0, 2, ke_budget,  "Π_K",                  r"$\Pi_K$ (cross-scale KE flux)",          "RdBu_r",  -Π_K_vmax, Π_K_vmax),
-    (1, 0, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",         "RdBu_r",  -Π_A_vmax, Π_A_vmax),
-    (1, 1, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",        "RdBu_r",  -Π_K_vmax, Π_K_vmax),
-    (1, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "inferno", 0,    ε_Aˢ_vmax),
-    (2, 0, ds_2d,      "b_r",                  r"Relative buoyancy ($b_r$)",              "RdBu_r",  -b_r_vmax, b_r_vmax),
-    (2, 1, ds_2d,      "w",                    r"Vertical velocity ($w$)",                "RdBu_r",  -w_vmax,   w_vmax),
-    (2, 2, ape_budget, "Rˢ",                   r"$R^s$ (reference-tendency correction)",  "RdBu_r",  -Rˢ_vmax,  Rˢ_vmax),
-    (3, 0, ke_budget,  "KE_of_sfs_flow",       r"SFS KE",                                 "inferno", 0,         KE_sfs_vmax),
-    (3, 1, ape_budget, "Eaˢ(ρ, z)",            r"SFS APE",                                "inferno", 0,         APE_sfs_vmax),
-    (3, 2, ke_budget,  "ε_Kˢ",                 r"$\varepsilon_K^s$ (small-scale KE dissipation)", "inferno", 0, ε_Kˢ_vmax),
+    # Row 0: vorticity, w, b, b_r
+    (0, 0, ds_2d,      "ω",                    r"Vorticity ($\omega$)",                            "RdBu_r",  -omega_vmax, omega_vmax),
+    (0, 1, ds_2d,      "w",                    r"Vertical velocity ($w$)",                         "RdBu_r",  -w_vmax,     w_vmax),
+    (0, 2, ds_2d,      "b",                    r"Buoyancy ($b$)",                                  "RdBu_r",  -b_vmax,     b_vmax),
+    (0, 3, ds_2d,      "b_r",                  r"Relative buoyancy ($b_r$)",                       "RdBu_r",  -b_r_vmax,   b_r_vmax),
+    # Row 1: SFS KE, cross-scale KE flux, SFS KE dissipation, APE→KE exchange
+    (1, 0, ke_budget,  "KE_of_sfs_flow",       r"SFS KE",                                          "inferno", 0,           KE_sfs_vmax),
+    (1, 1, ke_budget,  "Π_K",                  r"$\Pi_K$ (cross-scale KE flux)",                   "RdBu_r",  -Π_K_vmax,   Π_K_vmax),
+    (1, 2, ke_budget,  "ε_Kˢ",                 r"$\varepsilon_K^s$ (small-scale KE dissipation)",  "inferno", 0,           ε_Kˢ_vmax),
+    (1, 3, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",                 "RdBu_r",  -Π_K_vmax,   Π_K_vmax),
+    # Row 2: SFS APE, cross-scale APE flux, SFS APE dissipation, R^s
+    (2, 0, ape_budget, "Eaˢ(ρ, z)",            r"SFS APE",                                         "inferno", 0,           APE_sfs_vmax),
+    (2, 1, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",                  "RdBu_r",  -Π_A_vmax,   Π_A_vmax),
+    (2, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "inferno", 0,           ε_Aˢ_vmax),
+    (2, 3, ape_budget, "Rˢ",                   r"$R^s$ (reference-tendency correction)",           "RdBu_r",  -Rˢ_vmax,    Rˢ_vmax),
 ]
 
+last_snapshot_row = max(spec[0] for spec in panel_specs)
 meshes = []
 panel_dims = []
 for row, col, ds, var, title, cmap, vmin, vmax in panel_specs:
@@ -159,17 +164,30 @@ for row, col, ds, var, title, cmap, vmin, vmax in panel_specs:
     panel_dims.append((xdim, zdim))
     data0 = get_frame(ds, var, xdim, zdim, 0)
     im = ax.pcolormesh(xc, zc, data0, cmap=cmap, vmin=vmin, vmax=vmax, shading="nearest", rasterized=True)
-    fig.colorbar(im, ax=ax, shrink=0.7, pad=0.02, aspect=20)
-    ax.set_title(title, fontsize=11)
+
+    is_inferno = (cmap == "inferno")
+    cax = ax.inset_axes([0.2, 0.1, 0.6, 0.025])
+    cb = fig.colorbar(im, cax=cax, orientation="horizontal", extend="both")
+    cb.locator = MaxNLocator(nbins=4)
+    cb.update_ticks()
+    tick_color = "white" if is_inferno else "black"
+    cax.tick_params(colors=tick_color, labelsize=8)
+    for spine in cax.spines.values():
+        spine.set_edgecolor(tick_color)
+
+    title_color = "white" if is_inferno else "black"
+    title_bg    = "black" if is_inferno else "white"
+    ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=10, ha="center", va="top",
+            color=title_color, bbox=dict(facecolor=title_bg, edgecolor="none", pad=2, alpha=0.6))
     ax.set_ylim(-args.zlim, args.zlim)
     ax.set_aspect("equal")
     ax.set_ylabel("z" if col == 0 else "")
-    ax.set_xlabel("")
-    ax.tick_params(labelbottom=(row == 3))
+    ax.set_xlabel("x" if row == last_snapshot_row else "")
+    ax.tick_params(labelbottom=(row == last_snapshot_row), labelleft=(col == 0))
     meshes.append(im)
 
 for ax, letter in zip(snapshot_axes.flat, "abcdefghijkl"):
-    ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes, fontsize=12, fontweight="bold", va="top", ha="left",
+    ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes, fontsize=11, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5, alpha=0.8))
 #---
 
@@ -244,7 +262,6 @@ def update(frame):
 #+++ Save animation
 outfile = str(ANIMATIONS / f"{stem}_panels_l{ℓ_sel:.4f}{ref_suffix}.mp4")
 print(f"Recording {len(times)} frames at {args.fps} fps...")
-pause
 writer = FFMpegWriter(fps=args.fps, metadata=dict(title=f"SFS budgets ℓ={ℓ_sel:.4f}"))
 anim = FuncAnimation(fig, update, frames=len(times), blit=False, cache_frame_data=False)
 anim.save(outfile, writer=writer, dpi=args.dpi)
