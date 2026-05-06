@@ -20,7 +20,7 @@ print = logging.info
 import argparse
 parser = argparse.ArgumentParser(description="Animate 2×3 panels: vorticity, buoyancy, and SFS budget fields")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--filter-scale", type=float, default=0.4, help="Target filter length scale")
+parser.add_argument("--filter-scale", type=float, default=1, help="Target filter length scale")
 parser.add_argument("--clim-percentile", type=float, default=99, help="Percentile of |data| used to set symmetric color limits")
 parser.add_argument("--zlim", type=float, default=3.8, help="Vertical extent for z-axis (symmetric around 0)")
 parser.add_argument("--fps", type=int, default=12, help="Frames per second")
