@@ -53,6 +53,7 @@ jobs:
             output/khi_Nz512_Ri0.10.nc
             output/khi_Nz512_Ri0.10_2d.nc
           compression-level: 9
+          retention-days: 14
 
   # ---------------------------------------------------------------------------
   # Standalone filter test — no simulation needed, runs in parallel.
@@ -92,6 +93,7 @@ jobs:
           name: gaussian-filter-test
           path: figures/test_gaussian_filter.png
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Update commit status
         if: inputs.head_sha != '' && always()
@@ -178,6 +180,7 @@ jobs:
           name: budget-plots-time-varying
           path: figures/*.png
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload animation
         if: always()
@@ -186,6 +189,7 @@ jobs:
           name: animation-time-varying
           path: animations/*.mp4
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload postprocessing NetCDF files
         if: always()
@@ -194,6 +198,7 @@ jobs:
           name: postprocessing-output-time-varying
           path: postprocessing/output/*_integrated.nc
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Update commit status
         if: inputs.head_sha != '' && always()
@@ -276,6 +281,7 @@ jobs:
           name: budget-plots-fixed-ref
           path: figures/*.png
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload animation (fixed reference)
         if: always()
@@ -284,6 +290,7 @@ jobs:
           name: animation-fixed-ref
           path: animations/*.mp4
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload postprocessing NetCDF files
         if: always()
@@ -292,6 +299,7 @@ jobs:
           name: postprocessing-output-fixed-ref
           path: postprocessing/output/*_integrated.nc
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Update commit status
         if: inputs.head_sha != '' && always()
