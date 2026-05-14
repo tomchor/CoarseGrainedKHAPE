@@ -75,7 +75,9 @@ x = Π_K[x_dim].values
 z = Π_K[z_dim].values
 
 cm = 1 / 2.54
-fig, axes = plt.subplots(2, 2, figsize=(6 * cm, 5 * cm))
+fig_height_cm = 5
+fig_width_cm = 1.2 * fig_height_cm
+fig, axes = plt.subplots(2, 2, figsize=(fig_width_cm * cm, fig_height_cm * cm))
 fig.subplots_adjust(wspace=0, hspace=0, left=0, right=1, bottom=0, top=1)
 
 bx_dim = next(d for d in b.dims if "x" in d)
@@ -90,14 +92,14 @@ blevels = np.linspace(np.nanpercentile(bdata, 2), np.nanpercentile(bdata, 98), 1
 Π_K_vmax = 0.5 * np.nanpercentile(np.abs(Π_K_data), args.clim_percentile)
 Π_A_vmax = np.nanpercentile(np.abs(Π_A_data), args.clim_percentile)
 
-Lx = float(x.max() - x.min())
-z_half = Lx / 2.4  # so total z extent = Lx / 1.2
+z_half = min(float(z.max()), -float(z.min()))  # symmetric available z extent
 x_mid = 0.5 * (float(x.min()) + float(x.max()))
+x_half = 1.2 * z_half                            # each panel has aspect 1.2:1
 quadrants = [
-    (float(x.min()), x_mid,         0.0,    +z_half),  # top-left: left half, upper half
-    (x_mid,          float(x.max()), 0.0,    +z_half), # top-right: right half, upper half
-    (float(x.min()), x_mid,         -z_half, 0.0),     # bottom-left: left half, lower half
-    (x_mid,          float(x.max()),-z_half, 0.0),     # bottom-right: right half, lower half
+    (x_mid - x_half, x_mid,           0.0,    +z_half),  # top-left
+    (x_mid,          x_mid + x_half,  0.0,    +z_half),  # top-right
+    (x_mid - x_half, x_mid,          -z_half, 0.0),      # bottom-left
+    (x_mid,          x_mid + x_half, -z_half, 0.0),      # bottom-right
 ]
 
 for ax, field, (xlo, xhi, zlo, zhi) in zip(axes.flat, panels, quadrants):
