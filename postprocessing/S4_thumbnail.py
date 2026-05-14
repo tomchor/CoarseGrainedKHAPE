@@ -94,12 +94,11 @@ blevels = np.linspace(np.nanpercentile(bdata, 2), np.nanpercentile(bdata, 98), 1
 
 z_half = min(float(z.max()), -float(z.min()))  # symmetric available z extent
 x_mid = 0.5 * (float(x.min()) + float(x.max()))
-x_half = 1.2 * z_half                            # each panel has aspect 1.2:1
 quadrants = [
-    (x_mid - x_half, x_mid,           0.0,    +z_half),  # top-left
-    (x_mid,          x_mid + x_half,  0.0,    +z_half),  # top-right
-    (x_mid - x_half, x_mid,          -z_half, 0.0),      # bottom-left
-    (x_mid,          x_mid + x_half, -z_half, 0.0),      # bottom-right
+    (float(x.min()), x_mid,           0.0,    +z_half),  # top-left
+    (x_mid,          float(x.max()),  0.0,    +z_half),  # top-right
+    (float(x.min()), x_mid,          -z_half, 0.0),      # bottom-left
+    (x_mid,          float(x.max()), -z_half, 0.0),      # bottom-right
 ]
 
 for ax, field, (xlo, xhi, zlo, zhi) in zip(axes.flat, panels, quadrants):
@@ -119,7 +118,7 @@ for ax, field, (xlo, xhi, zlo, zhi) in zip(axes.flat, panels, quadrants):
 
     ax.set_xlim(xlo, xhi)
     ax.set_ylim(zlo, zhi)
-    ax.set_aspect("equal")
+    ax.set_aspect("auto")  # let each panel fill its 1.2:1 cell; data gets stretched
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_xlabel("")
