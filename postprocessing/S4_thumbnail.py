@@ -52,8 +52,8 @@ print(f"Selected ℓ   = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 print("Selecting fields...")
 sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
+ε_Kˢ     = ke_budget["ε_Kˢ"].sel(**sel).squeeze()
 Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()
-exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze()
 Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()
 ε_Aˢ     = ape_budget["ε_Aˢ"].sel(**sel).squeeze()
 #---
@@ -67,7 +67,7 @@ print("Done.")
 
 #+++ Plot
 print("Plotting...")
-panels = [Π_K, Π_A, exchange, ε_Aˢ]
+panels = [ε_Kˢ, Π_K, Π_A, ε_Aˢ]
 
 x_dim = next(d for d in Π_K.dims if "x" in d)
 z_dim = next(d for d in Π_K.dims if "z" in d)
@@ -85,12 +85,9 @@ bx      = b[bx_dim].values
 bz      = b[bz_dim].values
 blevels = np.linspace(np.nanpercentile(bdata, 2), np.nanpercentile(bdata, 98), 12)
 
-Π_K_data     = Π_K.transpose(x_dim, z_dim).values.T
-exchange_data = exchange.transpose(x_dim, z_dim).values.T
-Π_K_vmax = max(np.nanpercentile(np.abs(Π_K_data),     args.clim_percentile),
-               np.nanpercentile(np.abs(exchange_data), args.clim_percentile))
-
+Π_K_data = Π_K.transpose(x_dim, z_dim).values.T
 Π_A_data = Π_A.transpose(x_dim, z_dim).values.T
+Π_K_vmax = 0.5 * np.nanpercentile(np.abs(Π_K_data), args.clim_percentile)
 Π_A_vmax = np.nanpercentile(np.abs(Π_A_data), args.clim_percentile)
 
 Lx = float(x.max() - x.min())
@@ -106,14 +103,15 @@ quadrants = [
 for ax, field, (xlo, xhi, zlo, zhi) in zip(axes.flat, panels, quadrants):
     data = field.transpose(x_dim, z_dim).values.T
 
-    is_dissipation = field is ε_Aˢ
+    is_dissipation = field is ε_Kˢ or field is ε_Aˢ
     if is_dissipation:
         cmap = "inferno"
         vmin = 0
         vmax = np.nanpercentile(data, args.clim_percentile)
     else:
         cmap = "RdBu_r"
-        vmin, vmax = -Π_K_vmax, Π_K_vmax
+        vfield_max = Π_K_vmax if field is Π_K else Π_A_vmax
+        vmin, vmax = -vfield_max, vfield_max
 
     ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
 
