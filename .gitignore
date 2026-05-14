@@ -8,6 +8,8 @@ slurm-*.out
 *.mp4
 *.pdf
 *.png
+*.jpg
+*.jpeg
 */logs/*out
 */logs/*log
 *.err
