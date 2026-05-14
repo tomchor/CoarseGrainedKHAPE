@@ -53,7 +53,7 @@ jobs:
             output/khi_Nz512_Ri0.10.nc
             output/khi_Nz512_Ri0.10_2d.nc
           compression-level: 9
-          retention-days: 14
+          retention-days: 1
 
   # ---------------------------------------------------------------------------
   # Standalone filter test — no simulation needed, runs in parallel.
