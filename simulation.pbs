@@ -24,11 +24,13 @@ module li
 echo $CUDA_VISIBLE_DEVICES
 
 NZ=${NZ:-1024}
+SAVE_TENSORS=${SAVE_TENSORS:-0}
+[ "$SAVE_TENSORS" = "1" ] && TENSOR_FLAG="--save_tensors" || TENSOR_FLAG=""
 
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
-juliaup default 1.12
-time julia --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
+juliaup add 1.12.4   # Julia 1.12.6 has a GPU-codegen regression (InvalidIRError in gpu_fill_kernel!); 1.12.4 works
+time julia +1.12.4 --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ $TENSOR_FLAG 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
 
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.log
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.out

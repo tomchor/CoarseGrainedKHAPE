@@ -5,7 +5,7 @@ using Printf
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubfilterStressTensor, KineticEnergyCrossScaleFlux
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, subfilter_stress_tensor, KineticEnergyCrossScaleFlux
 using Oceanostics.ProgressMessengers
 @info "Finished loading packages"
 
@@ -253,7 +253,7 @@ for ℓ in filter_ℓs
         filt = ψ -> GaussianFilter(ψ; dims=(1, 3), σ, boundary=:edge, N)
         ū = Field(filt(u)); w̄ = Field(filt(w))
         S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))          # strain of the filtered velocity
-        τ = SubfilterStressTensor(model; σ, dims=(1, 3), boundary=:edge, N)  # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
+        τ = subfilter_stress_tensor(model; σ, dims=(1, 3), boundary=:edge, N)  # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
         push!(_ke_pairs,
               Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃), Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
               Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃), Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
