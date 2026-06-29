@@ -104,9 +104,9 @@ bash submit_validation_run.sh NZ=1024
 
 `submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
-Π_K, and the strain/stress tensors offline and compares them against the simulation's online
-diagnostics (`postprocessing/validation/inv01`–`inv04`), writing comparison figures to `figures/` and
-online-vs-offline animations to `animations/`.
+Π_K, the strain/stress tensors, and the SFS KE dissipation ε_Kˢ offline and compares them against the
+simulation's online diagnostics (`postprocessing/validation/inv01`–`inv05`), writing comparison figures
+to `figures/` and online-vs-offline animations to `animations/`.
 
 ### Run post-processing only
 

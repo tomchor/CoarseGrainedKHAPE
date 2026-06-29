@@ -11,7 +11,7 @@ from matplotlib.animation import FuncAnimation, FFMpegWriter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities)
 from src.aux02_ke_functions import (calculate_sfs_stress_tensor, calculate_strain_tensor,
-                                    calculate_cross_scale_ke_flux)
+                                    calculate_cross_scale_ke_flux, calculate_sfs_ke_dissipation)
 from src.aux03_plotting import run_label
 #---
 
@@ -24,8 +24,8 @@ parser = argparse.ArgumentParser(description="Animate online (simulation-time) v
                                              "one row per filter scale, columns = online | offline | difference.")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online widths")
-parser.add_argument("--field", default="Π_K", choices=["Π_K", "u", "w", "b"],
-                    help="Quantity to compare: cross-scale KE transfer Π_K (default) or a filtered field")
+parser.add_argument("--field", default="Π_K", choices=["Π_K", "ε_Ks", "u", "w", "b"],
+                    help="Quantity to compare: cross-scale KE transfer Π_K (default), SFS KE dissipation ε_Ks, or a filtered field")
 parser.add_argument("--z-window", type=float, default=6.0, help="Half-height of the z window (in units of h) shown in the maps")
 parser.add_argument("--fps", type=int, default=12, help="Frames per second")
 parser.add_argument("--dpi", type=int, default=150, help="DPI for output video")
@@ -40,7 +40,7 @@ ANIMATIONS.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 field = args.field
-field_tag = {"Π_K": "Pi_K", "u": "u", "w": "w", "b": "b"}[field]
+field_tag = {"Π_K": "Pi_K", "ε_Ks": "eps_Ks", "u": "u", "w": "w", "b": "b"}[field]
 
 
 def online_name(name, ℓ):
@@ -80,8 +80,10 @@ print(f"Animating {len(times)} frames (of {len(times_all)} available)")
 filtered_dimensions = ["x_caa", "z_aac"]
 tensor_dimensions   = ("x_caa", "z_aac")
 
-if field == "Π_K":
+if field in ("Π_K", "ε_Ks"):
     uᵢ = condense_uw_velocities(ds, indices=(1, 3))["uᵢ"]   # drops u,w from ds; keeps everything else
+if field == "ε_Ks":
+    S = calculate_strain_tensor(uᵢ, dimensions=tensor_dimensions)   # full-flow strain (scale-independent)
 
 panels = {}   # ℓ -> dict(online=, offline=, diff=)
 print(f"Building online/offline cubes for field '{field}'...")
@@ -97,6 +99,8 @@ for ℓ in args.filter_scales:
         τ  = calculate_sfs_stress_tensor(uᵢ, gf, filter_dims=filtered_dimensions, filtered_u_i=ūᵢ)
         S̄  = calculate_strain_tensor(ūᵢ, dimensions=tensor_dimensions)
         off = calculate_cross_scale_ke_flux(τ, S̄)
+    elif field == "ε_Ks":
+        off = calculate_sfs_ke_dissipation(S, ds.ν, gf, filter_dims=filtered_dimensions)
     else:
         off = gf.apply(ds[field], dims=filtered_dimensions)
 
@@ -149,15 +153,17 @@ def frame_array(da, frame):
     return da.isel(time=frame).transpose("z_aac", "x_caa").values
 
 
+positive = field == "ε_Ks"   # ε_Kˢ is non-negative: sequential map, zero-based limits for online/offline
 meshes = []
 for i, ℓ in enumerate(scales):
     p = panels[ℓ]
     vmax, dmax = clim[ℓ]["vmax"], clim[ℓ]["dmax"]
-    specs = [("online", -vmax, vmax), ("offline", -vmax, vmax), ("diff", -dmax, dmax)]
+    fmap, fmin = ("magma", 0) if positive else ("RdBu_r", -vmax)
+    specs = [("online", fmin, vmax, fmap), ("offline", fmin, vmax, fmap), ("diff", -dmax, dmax, "RdBu_r")]
     row_meshes = []
-    for k, (key, vmin, vmx) in enumerate(specs):
+    for k, (key, vmin, vmx, cmap) in enumerate(specs):
         ax = axes[i, k]
-        im = ax.pcolormesh(x, z, frame_array(p[key], 0), cmap="RdBu_r", vmin=vmin, vmax=vmx,
+        im = ax.pcolormesh(x, z, frame_array(p[key], 0), cmap=cmap, vmin=vmin, vmax=vmx,
                            shading="nearest", rasterized=True)
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
         if i == 0:

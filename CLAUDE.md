@@ -82,7 +82,7 @@ Sequential numbered scripts (01-06), each reading the previous step's output. `0
 
 `sweep*` scripts are the sweep variant (parameter sweep over filter scales): `sweep1_filter_fields.py` filters, `sweep2_energy_transfer.py` computes transfer, `sweep3_plot_transfer_spectrum.py` plots spectra.
 
-`postprocessing/validation/` holds the online-vs-offline comparison scripts (`inv01_compare_filters.py`, `inv02_compare_ke_transfer.py`, `inv03_compare_tensor.py`): they recompute the filtered fields, Π_K, and the SFS stress/strain tensors offline and compare them against the simulation's online diagnostics. They expect a run with `--save_tensors`.
+`postprocessing/validation/` holds the online-vs-offline comparison scripts, each of which recomputes a quantity offline and compares it against the simulation's online output: `inv01_compare_filters.py` (filtered fields), `inv02_compare_ke_transfer.py` (Π_K), `inv03_compare_tensor.py` (the S̄/τ tensor components), and `inv05_compare_dissipation.py` (SFS KE dissipation ε_Kˢ). `inv04_animate_comparison.py` makes the animated online | offline | difference version for a chosen `--field` (Π_K, ε_Ks, or a filtered field). `validation.pbs` runs them all. Only the tensor-component comparison (`inv03`) needs a `--save_tensors` run; Π_K and ε_Kˢ are always written.
 
 Standalone visualization scripts (not part of the numbered pipeline):
 - `plot1_panels.py` -- 4-panel snapshot of local SFS budget fields
