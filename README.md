@@ -52,7 +52,7 @@ Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files direc
 
 Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are optional and fall back to their defaults if omitted.
 
-### Run everything (simulation + post-processing + sweep)
+### Run everything (simulation + post-processing + sweep, with optional validation and plots)
 
 ```bash
 # Default resolution (Nz=2048), time-varying reference profile
@@ -63,9 +63,18 @@ bash submit_all_pbs.sh NZ=1024
 
 # Custom resolution with fixed-in-time reference profile
 bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
+
+# Add the online-vs-offline validation and/or the final plots (independently toggleable)
+bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors
+bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_transfer
+bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
 Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
+
+Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
+- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/`) and animations (`animations/`).
+- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
 
 ### Run simulation only
 

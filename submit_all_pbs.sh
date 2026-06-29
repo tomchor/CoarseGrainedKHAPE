@@ -1,23 +1,51 @@
 #!/bin/bash
-# Submit simulation and post-processing as a chained PBS job pair.
-# Post-processing only runs if simulation succeeds (afterok dependency).
+# Submit the simulation and post-processing as chained PBS jobs (afterok dependencies);
+# each stage only runs if the previous one succeeds. Optional validation and plotting stages.
 #
-# Usage: bash submit_all_pbs.sh [NZ=2048] [FIXED_REF=0]
+#   simulation → budgeting_filter → budgeting → sweep_filter → sweep_transfer   (always)
+#   + validation  (online-vs-offline figures + animations; parallel after sim)  (VALIDATE=1)
+#   + plots       (plot2 transfer spectrum, plot3 budgets, plot4 panels)        (PLOTS=1)
+#
+# Usage: bash submit_all_pbs.sh [NZ=2048] [FIXED_REF=0] [VALIDATE=0] [PLOTS=0]
 #   NZ         vertical resolution
 #   FIXED_REF  use fixed-in-time reference profile: 0 or 1
+#   VALIDATE   also run the online-vs-offline validation (runs the simulation with --save_tensors
+#              so the strain/stress tensor comparison works): 0 or 1
+#   PLOTS      also run the final plots after sweep_transfer: 0 or 1
 #
 # To run post-processing alone:
 #   bash postprocessing/submit_budgeting.sh [NZ=2048] [FIXED_REF=0|1|both]
 
-NZ=2048; FIXED_REF=0
-for arg in "$@"; do case $arg in NZ=*) NZ="${arg#*=}";; FIXED_REF=*) FIXED_REF="${arg#*=}";; esac; done
+NZ=2048; FIXED_REF=0; VALIDATE=0; PLOTS=0
+for arg in "$@"; do case $arg in
+  NZ=*)        NZ="${arg#*=}";;
+  FIXED_REF=*) FIXED_REF="${arg#*=}";;
+  VALIDATE=*)  VALIDATE="${arg#*=}";;
+  PLOTS=*)     PLOTS="${arg#*=}";;
+esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
+[ "$VALIDATE" = "1" ] && SAVE_TENSORS=1 || SAVE_TENSORS=0   # validation needs the per-scale tensors
 
 SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
                -o logs/kelvin_helmholtz_${NZ}.log \
                -e logs/kelvin_helmholtz_${NZ}.log \
-               -v NZ=$NZ simulation.pbs)
-echo "Submitted simulation (Nz=$NZ): $SIM_JOB"
+               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS simulation.pbs)
+echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS): $SIM_JOB"
+
+# Optional validation — parallel branch, runs after the simulation succeeds
+if [ "$VALIDATE" = "1" ]; then
+    cd postprocessing/validation
+    mkdir -p logs
+    VAL_NAME="validation_Nz${NZ}_Ri0.10"
+    VAL_JOB=$(qsub -N "$VAL_NAME" \
+                   -o "logs/${VAL_NAME}.log" \
+                   -e "logs/${VAL_NAME}.log" \
+                   -v NZ=$NZ \
+                   -W depend=afterok:$SIM_JOB \
+                   validation.pbs)
+    echo "Submitted validation (depends on $SIM_JOB): $VAL_JOB"
+    cd ../..
+fi
 
 cd postprocessing
 
@@ -57,4 +85,15 @@ ST_JOB=$(qsub -N "$ST_NAME" \
               sweep_transfer.pbs)
 echo "Submitted sweep transfer (depends on $SF_JOB): $ST_JOB"
 
+# Optional final plots — after sweep_transfer (which is downstream of budgeting, so both are done)
+if [ "$PLOTS" = "1" ]; then
+    PLOTS_NAME="plots_Nz${NZ}_Ri0.10"
+    PLOTS_JOB=$(qsub -N "$PLOTS_NAME" \
+                     -o "logs/${PLOTS_NAME}.log" \
+                     -e "logs/${PLOTS_NAME}.log" \
+                     -v NZ=$NZ \
+                     -W depend=afterok:$ST_JOB \
+                     plots.pbs)
+    echo "Submitted final plots (depends on $ST_JOB): $PLOTS_JOB"
+fi
 cd ..
