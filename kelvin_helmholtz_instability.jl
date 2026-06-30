@@ -2,12 +2,15 @@
 using Oceananigans
 using CairoMakie
 using Printf
+using Random
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics
 using Oceanostics.ProgressMessengers
+
 @info "Finished loading packages"
+Random.seed!(546)
 
 include("utils.jl")
 
