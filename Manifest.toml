@@ -1398,11 +1398,11 @@ version = "0.110.5"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "1aec196df6b5d70d6add9884d3e340add15c5979"
+git-tree-sha1 = "65ef3b254118a73cece4737be15be374f049491e"
 repo-rev = "tc/sfs-dissipation"
 repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
-version = "0.17.1"
+version = "0.17.2"
 
 [[deps.OffsetArrays]]
 git-tree-sha1 = "117432e406b5c023f665fa73dc26e79ec3630151"
