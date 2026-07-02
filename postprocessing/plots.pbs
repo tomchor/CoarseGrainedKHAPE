@@ -1,0 +1,37 @@
+#!/bin/bash -l
+#PBS -A UMCP0028
+#PBS -N plots_Nz2048_Ri0.10
+#PBS -o logs/plots_Nz2048_Ri0.10.log
+#PBS -e logs/plots_Nz2048_Ri0.10.log
+# Note: job name above is a default; qalter below updates it at runtime based on NZ
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
+#PBS -l walltime=02:00:00
+#PBS -q casper
+#PBS -M tchor@umd.edu
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=8:mem=128GB:ngpus=0
+#PBS -l job_priority=regular
+
+# Final figures from the post-processed budgets (budgeting + sweep pipelines must have run).
+set -eo pipefail
+
+NZ=${NZ:-2048}
+SIM=khi_Nz${NZ}_Ri0.10
+PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
+JOB_NAME="plots_Nz${NZ}_Ri0.10"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
+
+module li
+module --force purge
+module load ncarenv/25.10
+module li
+
+echo $CUDA_VISIBLE_DEVICES
+
+LOG=logs/${JOB_NAME}.out
+time $PYTHON -u plot2_transfer_spectrum.py --filename output/${SIM}.nc 2>&1 | tee    $LOG  # needs sweep output
+time $PYTHON -u plot3_budgets.py           --filename output/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget integrated
+time $PYTHON -u plot4_panels.py            --filename output/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget fields
+
+qstat -f $PBS_JOBID >> $LOG
