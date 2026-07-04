@@ -53,7 +53,7 @@ jobs:
             output/khi_Nz512_Ri0.10.nc
             output/khi_Nz512_Ri0.10_2d.nc
           compression-level: 9
-          retention-days: 1
+          retention-days: 2
 
   # ---------------------------------------------------------------------------
   # Standalone filter test — no simulation needed, runs in parallel.
@@ -93,7 +93,7 @@ jobs:
           name: gaussian-filter-test
           path: figures/test_gaussian_filter.png
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 20
 
       - name: Update commit status
         if: inputs.head_sha != '' && always()
@@ -180,7 +180,7 @@ jobs:
           name: budget-plots-time-varying
           path: figures/*.png
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 20
 
       - name: Upload animation
         if: always()
@@ -281,7 +281,7 @@ jobs:
           name: budget-plots-fixed-ref
           path: figures/*.png
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 20
 
       - name: Upload animation (fixed reference)
         if: always()
