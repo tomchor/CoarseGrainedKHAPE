@@ -10,7 +10,7 @@ from src.aux00_utils import load_dataset_and_grid, filter_fields
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for SFS budgets")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--filter-scales", type=float, nargs="+", default=[0.2, 0.5, 1, 2, 4, 7, 14], help="Filter length scales")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter length scales (must match the simulation's online filter_ℓs, since the SFS KE budget reads Π_K from the online output)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)

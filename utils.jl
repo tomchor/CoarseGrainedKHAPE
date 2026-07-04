@@ -1,6 +1,7 @@
 # Utility functions for khape simulations
 
-using CUDA: devices, device!, functional, totalmem, name, available_memory, memory_status
+import CUDA  # for version-robust qualified access (CUDA.free_memory etc.)
+using CUDA: devices, device!, functional, totalmem, name
 
 #+++ Grid sizing functions
 function closest_factor_number(primes::NTuple{3, Int}, target::Int)
@@ -61,7 +62,7 @@ end
 #+++ GPU Status Functions
 function get_gpu_memory_usage(gpu_device)
     total_mem = totalmem(gpu_device) |> Float64
-    free_mem  = available_memory()
+    free_mem  = isdefined(CUDA, :free_memory) ? CUDA.free_memory() : CUDA.available_memory()  # CUDA.jl v6 renamed available_memory → free_memory
     used_mem  = total_mem - free_mem
     return total_mem, free_mem, used_mem
 end
@@ -108,7 +109,14 @@ function show_gpu_status()
         println("  [$(bar)] $(round(usage_percent, digits=1))%")
         println()
         println("Double check with CUDA's native function:")
-        memory_status()
+        if isdefined(CUDA, :memory_status)
+            CUDA.memory_status()    # CUDA.jl ≤ 5 native pool report
+        elseif isdefined(CUDA, :pool_status)
+            CUDA.pool_status()      # CUDA.jl v6 renamed memory_status → pool_status
+        else                        # last-resort numeric fallback
+            free_gb = CUDA.free_memory() / 1024^3
+            println("  Device memory: $(round(free_gb, digits=2)) GiB free / $(round(total_gb, digits=2)) GiB total")
+        end
     end
 
     println("=" ^ 70)

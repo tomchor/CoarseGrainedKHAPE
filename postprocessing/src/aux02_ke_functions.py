@@ -254,7 +254,8 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_scales,
-                              ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18):
+                              ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18,
+                              include_pi_k=True):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -276,12 +277,17 @@ def calculate_energy_transfer(ds, filter_scales,
         with ``rho_sorted``.
     n_workers : int
         Number of threads for APE sorting (ThreadPoolExecutor).
+    include_pi_k : bool
+        If True (default) also compute the cross-scale KE flux Π_K. The KH budget
+        pipeline computes Π_K online and passes include_pi_k=False to skip the
+        offline recompute (the sweep keeps the default and still gets Π_K).
 
     Returns
     -------
     xr.Dataset
-        Dataset with Π_K, Π_A, the SFS APE->KE exchange term and the coarse
-        conversion w̄·b̄ᵣ (plus their volume integrals) indexed by filter_scale.
+        Dataset with Π_A, the SFS APE->KE exchange term and the coarse conversion
+        w̄·b̄ᵣ (plus their volume integrals) indexed by filter_scale — and Π_K (with
+        ∫Π_K dV) when include_pi_k=True.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
     tensor_dimensions   = ("x_caa", "z_aac")
@@ -318,14 +324,18 @@ def calculate_energy_transfer(ds, filter_scales,
         ds_filt_ℓ["LxLy"] = ds["LxLy"]
         ds_filt_ℓ.attrs.update(ds.attrs)
 
-        # --- KE cross-scale transfer ---
-        # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
-        sfs_stress_tensor = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
-                                                        filter_dims=filtered_dimensions,
-                                                        filtered_u_i=ds_filt_ℓ["ūᵢ"])
-        strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"], dimensions=tensor_dimensions)
-        # Π_K = -τⁱʲ : S̄ⁱʲ
-        Π_K = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
+        # --- KE cross-scale transfer (Π_K) ---
+        # Computed online by the simulation; skipped here when include_pi_k=False so the offline
+        # pipeline does not redundantly recompute it (the SFS KE budget reads the online Π_K).
+        ke_vars = {}
+        if include_pi_k:
+            # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ ;  Π_K = -τⁱʲ : S̄ⁱʲ
+            sfs_stress_tensor = calculate_sfs_stress_tensor(ds_full["uᵢ"], gaussian_filter,
+                                                            filter_dims=filtered_dimensions,
+                                                            filtered_u_i=ds_filt_ℓ["ūᵢ"])
+            strain_rate_tensor_l = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"], dimensions=tensor_dimensions)
+            Π_K = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
+            ke_vars = {"Π_K": Π_K, "∫Π_K dV": integrate(Π_K, dV)}
 
         # --- APE->KE conversion terms ---
         # SFS exchange:        filter(w·b_r) - filter(w)·filter(b_r)
@@ -333,10 +343,10 @@ def calculate_energy_transfer(ds, filter_scales,
         w_bar   = ds_filt_ℓ["ūᵢ"].sel(i=3)
         b_r_bar = gaussian_filter.apply(b_r, dims=filtered_dimensions)
         ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(w_full, b_r,
-                                                                gaussian_filter,
-                                                                filter_dims=filtered_dimensions,
-                                                                filtered_w=w_bar,
-                                                                filtered_b=b_r_bar)
+                                                               gaussian_filter,
+                                                               filter_dims=filtered_dimensions,
+                                                               filtered_w=w_bar,
+                                                               filtered_b=b_r_bar)
         wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄ᵣ")
 
         # --- APE cross-scale transfer ---
@@ -353,21 +363,20 @@ def calculate_energy_transfer(ds, filter_scales,
                                               filtered_density=ds_filt_ℓ.ρ̄,
                                               filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
 
-        int_Π_K                = integrate(Π_K, dV)
         int_Π_A                = integrate(Π_A, dV)
         int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
         int_wbar_b_r_bar       = integrate(wbar_b_r_bar, dV)
 
-        transfer_list.append(xr.Dataset({
-            "Π_K":                  Π_K,
+        transfer_vars = {
             "Π_A":                  Π_A,
             "SFS APE->KE exchange": ape_to_ke_exchange,
             "w̄·b̄ᵣ":                 wbar_b_r_bar,
-            "∫Π_K dV":              int_Π_K,
             "∫Π_A dV":              int_Π_A,
             "∫(SFS APE->KE) dV":    int_ape_to_ke_exchange,
             "∫w̄·b̄ᵣ dV":             int_wbar_b_r_bar,
-        }))
+            **ke_vars,
+        }
+        transfer_list.append(xr.Dataset(transfer_vars))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
                                name="filter_scale")

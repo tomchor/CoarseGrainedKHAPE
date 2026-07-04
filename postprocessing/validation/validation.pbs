@@ -1,0 +1,49 @@
+#!/bin/bash -l
+#PBS -A UMCP0028
+#PBS -N validation_Nz2048_Ri0.10
+#PBS -o logs/validation_Nz2048_Ri0.10.log
+#PBS -e logs/validation_Nz2048_Ri0.10.log
+# Note: job name above is a default; qalter below updates it at runtime based on NZ
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
+#PBS -l walltime=08:00:00
+#PBS -q casper
+#PBS -M tchor@umd.edu
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=18:mem=256GB:ngpus=0
+#PBS -l job_priority=regular
+
+set -eo pipefail
+
+NZ=${NZ:-2048}
+SIM=Nz${NZ}_Ri0.10
+FILE=output/khi_${SIM}.nc
+PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
+JOB_NAME="validation_Nz${NZ}_Ri0.10"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
+
+# Clear the environment from any previously loaded modules
+module li
+module --force purge
+module load ncarenv/25.10   # provides ffmpeg (for the comparison animations)
+module li
+
+echo $CUDA_VISIBLE_DEVICES
+
+LOG=logs/${JOB_NAME}.out
+
+# Static online-vs-offline comparison figures
+time $PYTHON -u inv01_compare_filters.py      --filename $FILE 2>&1 | tee    $LOG
+time $PYTHON -u inv02_compare_ke_transfer.py  --filename $FILE 2>&1 | tee -a $LOG
+time $PYTHON -u inv03_compare_tensor.py --filename $FILE --tensor strain --filter-scale 1 2>&1 | tee -a $LOG
+time $PYTHON -u inv03_compare_tensor.py --filename $FILE --tensor strain --filter-scale 7 2>&1 | tee -a $LOG
+time $PYTHON -u inv03_compare_tensor.py --filename $FILE --tensor stress --filter-scale 1 2>&1 | tee -a $LOG
+time $PYTHON -u inv03_compare_tensor.py --filename $FILE --tensor stress --filter-scale 7 2>&1 | tee -a $LOG
+time $PYTHON -u inv05_compare_dissipation.py   --filename $FILE 2>&1 | tee -a $LOG
+
+# Online-vs-offline comparison animations (online | offline | difference over time)
+time $PYTHON -u inv04_animate_comparison.py --filename $FILE --field Π_K  --max-frames 100 2>&1 | tee -a $LOG
+time $PYTHON -u inv04_animate_comparison.py --filename $FILE --field ε_Ks --max-frames 100 2>&1 | tee -a $LOG
+time $PYTHON -u inv04_animate_comparison.py --filename $FILE --field w    --max-frames 100 2>&1 | tee -a $LOG
+
+qstat -f $PBS_JOBID >> $LOG

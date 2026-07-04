@@ -11,7 +11,7 @@ from src.aux02_ke_functions import calculate_energy_transfer
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE transfer terms")
+parser = argparse.ArgumentParser(description="Calculate cross-scale APE transfer (Π_A) and APE↔KE exchange terms (Π_K is computed online)")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
@@ -55,11 +55,14 @@ print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
+# Π_K (cross-scale KE transfer) is computed online by the simulation, so it is skipped here
+# (include_pi_k=False); this step computes the APE cross-scale transfer Π_A and the APE↔KE exchange.
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
                                             rho_sorted=ds_sorted.rho_sorted,
                                             dz_sorted=ds_sorted.dz_sorted,
-                                            n_workers=n_workers)
+                                            n_workers=n_workers,
+                                            include_pi_k=False)
 print("\nDone!")
 #---
 

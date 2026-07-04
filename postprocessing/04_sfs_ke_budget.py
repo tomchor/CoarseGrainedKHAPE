@@ -4,12 +4,10 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
-    calculate_strain_tensor,
-    calculate_sfs_ke_dissipation,
     calculate_sfs_ke_tendency,
 )
 #---
@@ -66,18 +64,15 @@ b_r = calculate_b_r(ds_full.ρ, ds_sorted.rho_sorted)
 print("Done!")
 #---
 
-#+++ Calculate strain tensor of the full (unfiltered) flow  [scale-independent]
-print("\n" + "="*60)
-print("Calculating strain tensor of the full (unfiltered) flow...")
-strain_rate_tensor = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
-print("Done!")
-#---
-
 #+++ Loop over filter scales and calculate budget terms
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
+# Π_K and ε_Kˢ are computed online by the simulation (no offline recompute). Map a filter scale to
+# its sim-output variable name, matching the Julia Symbol("<var>_ℓ$(ℓ)"). Both are reference-
+# independent, so the same online fields serve the time-varying and fixed-reference budgets.
+def online_name(var, ℓ):
+    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
 
 dV = ds_full.dV
 budget_list = []
@@ -98,11 +93,6 @@ for ℓ in filter_scales:
     sfs_stress_tensor_trace = sum(sfs_stress_tensor.sel(i=k, j=k) for k in i_vals)
     sfs_ke_density = sfs_stress_tensor_trace / 2
 
-    # ε<ℓ = 2ρ₀ν τ(S, S) = 2ρ₀ν Σᵢⱼ [ filter(Sⁱʲ Sⁱʲ) - filter(Sⁱʲ)² ]   [m² s⁻³]
-    print("  SFS KE dissipation...")
-    sfs_ke_dissipation = calculate_sfs_ke_dissipation(strain_rate_tensor, ds.ν, gaussian_filter,
-                                                      filter_dims=filtered_dimensions)
-
     print("  APE->KE exchange term...")
     b_r_filt = gaussian_filter.apply(b_r, dims=filtered_dimensions)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
@@ -119,11 +109,19 @@ for ℓ in filter_scales:
 
     int_dKE_dt             = integrate(dKE_dt, dV)
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
-    int_sfs_ke_dissipation = integrate(sfs_ke_dissipation.reindex(time=dKE_dt.time), dV)
 
-    Π_K_ℓ     = energy_transfer["Π_K"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    int_Π_K_ℓ = energy_transfer["∫Π_K dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    residual  = -int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange - int_sfs_ke_dissipation
+    # Π_K and ε_Kˢ from the online sim output, integrated on the budget (padded) grid so they are
+    # consistent with the other terms (the padding region is ≈0 for both).
+    for var in ("Π_K", "ε_Ks"):
+        if online_name(var, ℓ) not in ds:
+            raise KeyError(f"Online field '{online_name(var, ℓ)}' not in sim output; the budget "
+                           f"filter scales must match the simulation's online filter_ℓs (got ℓ={ℓ}).")
+    Π_K_ℓ              = ds[online_name("Π_K", ℓ)]
+    sfs_ke_dissipation = ds[online_name("ε_Ks", ℓ)]
+    int_Π_K_ℓ              = integrate(Π_K_ℓ, dV)
+    int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
+    residual  = (-int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange
+                 - int_sfs_ke_dissipation.reindex(time=dKE_dt.time))
 
     budget_ℓ = xr.Dataset({
         # Local KE fields
