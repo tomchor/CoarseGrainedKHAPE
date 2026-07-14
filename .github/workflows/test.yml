@@ -43,7 +43,7 @@ jobs:
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
       - name: Run simulation (Nz=512, CPU)
-        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3 --filter_ls 1 7 15
+        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3
 
       - name: Upload simulation output
         uses: actions/upload-artifact@v4
@@ -148,7 +148,7 @@ jobs:
 
       - name: Run postprocessing pipeline
         working-directory: postprocessing
-        run: N_WORKERS=2 bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 15
+        run: N_WORKERS=2 bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
 
       - name: Run budget closure tests
         id: pytest
@@ -249,7 +249,7 @@ jobs:
 
       - name: Run postprocessing pipeline (fixed reference)
         working-directory: postprocessing
-        run: bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 15 --fixed-reference
+        run: bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --fixed-reference
 
       - name: Run budget closure tests (fixed reference)
         id: pytest
