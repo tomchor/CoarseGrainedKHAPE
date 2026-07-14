@@ -346,10 +346,10 @@ def calculate_energy_transfer(ds, filter_scales,
         # (cf. b̄ᵣ = filter(b_r) = -(g/ρ₀)(ρ̄ - filter(ρ_ref)), which filters the reference too)
         b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), rho_sorted)
         ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(w_full, b_r,
-                                                                gaussian_filter,
-                                                                filter_dims=filtered_dimensions,
-                                                                filtered_w=w_bar,
-                                                                filtered_b=b_r_l)
+                                                               gaussian_filter,
+                                                               filter_dims=filtered_dimensions,
+                                                               filtered_w=w_bar,
+                                                               filtered_b=b_r_l)
         wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄ᵣ")
 
         # --- APE cross-scale transfer ---
