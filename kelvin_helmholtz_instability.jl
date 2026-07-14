@@ -65,6 +65,12 @@ let s = ArgParseSettings()
             required = false
             default = 0.05
 
+        "--filter_ls"
+            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields, Πₖ, ε_Kˢ). The offline budget pipeline's --filter-scales must be a subset of these (default: 1 7)"
+            arg_type = Int
+            nargs = '+'
+            default = [1, 7]
+
         "--save_tensors"
             help = "Also output the strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale (for online-vs-offline validation). These are full 3D fields, so off by default to keep production output lean."
             action = :store_true
@@ -72,8 +78,10 @@ let s = ArgParseSettings()
     global parsed_args = parse_args(s, as_symbols=true)
 end
 # Keep the save_tensors control flag out of `params` (it is a Bool, which NetCDF can't store as a
-# global attribute, and it is not a physical parameter).
+# global attribute, and it is not a physical parameter). Likewise filter_ls is a vector (the online
+# filter scales, encoded in the output variable names as `_ℓ<ℓ>`), so keep it out of `params` too.
 save_tensors = pop!(parsed_args, :save_tensors)
+filter_ls = pop!(parsed_args, :filter_ls)
 params = (; parsed_args...)
 #---
 
@@ -223,7 +231,7 @@ vorticity = Field(∂z(u) - ∂x(w))
 
 #+++ Gaussian-filtered u, v, w, b at multiple filter scales for subfilter-scale analysis
 # ℓ is the FWHM of the Gaussian kernel; σ = ℓ / (2√(2 ln 2)) is the std dev passed to GaussianFilter
-filter_ℓs = (1, 7)
+filter_ℓs = Tuple(filter_ls)  # from --filter_ls (default (1, 7))
 _FWHM_to_σ(ℓ) = ℓ / (2 * sqrt(2 * log(2)))
 _fields = (u=u_center, v=v_center, w=w_center, b=b)
 _filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => GaussianFilter(f; dims=(1, 3), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
