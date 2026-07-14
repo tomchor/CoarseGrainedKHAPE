@@ -245,25 +245,19 @@ filtered_fields = (; _filt_pairs...)
 # where ε is the total viscous dissipation (KineticEnergyEquation.DissipationRate, defined above) and
 # ε̄ is the dissipation of the filtered flow (CoarseGrainedKineticEnergyDissipationRate). This equals
 # 2ν Σ[filter(SⁱʲSⁱʲ) - filter(Sⁱʲ)²] ≥ 0, exactly what calculate_sfs_ke_dissipation computes offline
-# in postprocessing/src/aux02_ke_functions.py. The Gaussian filter uses periodic x, edge-extended z,
-# and 2σ truncation (Oceanostics' default). The offline post-processing filter still truncates at 4σ
-# (scipy gaussian_filter1d's default), so the two currently differ — see _filter_N below for why.
-# 2D x–z runs (v ≡ 0) so dims=(1, 3); both are per unit mass (m² s⁻³).
+# in postprocessing/src/aux02_ke_functions.py. The Gaussian filter reproduces the offline post-
+# processing filter (periodic x, edge-extended z, 4σ truncation — scipy gaussian_filter1d's default;
+# Oceanostics truncates at 2σ). 2D x–z runs (v ≡ 0) so dims=(1, 3); both are per unit mass (m² s⁻³).
 to_center(ψ) = @at (Center, Center, Center) ψ
 
-# Per-direction Gaussian stencil widths at 2σ truncation (radius = ⌊2σ/Δ + ½⌋ cells). This is
-# Oceanostics' own default; we use it (rather than scipy's 4σ) so that large scales fit within the
-# periodic x-direction: Oceanostics requires the stencil radius to span at most one period (N ≤ 2Nx+1),
-# and at 4σ a scale like ℓ=15 (4σ ≈ 25.5h) overflows the Lx ≈ 14.1h domain. NOTE: the offline scipy
-# filter still truncates at 4σ, so online and offline no longer match exactly — a deliberate, temporary
-# divergence; reconciling the offline side (and the budget-closure consistency) is TODO.
-_filter_N(σ) = (2 * max(1, floor(Int, 2σ / minimum_xspacing(grid) + 0.5)) + 1,
-                2 * max(1, floor(Int, 2σ / minimum_zspacing(grid) + 0.5)) + 1)
+# Per-direction Gaussian stencil widths matching scipy's truncate=4 (radius = ⌊4σ/Δ + ½⌋ cells).
+_filter_N(σ) = (2 * max(1, floor(Int, 4σ / minimum_xspacing(grid) + 0.5)) + 1,
+                2 * max(1, floor(Int, 4σ / minimum_zspacing(grid) + 0.5)) + 1)
 
 _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
     σ = _FWHM_to_σ(ℓ)
-    gf = GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))   # reusable filter (2σ truncation; see _filter_N)
+    gf = GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))   # reusable, matched-to-offline filter
 
     Πₖ   = KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
     ε_Ks = Field(gf(ε)) - CoarseGrainedKineticEnergyDissipationRate(model, gf)   # filter(ε) - ε̄
