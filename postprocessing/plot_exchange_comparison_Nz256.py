@@ -31,11 +31,14 @@ OUTDIR = HERE / "output"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 filtered_dimensions = ["x_caa", "z_aac"]
 scales = [1.0, 7.0]
+times = [10, 30, 50]          # times to analyse; everything downstream is computed only for these
 OUT = str(OUTDIR / "khi_Nz256_Ri0.10_exchange_comparison.nc")
 
-#+++ Load + sort (self-consistent, all from one file)
+#+++ Load, pick times, then compute (only the selected times are ever processed)
 ds = load_dataset_and_grid(filename).chunk({"time": 1})
 ds = condense_uw_velocities(ds, indices=[1, 3])
+ds = ds.sel(time=times, method="nearest")
+print("selected times:", list(np.round(ds.time.values, 2)))
 print("z_aac: n=%d  range=[%.2f, %.2f]" % (ds.sizes["z_aac"], float(ds.z_aac.min()), float(ds.z_aac.max())))
 
 ds_for_sort = ds[["b", "dV", "LxLy"]].copy()
@@ -81,31 +84,30 @@ out.to_netcdf(OUT)
 print(f"saved {OUT}")
 #---
 
-#+++ Snapshot figure: pick the most active time (max rms of the main-branch exchange at ℓ=1)
+#+++ Snapshot figures: one per selected time (scales × main | tc/test-bl | difference)
 zsel = dict(z_aac=slice(-12.5, 12.5))
-time = 50
-tval = float(data[1.0]["main"].time.sel(time=time))
-print(f"snapshot time {time} (t={tval:.1f})")
-
-fig, axs = plt.subplots(len(scales), 3, figsize=(13, 3.4 * len(scales)), constrained_layout=True)
-for r, ℓ in enumerate(scales):
-    m = data[ℓ]["main"].sel(time=time).sel(**zsel)
-    t = data[ℓ]["test"].sel(time=time).sel(**zsel)
-    d = t - m
-    X = m.x_caa.values; Z = m.z_aac.values
-    vmax = float(np.nanpercentile(np.abs(np.concatenate([m.values.ravel(), t.values.ravel()])), 99))
-    dmax = float(np.nanpercentile(np.abs(d.values), 99)) or vmax
-    for c, (field, title, vm) in enumerate([(m, "main:  filter(b_r)", vmax),
-                                            (t, "tc/test-bl:  b_r_l", vmax),
-                                            (d, "difference (test − main)", dmax)]):
-        ax = axs[r, c]
-        im = ax.pcolormesh(X, Z, field.T, cmap="RdBu_r", vmin=-vm, vmax=vm, shading="auto", rasterized=True)
-        fig.colorbar(im, ax=ax, shrink=0.9)
-        ax.set_title(f"ℓ={ℓ:.0f}   {title}", fontsize=10)
-        ax.set_xlabel("x"); ax.set_ylabel("z" if c == 0 else "")
-fig.suptitle(f"SFS APE→KE exchange term, Nz=256, t={tval:.1f}", fontsize=12)
-fig.savefig(f"{OUTDIR}/exchange_comparison_Nz256_snapshot.png", dpi=140)
-print("saved output/exchange_comparison_Nz256_snapshot.png")
+for time in times:
+    tval = float(data[1.0]["main"].time.sel(time=time, method="nearest"))
+    fig, axs = plt.subplots(len(scales), 3, figsize=(13, 3.4 * len(scales)), constrained_layout=True)
+    for r, ℓ in enumerate(scales):
+        m = data[ℓ]["main"].sel(time=time, method="nearest").sel(**zsel)
+        t = data[ℓ]["test"].sel(time=time, method="nearest").sel(**zsel)
+        d = t - m
+        X = m.x_caa.values; Z = m.z_aac.values
+        vmax = float(np.nanpercentile(np.abs(np.concatenate([m.values.ravel(), t.values.ravel()])), 99))
+        dmax = float(np.nanpercentile(np.abs(d.values), 99)) or vmax
+        for c, (field, title, vm) in enumerate([(m, "main:  filter(b_r)", vmax),
+                                                (t, "tc/test-bl:  b_r_l", vmax),
+                                                (d, "difference (test − main)", dmax)]):
+            ax = axs[r, c]
+            im = ax.pcolormesh(X, Z, field.T, cmap="RdBu_r", vmin=-vm, vmax=vm, shading="auto", rasterized=True)
+            fig.colorbar(im, ax=ax, shrink=0.9)
+            ax.set_title(f"ℓ={ℓ:.0f}   {title}", fontsize=10)
+            ax.set_xlabel("x"); ax.set_ylabel("z" if c == 0 else "")
+    fig.suptitle(f"SFS APE→KE exchange term, Nz=256, t={tval:.1f}", fontsize=12)
+    fname = f"{OUTDIR}/exchange_comparison_Nz256_snapshot_t{int(round(tval))}.png"
+    fig.savefig(fname, dpi=140)
+    print("saved", fname)
 #---
 
 #+++ Integrated time series: shows the volume integral is (nearly) identical
@@ -113,8 +115,8 @@ fig2, axs2 = plt.subplots(1, len(scales), figsize=(11, 4), constrained_layout=Tr
 for c, ℓ in enumerate(scales):
     ax = axs2[c]
     tt = data[ℓ]["int_main"].time.values
-    ax.plot(tt, data[ℓ]["int_main"].values, "-",  lw=2, label="main: filter(b_r)")
-    ax.plot(tt, data[ℓ]["int_test"].values, "--", lw=2, label="tc/test-bl: b_r_l")
+    ax.plot(tt, data[ℓ]["int_main"].values, "-o",  lw=2,        label="main: filter(b_r)")
+    ax.plot(tt, data[ℓ]["int_test"].values, "--x", lw=2, ms=10, label="tc/test-bl: b_r_l")
     ax.set_title(f"ℓ={ℓ:.0f}"); ax.set_xlabel("time"); ax.axhline(0, color="k", lw=0.5)
     if c == 0: ax.set_ylabel("∫ exchange dV")
     ax.legend(fontsize=8)
