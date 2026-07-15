@@ -6,7 +6,7 @@ using Random
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, subfilter_stress_tensor, KineticEnergyCrossScaleFlux, SubFilterKineticEnergyDissipationRate
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -260,8 +260,8 @@ for ℓ in filter_ℓs
     σ = _FWHM_to_σ(ℓ)
     gf = GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))   # reusable, matched-to-offline filter
 
-    Πₖ   = KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
-    ε_Ks = SubFilterKineticEnergyDissipationRate(model, gf)   # εˢ = filter(ε) - εˡ
+    Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
+    ε_Ks = SubFilterKineticEnergyEquation.SubFilterKineticEnergyDissipationRate(model, gf) # εˢ = filter(ε) - εˡ
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")  => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
                      Symbol("ε_Ks_ℓ$(ℓ)") => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks))
 
@@ -271,7 +271,7 @@ for ℓ in filter_ℓs
     if save_tensors
         ū = Field(gf(u)); w̄ = Field(gf(w))
         S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))      # strain of the filtered velocity
-        τ = subfilter_stress_tensor(model, gf; dims=(1, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
+        τ = SubFilterKineticEnergyEquation.subfilter_stress_tensor(model, gf; dims=(1, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
         push!(_ke_pairs,
               Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃), Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
               Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃), Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
