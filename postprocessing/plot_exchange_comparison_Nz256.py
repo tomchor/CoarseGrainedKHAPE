@@ -5,12 +5,12 @@ The two branches differ only in the `filtered_b` argument of the exchange:
     main       : filtered_b = filter(b_r)            = -(g/ρ0)(ρ̄ - <ρ_ref>)
     tc/test-bl : filtered_b = b_r_l                  = -(g/ρ0)(ρ̄ -  ρ_ref )
 Everything else (w, b_r, w̄, the Gaussian filter) is identical, so both are
-computed here from the SAME Nz=256 simulation output.
+computed here from the SAME Nz=2048 simulation output.
 
 Outputs (kept, not deleted):
-  output/khi_Nz256_Ri0.10_exchange_comparison.nc      -- fields + integrals
-  output/exchange_comparison_Nz256_snapshot.png       -- x-z snapshot: main | tc/test-bl | diff
-  output/exchange_comparison_Nz256_integrated.png     -- ∫exchange dV time series
+  output/khi_Nz2048_Ri0.10_exchange_comparison.nc      -- fields + integrals
+  output/exchange_comparison_Nz2048_snapshot.png       -- x-z snapshot: main | tc/test-bl | diff
+  output/exchange_comparison_Nz2048_integrated.png     -- ∫exchange dV time series
 """
 import sys
 from pathlib import Path
@@ -20,19 +20,18 @@ sys.path.insert(0, str(HERE))
 import numpy as np
 import xarray as xr
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, sorted_timeseries,
                                     calculate_b_r, calculate_ape_to_ke_exchange_term)
 
-filename = str(REPO / "output" / "khi_Nz256_Ri0.10.nc")
+filename = str(REPO / "output" / "khi_Nz2048_Ri0.10.nc")
 OUTDIR = HERE / "output"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 filtered_dimensions = ["x_caa", "z_aac"]
 scales = [1.0, 7.0]
-times = [10, 30, 50]          # times to analyse; everything downstream is computed only for these
-OUT = str(OUTDIR / "khi_Nz256_Ri0.10_exchange_comparison.nc")
+times = [50]          # times to analyse; everything downstream is computed only for these
+OUT = str(OUTDIR / "khi_Nz2048_Ri0.10_exchange_comparison.nc")
 
 #+++ Load, pick times, then compute (only the selected times are ever processed)
 ds = load_dataset_and_grid(filename).chunk({"time": 1})
@@ -104,8 +103,8 @@ for time in times:
             fig.colorbar(im, ax=ax, shrink=0.9)
             ax.set_title(f"ℓ={ℓ:.0f}   {title}", fontsize=10)
             ax.set_xlabel("x"); ax.set_ylabel("z" if c == 0 else "")
-    fig.suptitle(f"SFS APE→KE exchange term, Nz=256, t={tval:.1f}", fontsize=12)
-    fname = f"{OUTDIR}/exchange_comparison_Nz256_snapshot_t{int(round(tval))}.png"
+    fig.suptitle(f"SFS APE→KE exchange term, Nz=2048, t={tval:.1f}", fontsize=12)
+    fname = f"{OUTDIR}/exchange_comparison_Nz2048_snapshot_t{int(round(tval))}.png"
     fig.savefig(fname, dpi=140)
     print("saved", fname)
 #---
@@ -120,9 +119,9 @@ for c, ℓ in enumerate(scales):
     ax.set_title(f"ℓ={ℓ:.0f}"); ax.set_xlabel("time"); ax.axhline(0, color="k", lw=0.5)
     if c == 0: ax.set_ylabel("∫ exchange dV")
     ax.legend(fontsize=8)
-fig2.suptitle("Volume-integrated SFS APE→KE exchange (Nz=256)", fontsize=12)
-fig2.savefig(f"{OUTDIR}/exchange_comparison_Nz256_integrated.png", dpi=140)
-print("saved output/exchange_comparison_Nz256_integrated.png")
+fig2.suptitle("Volume-integrated SFS APE→KE exchange (Nz=2048)", fontsize=12)
+fig2.savefig(f"{OUTDIR}/exchange_comparison_Nz2048_integrated.png", dpi=140)
+print("saved output/exchange_comparison_Nz2048_integrated.png")
 
 # quick numeric summary
 for ℓ in scales:
