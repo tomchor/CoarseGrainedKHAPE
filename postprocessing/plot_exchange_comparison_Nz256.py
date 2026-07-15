@@ -13,7 +13,10 @@ Outputs (kept, not deleted):
   output/exchange_comparison_Nz256_integrated.png     -- ∫exchange dV time series
 """
 import sys
-sys.path.insert(0, "/home/tomas/repos/khape/postprocessing")
+from pathlib import Path
+HERE = Path(__file__).resolve().parent   # the postprocessing/ directory
+REPO = HERE.parent                       # repository root
+sys.path.insert(0, str(HERE))
 import numpy as np
 import xarray as xr
 import matplotlib
@@ -23,12 +26,12 @@ from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integ
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, sorted_timeseries,
                                     calculate_b_r, calculate_ape_to_ke_exchange_term)
 
-REPO = "/home/tomas/repos/khape"
-filename = f"{REPO}/output/khi_Nz256_Ri0.10.nc"
-OUTDIR = f"{REPO}/postprocessing/output"
+filename = str(REPO / "output" / "khi_Nz256_Ri0.10.nc")
+OUTDIR = HERE / "output"
+OUTDIR.mkdir(parents=True, exist_ok=True)
 filtered_dimensions = ["x_caa", "z_aac"]
 scales = [1.0, 7.0]
-OUT = f"{OUTDIR}/khi_Nz256_Ri0.10_exchange_comparison.nc"
+OUT = str(OUTDIR / "khi_Nz256_Ri0.10_exchange_comparison.nc")
 
 #+++ Load + sort (self-consistent, all from one file)
 ds = load_dataset_and_grid(filename).chunk({"time": 1})
