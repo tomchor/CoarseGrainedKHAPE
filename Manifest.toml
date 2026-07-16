@@ -1399,8 +1399,6 @@ version = "0.110.5"
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
 git-tree-sha1 = "10546250e72e9f39f90d5e7c9f0c221fadb71739"
-repo-rev = "tc/sfs-ke"
-repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
 version = "0.18.0"
 
