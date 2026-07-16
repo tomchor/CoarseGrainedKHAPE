@@ -6,7 +6,7 @@ using Random
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, subfilter_stress_tensor, KineticEnergyCrossScaleFlux, CoarseGrainedKineticEnergyDissipationRate
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -241,13 +241,14 @@ filtered_fields = (; _filt_pairs...)
 #+++ Online cross-scale KE transfer Πₖ and SFS KE dissipation ε_Kˢ  (Oceanostics)
 # Computed at each filter scale ℓ (coarse-graining framework of Aluie et al. 2018, JPO):
 #   Πₖ   = -τⁱʲ S̄ⁱʲ        cross-scale (resolved → subfilter) KE flux      [KineticEnergyCrossScaleFlux]
-#   ε_Kˢ = filter(ε) - ε̄   sub-filter-scale viscous dissipation
-# where ε is the total viscous dissipation (KineticEnergyEquation.DissipationRate, defined above) and
-# ε̄ is the dissipation of the filtered flow (CoarseGrainedKineticEnergyDissipationRate). This equals
-# 2ν Σ[filter(SⁱʲSⁱʲ) - filter(Sⁱʲ)²] ≥ 0, exactly what calculate_sfs_ke_dissipation computes offline
-# in postprocessing/src/aux02_ke_functions.py. The Gaussian filter reproduces the offline post-
-# processing filter (periodic x, edge-extended z, 4σ truncation — scipy gaussian_filter1d's default;
-# Oceanostics truncates at 2σ). 2D x–z runs (v ≡ 0) so dims=(1, 3); both are per unit mass (m² s⁻³).
+#   ε_Kˢ = filter(ε) - εˡ   sub-filter-scale viscous dissipation           [SubFilterKineticEnergyDissipationRate]
+# where ε is the total viscous dissipation (KineticEnergyEquation.DissipationRate) and εˡ is the dissipation
+# of the filtered flow (FilteredKineticEnergyDissipationRate). SubFilterKineticEnergyDissipationRate assembles
+# εˢ = filter(ε) - εˡ in one diagnostic (previously done by hand). This equals 2ν Σ[filter(SⁱʲSⁱʲ) - filter(Sⁱʲ)²]
+# ≥ 0, exactly what calculate_sfs_ke_dissipation computes offline in postprocessing/src/aux02_ke_functions.py.
+# The Gaussian filter reproduces the offline post-processing filter (periodic x, edge-extended z, 4σ truncation
+# — scipy gaussian_filter1d's default; Oceanostics truncates at 2σ). 2D x–z runs (v ≡ 0) so dims=(1, 3); both
+# are per unit mass (m² s⁻³).
 to_center(ψ) = @at (Center, Center, Center) ψ
 
 # Per-direction Gaussian stencil widths matching scipy's truncate=4 (radius = ⌊4σ/Δ + ½⌋ cells).
@@ -259,8 +260,8 @@ for ℓ in filter_ℓs
     σ = _FWHM_to_σ(ℓ)
     gf = GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))   # reusable, matched-to-offline filter
 
-    Πₖ   = KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
-    ε_Ks = Field(gf(ε)) - CoarseGrainedKineticEnergyDissipationRate(model, gf)   # filter(ε) - ε̄
+    Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
+    ε_Ks = SubFilterKineticEnergyEquation.SubFilterKineticEnergyDissipationRate(model, gf) # εˢ = filter(ε) - εˡ
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")  => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
                      Symbol("ε_Ks_ℓ$(ℓ)") => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks))
 
@@ -270,7 +271,7 @@ for ℓ in filter_ℓs
     if save_tensors
         ū = Field(gf(u)); w̄ = Field(gf(w))
         S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))      # strain of the filtered velocity
-        τ = subfilter_stress_tensor(model, gf; dims=(1, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
+        τ = SubFilterKineticEnergyEquation.subfilter_stress_tensor(model, gf; dims=(1, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
         push!(_ke_pairs,
               Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃), Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
               Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃), Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
