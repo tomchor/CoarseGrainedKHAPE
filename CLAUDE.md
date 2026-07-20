@@ -25,7 +25,7 @@ bash submit_simulation.sh NZ=2048
 ```
 Account: `UMCP0028`, queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
 
-The Julia simulation accepts CLI args: `--Nz`, `--Ri`, `--stop_time`, `--Re0`, `--Pr`, `--U`, `--h`, `--perturbation_amplitude`, `--filter_ls` (one or more online filter length scales ℓ; default `1 7`), and `--save_tensors` (flag; also writes the per-scale strain/stress tensor components for online-vs-offline validation). For local CPU development:
+The Julia simulation accepts CLI args: `--Nz`, `--Ri`, `--stop_time`, `--Re0`, `--Pr`, `--U`, `--h`, `--perturbation_amplitude`, `--filter_ls` (one or more online filter length scales ℓ; default `1 7`), `--save_tensors` (flag; also writes the per-scale strain/stress tensor components for online-vs-offline validation), and `--save_sorted` (flag; also writes the Winters (1995) sorted reference state under all three Oceanostics sorting methods). For local CPU development:
 ```bash
 julia --project -t 8 kelvin_helmholtz_instability.jl
 julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3
@@ -82,7 +82,7 @@ Sequential numbered scripts (01-06), each reading the previous step's output. `0
 
 `sweep*` scripts are the sweep variant (parameter sweep over filter scales): `sweep1_filter_fields.py` filters, `sweep2_energy_transfer.py` computes transfer, `sweep3_plot_transfer_spectrum.py` plots spectra.
 
-`postprocessing/validation/` holds the online-vs-offline comparison scripts, each of which recomputes a quantity offline and compares it against the simulation's online output: `inv01_compare_filters.py` (filtered fields), `inv02_compare_ke_transfer.py` (Π_K), `inv03_compare_tensor.py` (the S̄/τ tensor components), and `inv05_compare_dissipation.py` (SFS KE dissipation ε_Kˢ). `inv04_animate_comparison.py` makes the animated online | offline | difference version for a chosen `--field` (Π_K, ε_Ks, or a filtered field). `validation.pbs` runs them all. Only the tensor-component comparison (`inv03`) needs a `--save_tensors` run; Π_K and ε_Kˢ are always written.
+`postprocessing/validation/` holds the online-vs-offline comparison scripts, each of which recomputes a quantity offline and compares it against the simulation's online output: `inv01_compare_filters.py` (filtered fields), `inv02_compare_ke_transfer.py` (Π_K), `inv03_compare_tensor.py` (the S̄/τ tensor components), `inv05_compare_dissipation.py` (SFS KE dissipation ε_Kˢ), and `inv06_compare_sorted_profiles.py` (the Winters sorted reference state: the sorted profile b✶(z✶) and the reference height z✶, for all three sorting methods). `inv04_animate_comparison.py` makes the animated online | offline | difference version for a chosen `--field` (Π_K, ε_Ks, or a filtered field). `validation.pbs` runs them all. The tensor-component comparison (`inv03`) needs a `--save_tensors` run and the sorted-state comparison (`inv06`) needs a `--save_sorted` run; Π_K and ε_Kˢ are always written.
 
 Standalone visualization scripts (not part of the numbered pipeline):
 - `plot1_panels.py` -- 4-panel snapshot of local SFS budget fields
@@ -117,6 +117,13 @@ The simulation computes, at each scale in `filter_ℓs` (set by `--filter_ls`, d
 - The Gaussian filter is configured to **match the offline filter exactly**: periodic x, edge-extended bounded z, stencil truncated at 4σ (matching scipy `gaussian_filter1d`'s default `truncate=4`; Oceanostics defaults to 2σ). Only i,j ∈ {1,3} are kept (2D x–z).
 - `Π_K_ℓ<ℓ>` and `ε_Ks_ℓ<ℓ>` (and their volume integrals) are always written and read back by `04_sfs_ke_budget.py`; the individual S̄/τ components (`S11/S33/S13_ℓ<ℓ>`, `tau11/tau33/tau13_ℓ<ℓ>`) are gated behind `--save_tensors` and consumed only by `postprocessing/validation/`.
 - Requires the Oceanostics `tc/sfs-dissipation` branch (PR #259), pinned via `repo-rev` in `Manifest.toml`, which provides `GaussianFilter`, `StrainRateTensor`, `subfilter_stress_tensor`, `KineticEnergyCrossScaleFlux`, and `CoarseGrainedKineticEnergyDissipationRate`.
+
+#### Online sorted reference state (`--save_sorted`)
+The `AvailablePotentialEnergyEquation` module (Oceanostics PR #272, branch `tc/available-potential-energy`) sorts the buoyancy field adiabatically into its minimum-PE state, giving the Winters et al. (1995) reference height z✶. `--save_sorted` emits it under all three sorting methods, which describe the same reference state but differ in where they place cells of *equal* buoyancy and on what grid they answer:
+- `z✶_3dsort` (`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) — 3D fields on the model grid, in the main output file. Tied cells take consecutive slots in the first and share their layer's mid-height (Winters eq. 11) in the second.
+- `b✶`, `z✶` (`OneDimensionalSort`) — the sorted column itself, in `output/khi_Nz<Nz>_Ri<Ri>_sorted.nc`. Its vertical dimension is N = Nx·Ny·Nz (one slab per model cell), so it cannot share a writer with the model-grid fields.
+- **`z✶` must be listed before `b✶` in the writer's output tuple.** `sorted_buoyancy` returns a bare `Field` with no operand, so `compute!` on it is a no-op — it is filled only as a side effect of computing `z✶`. Listing `b✶` first silently writes the *previous* output's sorted profile.
+- This is the online counterpart of the offline sort in `02_sort_density.py`. The offline pipeline sorts the *z-padded* domain (`load_dataset_and_grid` doubles the height with edge values at load time) while the online sort sees only the true domain, so the two do not sort the same field; `inv06_compare_sorted_profiles.py` quantifies that, running the offline sort both padded and unpadded to separate the padding effect from any genuine online-vs-offline difference.
 
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`

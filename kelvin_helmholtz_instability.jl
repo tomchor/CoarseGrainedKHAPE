@@ -7,6 +7,7 @@ using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
+using Oceanostics.AvailablePotentialEnergyEquation: sorted_reference_height, sorted_buoyancy, ThreeDimensionalSort, HeavisideIntegral, OneDimensionalSort
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -74,6 +75,10 @@ let s = ArgParseSettings()
         "--save_tensors"
             help = "Also output the strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale (for online-vs-offline validation). These are full 3D fields, so off by default to keep production output lean."
             action = :store_true
+
+        "--save_sorted"
+            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, plus the sorted buoyancy profile b✶(z✶). Adds two 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
+            action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
@@ -81,6 +86,7 @@ end
 # global attribute, and it is not a physical parameter). Likewise filter_ls is a vector (the online
 # filter scales, encoded in the output variable names as `_ℓ<ℓ>`), so keep it out of `params` too.
 save_tensors = pop!(parsed_args, :save_tensors)
+save_sorted = pop!(parsed_args, :save_sorted)
 filter_ls = pop!(parsed_args, :filter_ls)
 params = (; parsed_args...)
 #---
@@ -280,7 +286,33 @@ end
 ke_transfer_fields = (; _ke_pairs...)
 #---
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
+#+++ Online Winters et al. (1995) sorted reference state  (Oceanostics)
+# Sorting the buoyancy field adiabatically into its minimum-PE state assigns every parcel a reference
+# height z✶. Offline this is done in Python by 02_sort_density.py (an argsort of the whole field per
+# timestep, held in host RAM and written out at 2× the raw field size); done here it is one GPU sort
+# per output. The three methods describe the same reference state and agree on every volume integral,
+# but differ in where they put cells of *equal* buoyancy and on what grid they answer:
+#   ThreeDimensionalSort  z✶ on the model grid; tied cells take consecutive slots (z✶ spreads over a cell)
+#   HeavisideIntegral     z✶ on the model grid; tied cells share their layer's mid-height (Winters eq. 11)
+#   OneDimensionalSort    the sorted column itself, on a 1×1×N grid → the reference profile b✶(z✶)
+# All three are emitted so postprocessing/validation/inv06_compare_sorted_profiles.py can compare them
+# against each other and against the offline sort. Note the offline pipeline sorts the *z-padded* domain
+# (load_dataset_and_grid doubles the height with edge values), so the two do not sort the same field
+# near the top and bottom boundaries — quantifying that is part of what inv06 checks.
+sorted_fields = NamedTuple()
+if save_sorted
+    z✶_3dsort    = sorted_reference_height(model, method=ThreeDimensionalSort())
+    z✶_heaviside = sorted_reference_height(model, method=HeavisideIntegral())
+    sorted_fields = (; z✶_3dsort, z✶_heaviside)
+
+    # The sorted column lives on its own 1×1×N grid (N = Nx·Ny·Nz), so it cannot share a writer with
+    # the model-grid fields — its vertical dimension has a different length.
+    z✶_1dsort = sorted_reference_height(model, method=OneDimensionalSort())
+    b✶_1dsort = sorted_buoyancy(z✶_1dsort)
+end
+#---
+
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., sorted_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
@@ -310,6 +342,38 @@ NetCDFWriter(model, outputs,
              global_attributes = params,
              overwrite_existing = true)
 
+
+#+++ Sorted reference profile b✶(z✶), on its own 1×1×N grid
+# Separate file because the sorted column's vertical dimension (N = Nx·Ny·Nz cells, each holding the
+# volume of one model cell) is a different length from the model grid's, so it cannot share the
+# writers above. This is the online counterpart of the offline `rho_sorted`/`dz_sorted` profile.
+if save_sorted
+    output_filename_sorted = "output/$(simulation_name)_sorted.nc"
+    # `sorted_buoyancy` hands back a bare `Field` that carries no operand, so `compute!` on it does
+    # nothing: it is filled only as a side effect of computing z✶. Listing z✶ first in the output tuple
+    # is NOT enough — the writer groups its outputs by grid before serializing them, so b✶ still gets
+    # read before the sort runs and lags one output (verified: it matched the preceding snapshot
+    # bit-for-bit). Oceananigans runs callbacks before output writers within a time step
+    # (Simulations/run.jl), so force the sort from a callback on the writer's own schedule. Passing the
+    # clock time marks the field computed at that time, so the writer then reuses it instead of
+    # re-sorting. inv06_compare_sorted_profiles.py asserts b✶ really is a permutation of b.
+    # Two separate but identically-configured schedules: a schedule mutates its own actuation state
+    # each time it is queried, so the callback and the writer cannot share one instance (the first
+    # query would consume the actuation and the second would return false). Both are driven by the same
+    # clock and are queried once per time step, so they stay in lockstep.
+    simulation.callbacks[:sort_profile] = Callback(sim -> compute!(z✶_1dsort, sim.model.clock.time),
+                                                   ConsecutiveIterations(TimeInterval(2)))
+
+    simulation.output_writers[:sorted_profile] =
+        NetCDFWriter(model, (; z✶=z✶_1dsort, b✶=b✶_1dsort),
+                     schedule = ConsecutiveIterations(TimeInterval(2)),
+                     filename = output_filename_sorted,
+                     array_type = Array{Float64},
+                     global_attributes = params,
+                     overwrite_existing = true)
+    @info "Sorted reference profile will be saved to: $(output_filename_sorted)"
+end
+#---
 
 @info "Output will be saved to: $(output_filename).nc"
 #---

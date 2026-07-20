@@ -87,12 +87,23 @@ bash submit_simulation.sh NZ=2048
 
 # Also write the per-scale strain/stress tensor components (for online-vs-offline validation)
 bash submit_simulation.sh NZ=2048 SAVE_TENSORS=1
+
+# Also write the Winters (1995) sorted reference state (for online-vs-offline validation)
+bash submit_simulation.sh NZ=2048 SAVE_SORTED=1
 ```
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
 resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale. These
 are full 3D fields (off by default to keep production output lean) and are consumed only by the
 validation scripts in `postprocessing/validation/`.
+
+`SAVE_SORTED=1` passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
+state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
+(`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields in the main output file,
+and the sorted profile `b✶(z✶)` (`OneDimensionalSort`) in a separate `<stem>_sorted.nc`, whose vertical
+dimension is the sorted column of N = Nx·Ny·Nz cells rather than the model grid. This is the online
+counterpart of what `02_sort_density.py` computes offline; `inv06_compare_sorted_profiles.py` compares
+the two. Each method carries its own full-domain sort per output, so this is off by default.
 
 ### Run a simulation + online-vs-offline validation
 
@@ -104,9 +115,10 @@ bash submit_validation_run.sh NZ=1024
 
 `submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
-Π_K, the strain/stress tensors, and the SFS KE dissipation ε_Kˢ offline and compares them against the
-simulation's online diagnostics (`postprocessing/validation/inv01`–`inv05`), writing comparison figures
-to `figures/` and online-vs-offline animations to `animations/`.
+Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, and the sorted reference state offline and
+compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv06`),
+writing comparison figures to `figures/` and online-vs-offline animations to `animations/`. Note that
+`inv06` needs a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 
