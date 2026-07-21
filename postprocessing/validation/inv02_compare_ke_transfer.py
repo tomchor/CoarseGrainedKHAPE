@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
-from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter,
+from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter, open_grid_group,
                              condense_uw_velocities, integrate)
 from src.aux02_ke_functions import (calculate_sfs_stress_tensor,
                                      calculate_strain_tensor,
@@ -50,7 +50,7 @@ print("Loading simulation data...")
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk({"time": 1})
 
-grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
+grid = open_grid_group(filename)   # handles the _gridN naming a --save_sorted run introduces
 z0, z1 = float(grid.z.min()), float(grid.z.max())   # original (unpadded) z faces
 in_domain = dict(z_aac=slice(z0, z1))               # selects the original cell centers
 

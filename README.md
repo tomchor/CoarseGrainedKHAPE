@@ -99,9 +99,11 @@ validation scripts in `postprocessing/validation/`.
 
 `SAVE_SORTED=1` passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
 state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
-(`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields in the main output file,
-and the sorted profile `b✶(z✶)` (`OneDimensionalSort`) in a separate `<stem>_sorted.nc`, whose vertical
-dimension is the sorted column of N = Nx·Ny·Nz cells rather than the model grid. This is the online
+(`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
+the sorted profile `b✶(z✶)` (`OneDimensionalSort`) in a separate `<stem>_sorted.nc`, whose vertical
+dimension is the sorted column of N = Nx·Ny·Nz cells rather than the model grid. The column needs its
+own file: a `NetCDFWriter` holding two grids suffixes every dimension (`x_caa` → `x_caa_grid1`) and
+renames the grid metadata groups, which the rest of the pipeline cannot read. This is the online
 counterpart of what `02_sort_density.py` computes offline; `inv06_compare_sorted_profiles.py` compares
 the two. Each method carries its own full-domain sort per output, so this is off by default.
 

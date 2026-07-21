@@ -7,7 +7,7 @@ using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
-using Oceanostics.AvailablePotentialEnergyEquation: sorted_reference_height, sorted_buoyancy, ThreeDimensionalSort, HeavisideIntegral, OneDimensionalSort
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, OneDimensionalSort
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -299,20 +299,30 @@ ke_transfer_fields = (; _ke_pairs...)
 # against each other and against the offline sort. Note the offline pipeline sorts the *z-padded* domain
 # (load_dataset_and_grid doubles the height with edge values), so the two do not sort the same field
 # near the top and bottom boundaries — quantifying that is part of what inv06 checks.
+#
+# Only the column is a reference *profile* as written. For the two model-grid methods `reference_buoyancy`
+# is the model's own `b`, which is already an output, so their profiles are recovered by pairing z✶ with b
+# and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
 sorted_fields = NamedTuple()
 if save_sorted
-    z✶_3dsort    = sorted_reference_height(model, method=ThreeDimensionalSort())
-    z✶_heaviside = sorted_reference_height(model, method=HeavisideIntegral())
-    sorted_fields = (; z✶_3dsort, z✶_heaviside)
+    z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
+    z✶_heaviside = reference_height(model, method=HeavisideIntegral())
 
-    # The sorted column lives on its own 1×1×N grid (N = Nx·Ny·Nz), so it cannot share a writer with
-    # the model-grid fields — its vertical dimension has a different length.
-    z✶_1dsort = sorted_reference_height(model, method=OneDimensionalSort())
-    b✶_1dsort = sorted_buoyancy(z✶_1dsort)
+
+    # The column lives on its own 1×1×N grid (N = Nx·Ny·Nz), which a single NetCDFWriter handles
+    # alongside the model grid, as the lock_release example upstream does. Holding two grids does make
+    # the writer disambiguate: every dimension gets a suffix (z_aac → z_aac_grid1 for the model grid,
+    # _grid2 for the column) and the grid metadata groups get a matching prefix. The offline pipeline
+    # is written against the plain names, so `load_dataset_and_grid` strips the model grid's suffix at
+    # load time (`strip_grid_suffix` in postprocessing/src/aux00_utils.py) and everything downstream
+    # is unaffected; the column's variables keep their own suffix and are read by inv06.
+    z✶_1dsort = reference_height(model, method=OneDimensionalSort())
+    b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort)
 end
 #---
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., sorted_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
@@ -324,56 +334,23 @@ if !(model.closure isa ScalarDiffusivity)
     outputs = (; outputs..., ν, κ)
 end
 
-simulation.output_writers[:fields] =
-    NetCDFWriter(model, outputs,
-                 schedule = ConsecutiveIterations(TimeInterval(2)), # Consecutive iterations every 4 periods to calculate time derivatives
-                 filename = output_filename,
-                 array_type = Array{Float64},
-                 global_attributes = params,
-                 overwrite_existing = true)
+# The model-grid z✶ fields go in the 3D file only; the 2D writer below slices with `indices` for a
+# lightweight x–z animation and has no use for them.
+simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_fields...),
+                                                  schedule = ConsecutiveIterations(TimeInterval(2)),
+                                                  filename = output_filename,
+                                                  array_type = Array{Float64},
+                                                  global_attributes = params,
+                                                  overwrite_existing = true)
 
 output_filename_2d = "output/$(simulation_name)_2d.nc"
-simulation.output_writers[:twod_fields] =
-NetCDFWriter(model, outputs,
-             schedule = TimeInterval(2),
-             filename = output_filename_2d,
-             array_type = Array{Float32},
-             indices = (:, 1, :),
-             global_attributes = params,
-             overwrite_existing = true)
-
-
-#+++ Sorted reference profile b✶(z✶), on its own 1×1×N grid
-# Separate file because the sorted column's vertical dimension (N = Nx·Ny·Nz cells, each holding the
-# volume of one model cell) is a different length from the model grid's, so it cannot share the
-# writers above. This is the online counterpart of the offline `rho_sorted`/`dz_sorted` profile.
-if save_sorted
-    output_filename_sorted = "output/$(simulation_name)_sorted.nc"
-    # `sorted_buoyancy` hands back a bare `Field` that carries no operand, so `compute!` on it does
-    # nothing: it is filled only as a side effect of computing z✶. Listing z✶ first in the output tuple
-    # is NOT enough — the writer groups its outputs by grid before serializing them, so b✶ still gets
-    # read before the sort runs and lags one output (verified: it matched the preceding snapshot
-    # bit-for-bit). Oceananigans runs callbacks before output writers within a time step
-    # (Simulations/run.jl), so force the sort from a callback on the writer's own schedule. Passing the
-    # clock time marks the field computed at that time, so the writer then reuses it instead of
-    # re-sorting. inv06_compare_sorted_profiles.py asserts b✶ really is a permutation of b.
-    # Two separate but identically-configured schedules: a schedule mutates its own actuation state
-    # each time it is queried, so the callback and the writer cannot share one instance (the first
-    # query would consume the actuation and the second would return false). Both are driven by the same
-    # clock and are queried once per time step, so they stay in lockstep.
-    simulation.callbacks[:sort_profile] = Callback(sim -> compute!(z✶_1dsort, sim.model.clock.time),
-                                                   ConsecutiveIterations(TimeInterval(2)))
-
-    simulation.output_writers[:sorted_profile] =
-        NetCDFWriter(model, (; z✶=z✶_1dsort, b✶=b✶_1dsort),
-                     schedule = ConsecutiveIterations(TimeInterval(2)),
-                     filename = output_filename_sorted,
-                     array_type = Array{Float64},
-                     global_attributes = params,
-                     overwrite_existing = true)
-    @info "Sorted reference profile will be saved to: $(output_filename_sorted)"
-end
-#---
+simulation.output_writers[:twod_fields] = NetCDFWriter(model, outputs,
+                                                       schedule = TimeInterval(2),
+                                                       filename = output_filename_2d,
+                                                       array_type = Array{Float32},
+                                                       indices = (:, 1, :),
+                                                       global_attributes = params,
+                                                       overwrite_existing = true)
 
 @info "Output will be saved to: $(output_filename).nc"
 #---

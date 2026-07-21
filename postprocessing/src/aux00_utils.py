@@ -1,9 +1,62 @@
 import os
+import re
 from pathlib import Path
 import numpy as np
 import xarray as xr
 
 PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
+
+#+++ Multi-grid output files
+# A NetCDFWriter holding outputs on more than one grid disambiguates by suffixing every dimension name
+# (`z_aac` -> `z_aac_grid1`) and prefixing the grid metadata groups (`underlying_grid_reconstruction_kwargs`
+# -> `grid_1_underlying_grid_reconstruction_kwargs`). The simulation does this when run with
+# `--save_sorted`, since the Winters sorted column lives on its own 1x1xN grid. The rest of this
+# pipeline is written against the plain names, so the suffix is stripped at load time and everything
+# downstream is unaffected. Which number the model grid gets depends on the order the outputs were
+# declared, so it is read off a variable known to live on the model grid rather than assumed to be grid1.
+GRID_SUFFIX_RE = re.compile(r"_grid\d+$")
+
+
+def model_grid_suffix(ds, reference_var="b"):
+    """Return the `_gridN` suffix carried by the model grid's dimensions, or "" for a single-grid file."""
+    if reference_var not in ds.variables:
+        return ""
+    for dim in ds[reference_var].dims:
+        match = GRID_SUFFIX_RE.search(str(dim))
+        if match:
+            return match.group(0)
+    return ""
+
+
+def open_grid_group(filename, suffix=None):
+    """Open the model grid's underlying-grid reconstruction group, whatever it is called in this file.
+
+    `suffix` is the model grid's `_gridN` tag as returned by `model_grid_suffix`. Pass it if already
+    known; otherwise it is detected from the file, so callers can just say `open_grid_group(filename)`
+    and get the right group for both single- and multi-grid outputs.
+    """
+    if suffix is None:
+        with xr.open_dataset(filename, decode_times=False) as probe:
+            suffix = model_grid_suffix(probe)
+    group = "underlying_grid_reconstruction_kwargs"
+    if suffix:
+        group = f"grid_{suffix.removeprefix('_grid')}_{group}"
+    return xr.open_dataset(filename, group=group)
+
+
+def strip_grid_suffix(ds, suffix):
+    """Rename the model grid's dimensions and coordinates back to their plain, unsuffixed names.
+
+    Variables on *other* grids keep their own suffixes, so they stay in the dataset, distinguishable
+    and harmless to code that selects on the plain names (`"z_aac" in da.dims` does not match
+    `z_aac_grid2`). That is what lets `inv06` read the sorted column out of the same file.
+    """
+    if not suffix:
+        return ds
+    renames = {n: str(n)[: -len(suffix)] for n in (*ds.dims, *ds.coords, *ds.variables)
+               if str(n).endswith(suffix)}
+    return ds.rename(renames)
+#---
 
 #+++ Integrations and sums
 def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
@@ -76,7 +129,13 @@ def load_dataset_and_grid(filename):
     """
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False, chunks={})
-    grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
+
+    # A `--save_sorted` run writes the sorted column on its own grid, which makes the writer suffix
+    # every dimension name; strip the model grid's suffix so the rest of the pipeline sees the plain
+    # names it expects. A no-op on single-grid files.
+    suffix = model_grid_suffix(ds)
+    grid = open_grid_group(filename, suffix)
+    ds = strip_grid_suffix(ds, suffix)
 
     # Add grid extent as attributes
     ds.attrs["Lx"] = np.diff(grid.x)

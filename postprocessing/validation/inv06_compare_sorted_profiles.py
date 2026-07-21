@@ -5,12 +5,20 @@ against the offline (Python post-processing) one, for all three Oceanostics sort
 
 The simulation must have been run with `--save_sorted`, which writes
 
-    z✶_3dsort      ThreeDimensionalSort   z✶ on the model grid, tied cells take consecutive slots
-    z✶_heaviside   HeavisideIntegral      z✶ on the model grid, tied cells share their layer mid-height
-    b✶, z✶         OneDimensionalSort     the sorted column itself, in <stem>_sorted.nc
+    z✶_3dsort              ThreeDimensionalSort   z✶ on the model grid, tied cells take consecutive slots
+    z✶_heaviside           HeavisideIntegral      z✶ on the model grid, tied cells share their layer mid-height
+    z✶_1dsort, b✶_1dsort   OneDimensionalSort     the sorted column, on its own N-cell vertical axis
 
-against which this script sets the offline sort (`sorted_timeseries` + the nearest-density z₀ lookup
-of `local_potential_energies_timeseries`). The offline sort is run twice:
+all into the same output file. Since the column is on a different grid from the model fields, the
+writer suffixes every dimension name (`z_aac` -> `z_aac_grid1` for the model, `_grid2` for the column)
+and prefixes the grid metadata groups; `load_dataset_and_grid` strips the model grid's suffix so the
+rest of the pipeline is unaffected (see `strip_grid_suffix` in `aux00_utils`).
+
+Only the column is a reference *profile* as written. For the two model-grid methods the buoyancy that
+pairs with z✶ is the model's own `b`, so their profiles are recovered by ordering the (z✶, b) pairs by
+z✶ — what `profile_from_model_grid` does below, mirroring the lock_release example in the Oceanostics
+PR. All three are then compared against the offline sort (`sorted_timeseries` + the nearest-density z₀
+lookup of `local_potential_energies_timeseries`), which is run twice:
 
   * **padded**   — on the z-padded domain, which is what the production pipeline actually sorts, since
                    `load_dataset_and_grid` doubles the domain height with edge values at load time.
@@ -31,7 +39,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
-from src.aux00_utils import load_dataset_and_grid, integrate
+from src.aux00_utils import load_dataset_and_grid, integrate, open_grid_group, model_grid_suffix, strip_grid_suffix
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries, g, ρ0
 from src.aux03_plotting import run_label
 #---
@@ -71,7 +79,7 @@ print("Loading simulation data...")
 ds = load_dataset_and_grid(filename)          # z-padded to 2x height with edge values
 ds = ds.chunk({"time": 1})
 
-grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
+grid = open_grid_group(filename)   # handles the _gridN naming a --save_sorted run introduces
 z_bot, z_top = float(grid.z.min()), float(grid.z.max())   # original (unpadded) z faces
 in_domain = dict(z_aac=slice(z_bot, z_top))               # selects the original cell centers
 
@@ -79,11 +87,15 @@ for v in ("z✶_3dsort", "z✶_heaviside"):
     if v not in ds:
         raise SystemExit(f"Online field '{v}' not in {filename} — rerun the simulation with --save_sorted.")
 
-sorted_filename = str(Path(filename).with_name(stem + "_sorted.nc"))
-if not os.path.exists(sorted_filename):
-    raise SystemExit(f"Sorted-column file not found: {sorted_filename} — rerun the simulation with --save_sorted.")
-ds_col = xr.open_dataset(sorted_filename, decode_times=False)
-print(f"Sorted column loaded from: {sorted_filename}   dims={dict(ds_col.sizes)}")
+# The sorted column shares the output file with the model-grid fields. Because they are on different
+# grids the writer suffixes every dimension (`z_aac` -> `z_aac_grid1` for the model, `_grid2` for the
+# column); `load_dataset_and_grid` strips the model's suffix, so the column's variables are still in
+# `ds` carrying theirs. Read them from the raw file to keep the padded/unpadded bookkeeping clear.
+ds_col = xr.open_dataset(filename, decode_times=False)
+for v in ("z✶_1dsort", "b✶_1dsort"):
+    if v not in ds_col:
+        raise SystemExit(f"Online field '{v}' not in {filename} — rerun the simulation with --save_sorted.")
+print(f"Sorted column read from {Path(filename).name}, on its own axis: {ds_col['b✶_1dsort'].dims}")
 
 if args.time is None:
     args.time = float(ds.time.values[len(ds.time) // 2])
@@ -121,6 +133,9 @@ def offline_z0(rho, rho_sorted, z_sorted):
 # without going through load_dataset_and_grid (which always pads).
 print("Building the unpadded dataset (the like-for-like control for the online sort)...")
 ds_raw = xr.open_dataset(filename, decode_times=False, chunks={}).chunk({"time": 1})
+# Same normalization load_dataset_and_grid does, minus the padding: strip the model grid's `_gridN`
+# suffix so the plain names below resolve. A no-op unless the run used --save_sorted.
+ds_raw = strip_grid_suffix(ds_raw, model_grid_suffix(ds_raw))
 ds_raw.attrs.update(ds.attrs)
 ds_raw["dV"]    = ds_raw.Δx_caa * ds_raw.Δy_aca * ds_raw.Δz_aac
 ds_raw["LxLy"]  = float(np.diff(grid.x)) * float(np.diff(grid.y))
@@ -134,11 +149,27 @@ ds_unpad_rho, srt_unpad = offline_sort(ds_raw, "unpadded")
 
 #+++ Assemble the sorted profiles, as buoyancy on a common footing
 # Online: b✶ on the sorted column. Offline: rho_sorted on z_1d_sorted -> convert to buoyancy.
-b_col = ds_col["b✶"].squeeze(drop=True)
-z_col = ds_col["z✶"].squeeze(drop=True)
+b_col = ds_col["b✶_1dsort"].squeeze(drop=True)
+z_col = ds_col["z✶_1dsort"].squeeze(drop=True)
 col_dim = [d for d in b_col.dims if d != "time"][0]
 b_col = b_col.assign_coords({col_dim: np.asarray(z_col.isel(time=0))}).rename({col_dim: "z✶"})
 
+
+def profile_from_model_grid(z_star_field, b_field):
+    """Recover the reference profile b✶(z✶) from a model-grid method.
+
+    `reference_buoyancy` is the model's own `b` for `ThreeDimensionalSort` and `HeavisideIntegral`,
+    since z✶ and b already pair up cell by cell there. Ordering those pairs by z✶ gives the same
+    profile `OneDimensionalSort` stores directly — which is exactly what the lock_release example in
+    the Oceanostics PR does to plot all three methods on the same axes.
+    """
+    z = np.asarray(z_star_field).ravel()
+    b = np.asarray(b_field).ravel()
+    order = np.argsort(z)
+    return xr.DataArray(b[order], dims="z✶", coords={"z✶": z[order]})
+
+
+# All three online methods as profiles, at the snapshot time, plus the two offline sorts.
 profiles = {
     "online (OneDimensionalSort)": b_col,
     "offline (unpadded)": rho_to_b(srt_unpad.rho_sorted).rename({"z_1d_sorted": "z✶"}),
@@ -147,10 +178,12 @@ profiles = {
 print("\nSorted-profile lengths:  " + "   ".join(f"{k}: N={v.sizes['z✶']}" for k, v in profiles.items()))
 
 # Invariant: the online column is a *permutation* of the model's own buoyancy at the same time, so
-# sorting the raw field must reproduce it exactly. This catches the sorted profile going stale — the
-# writer fills b✶ only as a side effect of computing z✶, so if the two are listed in the wrong order
-# in the simulation's output tuple, b✶ silently lags by one output. Bit-for-bit is the right tolerance:
-# both sides sort identical Float64 data, so any real difference is a bug, not roundoff.
+# sorting the raw field must reproduce it exactly. This is what catches b✶ going stale. Oceanostics
+# fills the column as a side effect of sorting z✶, and an earlier revision of the branch returned it as
+# a bare `Field` that `compute!` ignored, so an output writer kept emitting the *previous* sort's
+# profile — no error, entirely plausible-looking output. `reference_buoyancy` now wraps it so it
+# recomputes itself, and this assertion guards against that regressing. Bit-for-bit is the right
+# tolerance: both sides sort identical Float64 data, so any real difference is a bug, not roundoff.
 b_online = b_col.sel(time=t_sel, method="nearest").values
 b_raw    = np.sort(ds_raw["b"].sel(time=t_sel, method="nearest").values.ravel())
 stale    = np.abs(b_online - b_raw).max()
@@ -161,8 +194,8 @@ if stale > 0:
     raise SystemExit(
         f"Online sorted profile b✶ is not a permutation of b at t={t_sel:g} (max|diff| = {stale:.3e}).\n"
         f"  Closest match is t={best_t:g} (max|diff| = {best_d:.3e}).\n"
-        f"  If that is an *earlier* time, b✶ is stale: list z✶ before b✶ in the simulation's "
-        f"sorted-profile output tuple (sorted_buoyancy returns a bare Field that compute! does not fill).")
+        f"  If that is an *earlier* time, b✶ is stale — the sort that fills it did not run before the "
+        f"writer read it. Check that `reference_buoyancy` still returns a self-recomputing field.")
 print(f"Invariant OK: online b✶ is an exact permutation of b at t={t_sel:.3f}")
 #---
 
@@ -192,6 +225,15 @@ print("="*70)
 B0 = float(ds.attrs.get("B₀", 1.0))
 ref_prof = profiles["online (OneDimensionalSort)"].sel(time=t_sel, method="nearest")
 
+# The two model-grid methods become profiles by pairing their z✶ with the model's own b and ordering.
+# Done here rather than above because it needs `z_star`, and only at the snapshot time (these are the
+# comparison's subject, not a time series). They must reproduce the column: same set of cells, same
+# buoyancies, just indexed by cell instead of by rank.
+b_true_snap = ds["b"].sel(**in_domain).sel(time=t_sel, method="nearest")
+for _lbl, _key in (("online (ThreeDimensionalSort)", "online (ThreeDimensionalSort)"),
+                   ("online (HeavisideIntegral)",    "online (HeavisideIntegral)")):
+    profiles[_lbl] = profile_from_model_grid(z_star[_key].sel(time=t_sel, method="nearest"), b_true_snap)
+
 
 def compare_profiles(a, b):
     """Difference between two sorted profiles, elementwise when they share a z✶ axis, else interpolated.
@@ -207,12 +249,13 @@ def compare_profiles(a, b):
     return np.interp(common, zb, b.values) - np.interp(common, za, a.values), "interpolated"
 
 
+REF_PROFILE = "online (OneDimensionalSort)"
 for label, prof in profiles.items():
-    if label.startswith("online"):
+    if label == REF_PROFILE:
         continue
-    p = prof.sel(time=t_sel, method="nearest")
+    p = prof.sel(time=t_sel, method="nearest") if "time" in prof.dims else prof
     d, how = compare_profiles(ref_prof, p)
-    print(f"    {label:<24}  rms = {np.sqrt(np.mean(d**2))/B0:.3e}   max = {np.max(np.abs(d))/B0:.3e}   [{how}]")
+    print(f"    {label:<30}  rms = {np.sqrt(np.mean(d**2))/B0:.3e}   max = {np.max(np.abs(d))/B0:.3e}   [{how}]")
 
 print("\n" + "="*70)
 print("  Reference height z✶(x, z)   [pairwise rms difference, in units of Lz]")
@@ -242,6 +285,23 @@ for a in labels:
     rms_int = float(np.sqrt(np.mean(d[~saturated] ** 2))) if (~saturated).any() else np.nan
     print(f"    {a:<32}{rms_tie:>20.3e}{rms_int:>24.3e}")
 
+# OneDimensionalSort answers on the sorted column rather than the model grid, so it has no cell-by-cell
+# entry in the table above. It is still tied to the other two exactly: ThreeDimensionalSort gives each
+# cell the height of its own slot in that same column, so collecting its z✶ values and sorting them must
+# reproduce the column verbatim. That is the whole content of "the two methods describe the same sorted
+# state, on different grids", and it is a bit-for-bit check rather than a tolerance.
+print("\n" + "="*70)
+print("  OneDimensionalSort vs ThreeDimensionalSort   [same sorted column, indexed by rank vs by cell]")
+print("="*70)
+z_col_t   = np.sort(z_col.sel(time=t_sel, method="nearest").values.ravel())
+z_3d_sort = np.sort(snap["online (ThreeDimensionalSort)"].values.ravel())
+if z_col_t.shape != z_3d_sort.shape:
+    print(f"    SKIPPED: column has N={z_col_t.size} but the model grid has {z_3d_sort.size} cells")
+else:
+    d = np.abs(z_col_t - z_3d_sort)
+    print(f"    sorted(z✶_3dsort) vs the 1D column:  max|diff| = {d.max():.3e}  ({d.max()/Lz:.3e} · Lz)")
+    print(f"    {'exact match' if d.max() == 0 else 'MISMATCH — the two are not the same sorted column'}")
+
 # The integral every method must agree on: RPE = ∫ ρ g z✶ dV / ρ₀  ( = -∫ b z✶ dV, the Winters E_b).
 print("\n" + "="*70)
 print("  Background potential energy  ∫E_b dV = -∫ b z✶ dV   [relative to the online 3D sort]")
@@ -260,7 +320,7 @@ label_run = run_label(ds.attrs)
 fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
 
 for lbl, prof in profiles.items():
-    p = prof.sel(time=t_sel, method="nearest")
+    p = prof.sel(time=t_sel, method="nearest") if "time" in prof.dims else prof
     axes[0].plot(p.values / B0, p["z✶"].values, label=f"{lbl}  (N={p.sizes['z✶']})",
                  lw=2.5 if lbl.startswith("online") else 1.4,
                  ls="-" if lbl.startswith("online") else "--")
@@ -270,13 +330,13 @@ axes[0].legend(fontsize=8)
 axes[0].grid(alpha=0.3)
 
 for lbl, prof in profiles.items():
-    if lbl.startswith("online"):
+    if lbl == REF_PROFILE:
         continue
-    p = prof.sel(time=t_sel, method="nearest")
+    p = prof.sel(time=t_sel, method="nearest") if "time" in prof.dims else prof
     d, how = compare_profiles(ref_prof, p)
     z_axis = ref_prof["z✶"].values if how == "elementwise" else np.linspace(z_bot, z_top, len(d))
     axes[1].plot(d / B0, z_axis, lw=1.4, label=f"{lbl} [{how}]")
-axes[1].set(xlabel="(offline − online) b✶ / B₀", ylabel="z✶", title="Difference from the online column")
+axes[1].set(xlabel="(other − 1D-sort column) b✶ / B₀", ylabel="z✶", title="Difference from the online column")
 axes[1].legend(fontsize=8)
 axes[1].grid(alpha=0.3)
 
