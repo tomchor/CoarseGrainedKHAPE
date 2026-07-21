@@ -39,6 +39,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
+from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import load_dataset_and_grid, integrate, open_grid_group, model_grid_suffix, strip_grid_suffix
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries, g, ρ0
 from src.aux03_plotting import run_label
@@ -54,7 +55,9 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Pa
 parser.add_argument("--time", type=float, default=None, help="Target time for the snapshot maps (default: midpoint of simulation)")
 parser.add_argument("--z-window", type=float, default=None, help="Half-height of the z window shown in the snapshot maps (default: the full domain — the tie and padding effects this script is about live at the saturated top and bottom, so cropping to the shear layer hides them)")
 parser.add_argument("--n-workers", type=int, default=1, help="Thread-pool workers for the offline sort")
+add_tolerance_arg(parser)
 args = parser.parse_args()
+set_tolerance(args.tolerance)
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # validation/ → postprocessing/ → repo root
@@ -255,7 +258,12 @@ for label, prof in profiles.items():
         continue
     p = prof.sel(time=t_sel, method="nearest") if "time" in prof.dims else prof
     d, how = compare_profiles(ref_prof, p)
-    print(f"    {label:<30}  rms = {np.sqrt(np.mean(d**2))/B0:.3e}   max = {np.max(np.abs(d))/B0:.3e}   [{how}]")
+    rms = float(np.sqrt(np.mean(d**2)) / B0)
+    msg = f"    {label:<30}  rms = {rms:.3e}   max = {np.max(np.abs(d))/B0:.3e}   [{how}]"
+    # Every one of these sorts the same buoyancy field, so they must agree to roundoff — including the
+    # padded offline sort, whose padding changes z✶ but not the profile. This is the check that would
+    # have caught b✶ going stale had the permutation invariant above not already done so.
+    check(rms, msg, print)
 
 print("\n" + "="*70)
 print("  Reference height z✶(x, z)   [pairwise rms difference, in units of Lz]")
@@ -299,8 +307,9 @@ if z_col_t.shape != z_3d_sort.shape:
     print(f"    SKIPPED: column has N={z_col_t.size} but the model grid has {z_3d_sort.size} cells")
 else:
     d = np.abs(z_col_t - z_3d_sort)
-    print(f"    sorted(z✶_3dsort) vs the 1D column:  max|diff| = {d.max():.3e}  ({d.max()/Lz:.3e} · Lz)")
-    print(f"    {'exact match' if d.max() == 0 else 'MISMATCH — the two are not the same sorted column'}")
+    check(float(d.max() / Lz),
+          f"    sorted(z✶_3dsort) vs the 1D column:  max|diff| = {d.max():.3e}  ({d.max()/Lz:.3e} · Lz)"
+          f"   {'exact match' if d.max() == 0 else 'MISMATCH'}", print)
 
 # The integral every method must agree on: RPE = ∫ ρ g z✶ dV / ρ₀  ( = -∫ b z✶ dV, the Winters E_b).
 print("\n" + "="*70)
@@ -312,7 +321,14 @@ Eb = {k: float(integrate(-b_true.sel(time=t_sel, method="nearest") * v.sel(time=
                          dV).squeeze()) for k, v in z_star.items()}
 Eb_ref = Eb["online (ThreeDimensionalSort)"]
 for k, v in Eb.items():
-    print(f"    {k:<32} ∫E_b = {v: .6e}   rel. diff = {(v - Eb_ref)/abs(Eb_ref): .3e}")
+    rel = (v - Eb_ref) / abs(Eb_ref)
+    msg = f"    {k:<32} ∫E_b = {v: .6e}   rel. diff = {rel: .3e}"
+    # Only the online methods are held to a tolerance. They describe the same sorted state and must
+    # agree on every volume integral, so any difference is a bug. The offline numbers differ for
+    # reasons this script exists to *measure* rather than to enforce: the nearest-density z₀ lookup
+    # discretizes differently, and the padded sort sees a domain twice as tall (~3% in ∫E_b). Asserting
+    # on those would either be vacuous or would fail on a legitimate methodological difference.
+    check(abs(rel), msg, print) if k.startswith("online") else print(msg)
 #---
 
 #+++ Figure 1: the sorted profiles
@@ -393,3 +409,5 @@ out3 = FIGURES / f"inv06_background_pe_{stem}.png"
 fig.savefig(out3, dpi=150)
 print(f"Saved {out3}")
 #---
+
+finalize(print)
