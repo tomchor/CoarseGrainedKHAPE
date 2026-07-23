@@ -141,7 +141,9 @@ ds_raw = xr.open_dataset(filename, decode_times=False, chunks={}).chunk({"time":
 ds_raw = strip_grid_suffix(ds_raw, model_grid_suffix(ds_raw))
 ds_raw.attrs.update(ds.attrs)
 ds_raw["dV"]    = ds_raw.Δx_caa * ds_raw.Δy_aca * ds_raw.Δz_aac
-ds_raw["LxLy"]  = float(np.diff(grid.x)) * float(np.diff(grid.y))
+# Domain extent as a 0-d scalar (last − first): `float(np.diff(grid.x))` would call float() on a
+# 1-element *1-d* array, which newer numpy rejects ("only 0-dimensional arrays can be converted…").
+ds_raw["LxLy"]  = float(grid.x[-1] - grid.x[0]) * float(grid.y[-1] - grid.y[0])
 ds_raw.attrs["z_min"] = z_bot
 ds_raw.attrs["z_max"] = z_top
 
