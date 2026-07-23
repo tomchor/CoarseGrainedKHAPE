@@ -100,12 +100,13 @@ validation scripts in `postprocessing/validation/`.
 `SAVE_SORTED=1` passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
 state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
 (`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
-the sorted profile `b✶(z✶)` (`VerticalSort`) in a separate `<stem>_sorted.nc`, whose vertical
-dimension is the sorted column of N = Nx·Ny·Nz cells rather than the model grid. The column needs its
-own file: a `NetCDFWriter` holding two grids suffixes every dimension (`x_caa` → `x_caa_grid1`) and
-renames the grid metadata groups, which the rest of the pipeline cannot read. This is the online
-counterpart of what `02_sort_density.py` computes offline; `inv06_compare_sorted_profiles.py` compares
-the two. Each method carries its own full-domain sort per output, so this is off by default.
+the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It
+also emits the online local available potential energy `E_a` (and its integral `∫E_a`). All of these
+go into the main output file, since one `NetCDFWriter` holds both grids; the resulting per-grid
+dimension suffixing is undone at load time by the post-processing loader, so the rest of the pipeline
+is unaffected. This is the online counterpart of what `02_sort_density.py` and the offline APE
+computation produce; `inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare the
+two. Each method carries its own full-domain sort per output, so this is off by default.
 
 ### Run a simulation + online-vs-offline validation
 

@@ -62,11 +62,20 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 # comparisons (the offline nearest-density z₀ lookup, and the padded-domain sort, which differs from
 # the online ∫E_b by ~3%) are reported but deliberately not asserted: they measure a methodological
 # difference this script exists to quantify, not a regression.
+#
+# `inv07` also belongs to the exact-by-construction group. It compares the local APE computed two ways:
+# online, Eₐ from the ThreeDimensionalSort z✶ (ranked slots); offline, the same Holliday–McIntyre
+# integral from the nearest-density z₀ lookup. Those disagree only over tied buoyancies — and Eₐ ≈ 0
+# there for both (a parcel in uniform fluid sits at its own reference height), so unlike inv06's sorted
+# *state* the local *energy* is insensitive to the tie-handling. Measured at Re=262 the field and the
+# volume integral both agree to ~1e-11, so it is held at 1e-6 (six orders of headroom over the measured
+# value, and still far below the percent level a real physics regression would show).
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
     pytest.param("inv05_compare_dissipation.py", 0.5, [], id="eps_Ks"),
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
+    pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
 ]
 
 

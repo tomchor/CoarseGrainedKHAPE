@@ -8,6 +8,7 @@ using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort
+using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -318,7 +319,19 @@ if save_sorted
     # is unaffected; the column's variables keep their own suffix and are read by inv06.
     z✶_1dsort = reference_height(model, method=VerticalSort())
     b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
-    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort)
+
+    # Online local available potential energy (Oceanostics PR #274). AvailablePotentialEnergy now
+    # computes the Holliday & McIntyre (1981) local APE density Eₐ = ∫_{z✶}^{z}[b✶(z̃) - b] dz̃, the same
+    # positive-definite integral the offline pipeline builds in local_potential_energies_timeseries
+    # (its `ape` field): with b = g(ρ₀-ρ)/ρ₀ the two are identical, per unit mass (m² s⁻²), no ρ₀/sign
+    # conversion. Reuse the ThreeDimensionalSort z✶ above so the sort is shared, not repeated. Eₐ (the
+    # local field) is validated against the offline `ape` by inv07; ∫Eₐ and ∫E_b give the online
+    # TPE = BPE + APE split, which ∫pe (already written) closes. E_b's local field is the trivial -bz✶,
+    # so only its integral is emitted.
+    E_a = AvailablePotentialEnergy(model, z✶_3dsort)
+    ∫E_a = Integral(E_a)
+    ∫E_b = Integral(BackgroundPotentialEnergy(model, z✶_3dsort))
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b)
 end
 #---
 
