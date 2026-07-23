@@ -1398,7 +1398,7 @@ version = "0.110.5"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "7db2e5e845dbda78ffb793d2a933b08decf323ac"
+git-tree-sha1 = "ebf9b90b6660cefd72fdc49b940239efa71aaa7e"
 repo-rev = "tc/available-potential-energy"
 repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"

@@ -7,7 +7,7 @@ The simulation must have been run with `--save_sorted`, which writes
 
     z✶_3dsort              ThreeDimensionalSort   z✶ on the model grid, tied cells take consecutive slots
     z✶_heaviside           HeavisideIntegral      z✶ on the model grid, tied cells share their layer mid-height
-    z✶_1dsort, b✶_1dsort   OneDimensionalSort     the sorted column, on its own N-cell vertical axis
+    z✶_1dsort, b✶_1dsort   VerticalSort           the sorted column, on its own N-cell vertical axis
 
 all into the same output file. Since the column is on a different grid from the model fields, the
 writer suffixes every dimension name (`z_aac` -> `z_aac_grid1` for the model, `_grid2` for the column)
@@ -163,7 +163,7 @@ def profile_from_model_grid(z_star_field, b_field):
 
     `reference_buoyancy` is the model's own `b` for `ThreeDimensionalSort` and `HeavisideIntegral`,
     since z✶ and b already pair up cell by cell there. Ordering those pairs by z✶ gives the same
-    profile `OneDimensionalSort` stores directly — which is exactly what the lock_release example in
+    profile `VerticalSort` stores directly — which is exactly what the lock_release example in
     the Oceanostics PR does to plot all three methods on the same axes.
     """
     z = np.asarray(z_star_field).ravel()
@@ -174,7 +174,7 @@ def profile_from_model_grid(z_star_field, b_field):
 
 # All three online methods as profiles, at the snapshot time, plus the two offline sorts.
 profiles = {
-    "online (OneDimensionalSort)": b_col,
+    "online (VerticalSort)": b_col,
     "offline (unpadded)": rho_to_b(srt_unpad.rho_sorted).rename({"z_1d_sorted": "z✶"}),
     "offline (padded)":   rho_to_b(srt_pad.rho_sorted).rename({"z_1d_sorted": "z✶"}),
 }
@@ -226,7 +226,7 @@ print("\n" + "="*70)
 print("  Sorted profile b✶(z✶)   [rms difference vs the online column, in units of B₀]")
 print("="*70)
 B0 = float(ds.attrs.get("B₀", 1.0))
-ref_prof = profiles["online (OneDimensionalSort)"].sel(time=t_sel, method="nearest")
+ref_prof = profiles["online (VerticalSort)"].sel(time=t_sel, method="nearest")
 
 # The two model-grid methods become profiles by pairing their z✶ with the model's own b and ordering.
 # Done here rather than above because it needs `z_star`, and only at the snapshot time (these are the
@@ -252,7 +252,7 @@ def compare_profiles(a, b):
     return np.interp(common, zb, b.values) - np.interp(common, za, a.values), "interpolated"
 
 
-REF_PROFILE = "online (OneDimensionalSort)"
+REF_PROFILE = "online (VerticalSort)"
 for label, prof in profiles.items():
     if label == REF_PROFILE:
         continue
@@ -293,13 +293,13 @@ for a in labels:
     rms_int = float(np.sqrt(np.mean(d[~saturated] ** 2))) if (~saturated).any() else np.nan
     print(f"    {a:<32}{rms_tie:>20.3e}{rms_int:>24.3e}")
 
-# OneDimensionalSort answers on the sorted column rather than the model grid, so it has no cell-by-cell
+# VerticalSort answers on the sorted column rather than the model grid, so it has no cell-by-cell
 # entry in the table above. It is still tied to the other two exactly: ThreeDimensionalSort gives each
 # cell the height of its own slot in that same column, so collecting its z✶ values and sorting them must
 # reproduce the column verbatim. That is the whole content of "the two methods describe the same sorted
 # state, on different grids", and it is a bit-for-bit check rather than a tolerance.
 print("\n" + "="*70)
-print("  OneDimensionalSort vs ThreeDimensionalSort   [same sorted column, indexed by rank vs by cell]")
+print("  VerticalSort vs ThreeDimensionalSort   [same sorted column, indexed by rank vs by cell]")
 print("="*70)
 z_col_t   = np.sort(z_col.sel(time=t_sel, method="nearest").values.ravel())
 z_3d_sort = np.sort(snap["online (ThreeDimensionalSort)"].values.ravel())

@@ -7,7 +7,7 @@ using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
-using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, OneDimensionalSort
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -294,7 +294,7 @@ ke_transfer_fields = (; _ke_pairs...)
 # but differ in where they put cells of *equal* buoyancy and on what grid they answer:
 #   ThreeDimensionalSort  z✶ on the model grid; tied cells take consecutive slots (z✶ spreads over a cell)
 #   HeavisideIntegral     z✶ on the model grid; tied cells share their layer's mid-height (Winters eq. 11)
-#   OneDimensionalSort    the sorted column itself, on a 1×1×N grid → the reference profile b✶(z✶)
+#   VerticalSort          the sorted column itself, on a 1×1×N grid → the reference profile b✶(z✶)
 # All three are emitted so postprocessing/validation/inv06_compare_sorted_profiles.py can compare them
 # against each other and against the offline sort. Note the offline pipeline sorts the *z-padded* domain
 # (load_dataset_and_grid doubles the height with edge values), so the two do not sort the same field
@@ -316,7 +316,7 @@ if save_sorted
     # is written against the plain names, so `load_dataset_and_grid` strips the model grid's suffix at
     # load time (`strip_grid_suffix` in postprocessing/src/aux00_utils.py) and everything downstream
     # is unaffected; the column's variables keep their own suffix and are read by inv06.
-    z✶_1dsort = reference_height(model, method=OneDimensionalSort())
+    z✶_1dsort = reference_height(model, method=VerticalSort())
     b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
     sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort)
 end
