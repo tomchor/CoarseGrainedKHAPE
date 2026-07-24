@@ -170,6 +170,8 @@ jobs:
         run: |
           echo "=== figures/ ==="
           ls -la figures/ || echo "(directory missing)"
+          echo "=== figures/validation/ ==="
+          ls -la figures/validation/ || echo "(directory missing)"
           echo "=== animations/ ==="
           ls -la animations/ || echo "(directory missing)"
           echo "=== postprocessing/output/ ==="
@@ -181,6 +183,19 @@ jobs:
         with:
           name: budget-plots-time-varying
           path: figures/*.png
+          if-no-files-found: warn
+          retention-days: 20
+
+      # The online-vs-offline comparison figures written by the validation scripts that
+      # tests/test_online_vs_offline.py runs (inv01/inv02/inv05/inv06/inv07). They go in their own
+      # subdirectory, so `figures/*.png` above does not pick them up. Uploaded on `always()` so the
+      # plots are still there to look at when a comparison fails — which is when they matter most.
+      - name: Upload online-vs-offline validation plots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-plots-time-varying
+          path: figures/validation/*.png
           if-no-files-found: warn
           retention-days: 20
 

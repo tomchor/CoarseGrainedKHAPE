@@ -28,8 +28,10 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # validation/ → postprocessing/ → repo root
-FIGURES = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
+# Validation figures go in their own subdirectory so they are separable from the budget and
+# paper figures in `figures/` — CI uploads this directory as its own artifact.
+FIGURES = REPO_ROOT / "figures" / "validation"
+FIGURES.mkdir(parents=True, exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 ℓ = args.filter_scale

@@ -73,7 +73,7 @@ bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
-- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/`) and animations (`animations/`).
+- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
 - `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
 
 ### Run simulation only
@@ -118,10 +118,10 @@ bash submit_validation_run.sh NZ=1024
 
 `submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
-Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, and the sorted reference state offline and
-compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv06`),
-writing comparison figures to `figures/` and online-vs-offline animations to `animations/`. Note that
-`inv06` needs a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
+Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, and the local APE offline and
+compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv07`),
+writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
+`inv06` and `inv07` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 
