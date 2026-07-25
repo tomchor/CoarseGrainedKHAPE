@@ -73,7 +73,7 @@ bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
-- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/`) and animations (`animations/`).
+- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
 - `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
 
 ### Run simulation only
@@ -87,12 +87,26 @@ bash submit_simulation.sh NZ=2048
 
 # Also write the per-scale strain/stress tensor components (for online-vs-offline validation)
 bash submit_simulation.sh NZ=2048 SAVE_TENSORS=1
+
+# Also write the Winters (1995) sorted reference state (for online-vs-offline validation)
+bash submit_simulation.sh NZ=2048 SAVE_SORTED=1
 ```
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
 resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale. These
 are full 3D fields (off by default to keep production output lean) and are consumed only by the
 validation scripts in `postprocessing/validation/`.
+
+`SAVE_SORTED=1` passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
+state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
+(`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
+the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It
+also emits the online local available potential energy `E_a` (and its integral `∫E_a`). All of these
+go into the main output file, since one `NetCDFWriter` holds both grids; the resulting per-grid
+dimension suffixing is undone at load time by the post-processing loader, so the rest of the pipeline
+is unaffected. This is the online counterpart of what `02_sort_density.py` and the offline APE
+computation produce; `inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare the
+two. Each method carries its own full-domain sort per output, so this is off by default.
 
 ### Run a simulation + online-vs-offline validation
 
@@ -104,9 +118,10 @@ bash submit_validation_run.sh NZ=1024
 
 `submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
-Π_K, the strain/stress tensors, and the SFS KE dissipation ε_Kˢ offline and compares them against the
-simulation's online diagnostics (`postprocessing/validation/inv01`–`inv05`), writing comparison figures
-to `figures/` and online-vs-offline animations to `animations/`.
+Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, and the local APE offline and
+compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv07`),
+writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
+`inv06` and `inv07` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 

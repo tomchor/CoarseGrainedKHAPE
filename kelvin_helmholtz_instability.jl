@@ -7,6 +7,8 @@ using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort
+using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -74,6 +76,10 @@ let s = ArgParseSettings()
         "--save_tensors"
             help = "Also output the strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale (for online-vs-offline validation). These are full 3D fields, so off by default to keep production output lean."
             action = :store_true
+
+        "--save_sorted"
+            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, plus the sorted buoyancy profile b✶(z✶). Adds two 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
+            action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
@@ -81,6 +87,7 @@ end
 # global attribute, and it is not a physical parameter). Likewise filter_ls is a vector (the online
 # filter scales, encoded in the output variable names as `_ℓ<ℓ>`), so keep it out of `params` too.
 save_tensors = pop!(parsed_args, :save_tensors)
+save_sorted = pop!(parsed_args, :save_sorted)
 filter_ls = pop!(parsed_args, :filter_ls)
 params = (; parsed_args...)
 #---
@@ -280,6 +287,54 @@ end
 ke_transfer_fields = (; _ke_pairs...)
 #---
 
+#+++ Online Winters et al. (1995) sorted reference state  (Oceanostics)
+# Sorting the buoyancy field adiabatically into its minimum-PE state assigns every parcel a reference
+# height z✶. Offline this is done in Python by 02_sort_density.py (an argsort of the whole field per
+# timestep, held in host RAM and written out at 2× the raw field size); done here it is one GPU sort
+# per output. The three methods describe the same reference state and agree on every volume integral,
+# but differ in where they put cells of *equal* buoyancy and on what grid they answer:
+#   ThreeDimensionalSort  z✶ on the model grid; tied cells take consecutive slots (z✶ spreads over a cell)
+#   HeavisideIntegral     z✶ on the model grid; tied cells share their layer's mid-height (Winters eq. 11)
+#   VerticalSort          the sorted column itself, on a 1×1×N grid → the reference profile b✶(z✶)
+# All three are emitted so postprocessing/validation/inv06_compare_sorted_profiles.py can compare them
+# against each other and against the offline sort. Note the offline pipeline sorts the *z-padded* domain
+# (load_dataset_and_grid doubles the height with edge values), so the two do not sort the same field
+# near the top and bottom boundaries — quantifying that is part of what inv06 checks.
+#
+# Only the column is a reference *profile* as written. For the two model-grid methods `reference_buoyancy`
+# is the model's own `b`, which is already an output, so their profiles are recovered by pairing z✶ with b
+# and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
+sorted_fields = NamedTuple()
+if save_sorted
+    z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
+    z✶_heaviside = reference_height(model, method=HeavisideIntegral())
+
+
+    # The column lives on its own 1×1×N grid (N = Nx·Ny·Nz), which a single NetCDFWriter handles
+    # alongside the model grid, as the lock_release example upstream does. Holding two grids does make
+    # the writer disambiguate: every dimension gets a suffix (z_aac → z_aac_grid1 for the model grid,
+    # _grid2 for the column) and the grid metadata groups get a matching prefix. The offline pipeline
+    # is written against the plain names, so `load_dataset_and_grid` strips the model grid's suffix at
+    # load time (`strip_grid_suffix` in postprocessing/src/aux00_utils.py) and everything downstream
+    # is unaffected; the column's variables keep their own suffix and are read by inv06.
+    z✶_1dsort = reference_height(model, method=VerticalSort())
+    b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
+
+    # Online local available potential energy (Oceanostics PR #274). AvailablePotentialEnergy now
+    # computes the Holliday & McIntyre (1981) local APE density Eₐ = ∫_{z✶}^{z}[b✶(z̃) - b] dz̃, the same
+    # positive-definite integral the offline pipeline builds in local_potential_energies_timeseries
+    # (its `ape` field): with b = g(ρ₀-ρ)/ρ₀ the two are identical, per unit mass (m² s⁻²), no ρ₀/sign
+    # conversion. Reuse the ThreeDimensionalSort z✶ above so the sort is shared, not repeated. Eₐ (the
+    # local field) is validated against the offline `ape` by inv07; ∫Eₐ and ∫E_b give the online
+    # TPE = BPE + APE split, which ∫pe (already written) closes. E_b's local field is the trivial -bz✶,
+    # so only its integral is emitted.
+    E_a = AvailablePotentialEnergy(model, z✶_3dsort)
+    ∫E_a = Integral(E_a)
+    ∫E_b = Integral(BackgroundPotentialEnergy(model, z✶_3dsort))
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b)
+end
+#---
+
 outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
 
 using NCDatasets
@@ -292,24 +347,23 @@ if !(model.closure isa ScalarDiffusivity)
     outputs = (; outputs..., ν, κ)
 end
 
-simulation.output_writers[:fields] =
-    NetCDFWriter(model, outputs,
-                 schedule = ConsecutiveIterations(TimeInterval(2)), # Consecutive iterations every 4 periods to calculate time derivatives
-                 filename = output_filename,
-                 array_type = Array{Float64},
-                 global_attributes = params,
-                 overwrite_existing = true)
+# The model-grid z✶ fields go in the 3D file only; the 2D writer below slices with `indices` for a
+# lightweight x–z animation and has no use for them.
+simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_fields...),
+                                                  schedule = ConsecutiveIterations(TimeInterval(2)),
+                                                  filename = output_filename,
+                                                  array_type = Array{Float64},
+                                                  global_attributes = params,
+                                                  overwrite_existing = true)
 
 output_filename_2d = "output/$(simulation_name)_2d.nc"
-simulation.output_writers[:twod_fields] =
-NetCDFWriter(model, outputs,
-             schedule = TimeInterval(2),
-             filename = output_filename_2d,
-             array_type = Array{Float32},
-             indices = (:, 1, :),
-             global_attributes = params,
-             overwrite_existing = true)
-
+simulation.output_writers[:twod_fields] = NetCDFWriter(model, outputs,
+                                                       schedule = TimeInterval(2),
+                                                       filename = output_filename_2d,
+                                                       array_type = Array{Float32},
+                                                       indices = (:, 1, :),
+                                                       global_attributes = params,
+                                                       overwrite_existing = true)
 
 @info "Output will be saved to: $(output_filename).nc"
 #---

@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
-from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities
+from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities, open_grid_group
 from src.aux02_ke_functions import calculate_strain_tensor, calculate_sfs_stress_tensor
 from src.aux03_plotting import run_label
 #---
@@ -28,8 +28,10 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # validation/ → postprocessing/ → repo root
-FIGURES = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
+# Validation figures go in their own subdirectory so they are separable from the budget and
+# paper figures in `figures/` — CI uploads this directory as its own artifact.
+FIGURES = REPO_ROOT / "figures" / "validation"
+FIGURES.mkdir(parents=True, exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 ℓ = args.filter_scale
@@ -49,7 +51,7 @@ TENSOR_SYMBOL = {"strain": "S̄ⁱʲ", "stress": "τⁱʲ"}[args.tensor]
 # (unpadded) z extent from the grid group to drop the padding before comparing.
 print("Loading simulation data...")
 ds = load_dataset_and_grid(filename)
-grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
+grid = open_grid_group(filename)   # handles the _gridN naming a --save_sorted run introduces
 z0, z1 = float(grid.z.min()), float(grid.z.max())
 in_domain = dict(z_aac=slice(z0, z1))
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
+from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter
 from src.aux03_plotting import run_label
 #---
@@ -20,12 +21,16 @@ parser = argparse.ArgumentParser(description="Compare online (simulation-time) v
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online GaussianFilter widths")
 parser.add_argument("--time", type=float, default=None, help="Target time for snapshot (default: midpoint of simulation)")
+add_tolerance_arg(parser)
 args = parser.parse_args()
+set_tolerance(args.tolerance)
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # validation/ → postprocessing/ → repo root
-FIGURES = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
+# Validation figures go in their own subdirectory so they are separable from the budget and
+# paper figures in `figures/` — CI uploads this directory as its own artifact.
+FIGURES = REPO_ROOT / "figures" / "validation"
+FIGURES.mkdir(parents=True, exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 #---
@@ -105,7 +110,7 @@ for name in field_names:
         rms_online = np.sqrt(np.nanmean(online_vals**2))
         rel_err = rms_diff / rms_online if rms_online > 0 else float("inf")
         max_abs = np.nanmax(np.abs(diff))
-        print(f"  {name}_ℓ{ℓ_str}: rms(diff)/rms(online) = {rel_err:.2e}, max|diff| = {max_abs:.2e}")
+        check(rel_err, f"  {name}_ℓ{ℓ_str}: rms(diff)/rms(online) = {rel_err:.2e}, max|diff| = {max_abs:.2e}", print)
 
     suptitle = f"Online vs offline Gaussian filter: {name}   t = {t_sel:.1f}"
     if label:
@@ -116,3 +121,5 @@ for name in field_names:
     fig.savefig(outfile, dpi=150, bbox_inches="tight")
     print(f"  Figure saved to: {outfile}")
 #---
+
+finalize(print)
