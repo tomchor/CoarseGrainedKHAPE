@@ -15,6 +15,7 @@ using Oceanostics.ProgressMessengers
 Random.seed!(546)
 
 include("utils.jl")
+include("online_ape_dissipation.jl")   # Υ = z✶ - z and ε_A = κ ∂ᵢb ∂ᵢΥ, built on Oceanostics' reference height
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()
@@ -78,7 +79,7 @@ let s = ArgParseSettings()
             action = :store_true
 
         "--save_sorted"
-            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, plus the sorted buoyancy profile b✶(z✶). Adds two 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
+            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), the local APE Eₐ, and the buoyancy displacement potential Υ with the total APE dissipation ε_A. Adds a few 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
             action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
@@ -331,7 +332,21 @@ if save_sorted
     E_a = AvailablePotentialEnergy(model, z✶_3dsort)
     ∫E_a = Integral(E_a)
     ∫E_b = Integral(BackgroundPotentialEnergy(model, z✶_3dsort))
-    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b)
+
+    # Buoyancy displacement potential Υ = z✶ - z and the total APE dissipation ε_A = κ ∂ᵢb ∂ᵢΥ, both
+    # from online_ape_dissipation.jl. They hang off the HeavisideIntegral z✶ already computed above, so
+    # they add no sort of their own — and that is also the method to want here: every use of Υ
+    # differentiates it, and only Eq. (11) makes z✶ a function of buoyancy alone, so tied cells share
+    # one reference height instead of spreading z✶ over the depth their run fills. Υ is materialized as
+    # a `Field` (halos filled) both because ε_A differences it and so the two share one computation.
+    # Note the units convention: this Υ is the buoyancy form, and the offline pipeline's Υ is the
+    # density form of Wenegrat, Chor & Barkan (2026) Eq. (7), the two differing by -g/ρ₀ (see the
+    # header of online_ape_dissipation.jl). ε_A is the same number in either form.
+    Υ = Field(BuoyancyDisplacementPotential(model, z✶_heaviside))
+    ε_A = AvailablePotentialEnergyDissipationRate(model, z✶_heaviside; upsilon=Υ)
+    ∫ε_A = Integral(ε_A)
+
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, Υ, ε_A, ∫ε_A)
 end
 #---
 
