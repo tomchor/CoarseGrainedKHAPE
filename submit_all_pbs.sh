@@ -10,7 +10,7 @@
 #   NZ         vertical resolution
 #   FIXED_REF  use fixed-in-time reference profile: 0 or 1
 #   VALIDATE   also run the online-vs-offline validation (runs the simulation with --save_tensors
-#              so the strain/stress tensor comparison works): 0 or 1
+#              and --save_sorted so the tensor and sorted-reference-state comparisons work): 0 or 1
 #   PLOTS      also run the final plots after sweep_transfer: 0 or 1
 #
 # To run post-processing alone:
@@ -24,13 +24,14 @@ for arg in "$@"; do case $arg in
   PLOTS=*)     PLOTS="${arg#*=}";;
 esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
-[ "$VALIDATE" = "1" ] && SAVE_TENSORS=1 || SAVE_TENSORS=0   # validation needs the per-scale tensors
+# validation needs the per-scale tensors (inv03) and the sorted reference state (inv06)
+[ "$VALIDATE" = "1" ] && { SAVE_TENSORS=1; SAVE_SORTED=1; } || { SAVE_TENSORS=0; SAVE_SORTED=0; }
 
 SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
                -o logs/kelvin_helmholtz_${NZ}.log \
                -e logs/kelvin_helmholtz_${NZ}.log \
-               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS simulation.pbs)
-echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS): $SIM_JOB"
+               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED simulation.pbs)
+echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS, save_sorted=$SAVE_SORTED): $SIM_JOB"
 
 # Optional validation — parallel branch, runs after the simulation succeeds
 if [ "$VALIDATE" = "1" ]; then

@@ -8,7 +8,8 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
-from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter,
+from aux_check import add_tolerance_arg, set_tolerance, check, finalize
+from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter, open_grid_group,
                              condense_uw_velocities, integrate)
 from src.aux02_ke_functions import (calculate_sfs_stress_tensor,
                                      calculate_strain_tensor,
@@ -26,12 +27,16 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Pa
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online cross_scale_ke_flux widths")
 parser.add_argument("--time", type=float, default=None, help="Target time for the snapshot maps (default: midpoint of simulation)")
 parser.add_argument("--z-window", type=float, default=6.0, help="Half-height of the z window (in units of h) shown in the snapshot maps")
+add_tolerance_arg(parser)
 args = parser.parse_args()
+set_tolerance(args.tolerance)
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # validation/ → postprocessing/ → repo root
-FIGURES = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
+# Validation figures go in their own subdirectory so they are separable from the budget and
+# paper figures in `figures/` — CI uploads this directory as its own artifact.
+FIGURES = REPO_ROOT / "figures" / "validation"
+FIGURES.mkdir(parents=True, exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 
@@ -50,7 +55,7 @@ print("Loading simulation data...")
 ds = load_dataset_and_grid(filename)
 ds = ds.chunk({"time": 1})
 
-grid = xr.open_dataset(filename, group="underlying_grid_reconstruction_kwargs")
+grid = open_grid_group(filename)   # handles the _gridN naming a --save_sorted run introduces
 z0, z1 = float(grid.z.min()), float(grid.z.max())   # original (unpadded) z faces
 in_domain = dict(z_aac=slice(z0, z1))               # selects the original cell centers
 
@@ -125,8 +130,8 @@ for i, ℓ in enumerate(filter_scales):
     rms_diff   = float(np.sqrt(np.nanmean(diff.values**2)))
     rms_online = float(np.sqrt(np.nanmean(on.values**2)))
     rel = rms_diff / rms_online if rms_online > 0 else float("inf")
-    print(f"  ℓ={ℓ:>4g}: rms(diff)/rms(online) = {rel:.2e},  max|diff| = {float(np.nanmax(np.abs(diff.values))):.2e}"
-          f",  rms(online) = {rms_online:.2e}")
+    check(rel, f"  ℓ={ℓ:>4g}: rms(diff)/rms(online) = {rel:.2e},  max|diff| = {float(np.nanmax(np.abs(diff.values))):.2e}"
+               f",  rms(online) = {rms_online:.2e}", print)
 
 suptitle = f"Online vs offline cross-scale KE transfer Π_K   t = {t_sel:.1f}"
 if label:
@@ -161,7 +166,7 @@ for i, ℓ in enumerate(filter_scales):
 
     denom = float(np.sqrt(np.nanmean(off_int.values**2)))
     rel = float(np.sqrt(np.nanmean((on_int_fld.values - off_int.values)**2))) / denom if denom > 0 else float("inf")
-    print(f"  ℓ={ℓ:>4g}: rms(online−offline)/rms(offline) = {rel:.2e}")
+    check(rel, f"  ℓ={ℓ:>4g}: rms(online−offline)/rms(offline) = {rel:.2e}", print)
 
 suptitle = "Online vs offline volume-integrated KE transfer ∫Π_K dV"
 if label:
@@ -171,3 +176,5 @@ outfile2 = str(FIGURES / f"{stem}_ke_transfer_comparison_integral.png")
 fig2.savefig(outfile2, dpi=150, bbox_inches="tight")
 print(f"Integral figure saved to: {outfile2}")
 #---
+
+finalize(print)
