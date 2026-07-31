@@ -758,7 +758,8 @@ def calculate_ape_dissipation(rho, upsilon, kappa, index_dim="i"):
 
     This is the building block of the sub-filter dissipation below, which is the
     same expression evaluated on the full and on the filtered state, and it is what
-    the simulation computes online (`ε_A`, see `online_ape_dissipation.jl`);
+    the simulation computes online (`ε_A`, from Oceanostics'
+    `AvailablePotentialEnergyDissipationRate`);
     `postprocessing/validation/inv08_compare_ape_dissipation.py` compares the two.
 
     Parameters

@@ -3,7 +3,8 @@
 Compare the online (Oceanostics, simulation-time) buoyancy displacement potential Υ and total APE
 dissipation rate ε_A against the offline (Python post-processing) ones.
 
-The simulation computes, at each output (see `online_ape_dissipation.jl`),
+The simulation computes, at each output (Oceanostics' `BuoyancyDisplacementPotential` and
+`AvailablePotentialEnergyDissipationRate`),
 
     Υ   = z✶ - z            the buoyancy displacement potential, and
     ε_A = κ ∂ᵢb ∂ᵢΥ         the rate at which diffusion destroys available potential energy,
@@ -96,7 +97,7 @@ in_domain = dict(z_aac=slice(z_bot, z_top))   # the original cell centers, dropp
 for v in ("Υ", "ε_A", "∫ε_A"):
     if v not in ds:
         raise SystemExit(f"Online field '{v}' not in {filename} — rerun the simulation with --save_sorted "
-                         f"(needs online_ape_dissipation.jl).")
+                         f"(needs Oceanostics >= 0.19.0).")
 
 online_upsilon = ds["Υ"].sel(**in_domain)         # buoyancy form, z✶ - z, on the model grid
 online_eps_A   = ds["ε_A"].sel(**in_domain)

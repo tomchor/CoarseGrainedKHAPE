@@ -103,7 +103,7 @@ state under each of the three Oceanostics sorting methods: the reference height 
 the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It
 also emits the online local available potential energy `E_a` (and its integral `∫E_a`), the buoyancy
 displacement potential `Υ` = z✶ − z, and the total APE dissipation rate `ε_A` = κ ∂ᵢb ∂ᵢΥ (and its
-integral `∫ε_A`), the last two defined in `online_ape_dissipation.jl`. All of these
+integral `∫ε_A`). All of these
 go into the main output file, since one `NetCDFWriter` holds both grids; the resulting per-grid
 dimension suffixing is undone at load time by the post-processing loader, so the rest of the pipeline
 is unaffected. This is the online counterpart of what `02_sort_density.py` and the offline APE

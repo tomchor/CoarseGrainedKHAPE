@@ -9,13 +9,13 @@ using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
+using Oceanostics.AvailablePotentialEnergyEquation: BuoyancyDisplacementPotential, AvailablePotentialEnergyDissipationRate
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
 Random.seed!(546)
 
 include("utils.jl")
-include("online_ape_dissipation.jl")   # Υ = z✶ - z and ε_A = κ ∂ᵢb ∂ᵢΥ, built on Oceanostics' reference height
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()
@@ -334,14 +334,14 @@ if save_sorted
     ∫E_b = Integral(BackgroundPotentialEnergy(model, z✶_3dsort))
 
     # Buoyancy displacement potential Υ = z✶ - z and the total APE dissipation ε_A = κ ∂ᵢb ∂ᵢΥ, both
-    # from online_ape_dissipation.jl. They hang off the HeavisideIntegral z✶ already computed above, so
-    # they add no sort of their own — and that is also the method to want here: every use of Υ
-    # differentiates it, and only Eq. (11) makes z✶ a function of buoyancy alone, so tied cells share
-    # one reference height instead of spreading z✶ over the depth their run fills. Υ is materialized as
-    # a `Field` (halos filled) both because ε_A differences it and so the two share one computation.
-    # Note the units convention: this Υ is the buoyancy form, and the offline pipeline's Υ is the
-    # density form of Wenegrat, Chor & Barkan (2026) Eq. (7), the two differing by -g/ρ₀ (see the
-    # header of online_ape_dissipation.jl). ε_A is the same number in either form.
+    # from Oceanostics (≥ 0.19.0). They hang off the HeavisideIntegral z✶ already computed above, so
+    # they add no sort of their own — and that is also the method Oceanostics defaults to for them, for
+    # the reason its docstrings give: every use of Υ differentiates it, and only Eq. (11) makes z✶ a
+    # function of buoyancy alone, so tied cells share one reference height instead of spreading z✶ over
+    # the depth their run fills. Υ is materialized as a `Field` (halos filled) both because ε_A
+    # differences it and so the two share one computation. Note the units convention: this Υ is the
+    # buoyancy form z✶ - z, and the offline pipeline's Υ is the density form of Wenegrat, Chor & Barkan
+    # (2026) Eq. (7), the two differing by -g/ρ₀. ε_A is the same number in either form.
     Υ = Field(BuoyancyDisplacementPotential(model, z✶_heaviside))
     ε_A = AvailablePotentialEnergyDissipationRate(model, z✶_heaviside; upsilon=Υ)
     ∫ε_A = Integral(ε_A)
