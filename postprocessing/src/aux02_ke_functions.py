@@ -5,6 +5,7 @@ This module contains functions for calculating kinetic energy (KE).
 """
 
 import gc
+import time
 import xarray as xr
 from src.aux00_utils import (integrate, calculate_gradient,
                          condense_velocities,
@@ -378,6 +379,10 @@ def calculate_energy_transfer(ds, filter_scales,
                                                              n_workers=n_workers)
         # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ, with ∇Υˡ computed by differentiating the assembled Υˡ
         # field using a 4th-order stencil (see calculate_cross_scale_ape_flux()).
+        # Printed/timed: this step used to be a long silent gap after this loop's per-scale prints,
+        # easily mistaken for a hang even though it's just slow (confirmed via cput/walltime deltas).
+        print("Calculating cross-scale APE flux (Π_A)...")
+        t0 = time.time()
         Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
                                               gaussian_filter, filter_dims=filtered_dimensions,
                                               filtered_density=ds_filt_ℓ.ρ̄,
@@ -394,6 +399,7 @@ def calculate_energy_transfer(ds, filter_scales,
         # be freed before the next scale, bounding peak memory to ~1 scale's filt_local_pes instead of all
         # n_scales -- the same pattern already used in 05_sfs_ape_budget.py's own per-scale loop.
         Π_A = Π_A.load()
+        print(f"  Π_A computed and loaded  ({time.time()-t0:.1f}s)")
         del filt_local_pes
         gc.collect()
 
