@@ -1,0 +1,75 @@
+#!/bin/bash -l
+#PBS -A UMCP0023
+#PBS -N test_scheduler_timing
+#PBS -o logs/test_scheduler_timing.log
+#PBS -e logs/test_scheduler_timing.log
+# Note: job name above is a default; qalter below updates it at runtime based on Nx/Ny/Nz
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out files for per-run logs
+#PBS -l walltime=04:00:00
+#PBS -q casper
+#PBS -M wenegrat@umd.edu
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=8:mem=384GB:ngpus=0
+#PBS -l job_priority=regular
+
+# Timed back-to-back comparison of 01_filter_fields.py's two --write-mode options ("load", the current
+# production default -- eager materialization, fast but OOMs at large resolutions -- vs "synchronous" --
+# streamed/chunked, bounded memory, but single-threaded and assumed-but-never-measured to be slower) on the
+# SAME input file, in the SAME job, on the SAME node, so the only thing that differs between the two timed
+# runs is the write strategy itself (no queue-contention/node-variability confound from comparing separate
+# jobs). Defaults to the 256x256x64 case since that's known to complete successfully under "load" already
+# (needs the 384GB bump, but doesn't OOM at this resolution) -- the point here is measuring the slowdown,
+# not testing OOM behavior (that's what the 512x512x128 run itself is for).
+set -eo pipefail
+
+NX=${NX:-256}
+NY=${NY:-256}
+NZ=${NZ:-64}
+SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
+JOB_NAME="${SIM}_scheduler_timing_test"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
+
+source ../hpc_env.sh
+
+echo "======================================================================"
+echo "  Run 1/2: --write-mode load (current production default)"
+echo "======================================================================"
+time $PYTHON -u 01_filter_fields.py --filename output/${SIM}.nc --write-mode load --output-suffix _timingtest_load \
+    2>&1 | tee logs/${JOB_NAME}_load.out
+
+echo ""
+echo "======================================================================"
+echo "  Run 2/2: --write-mode synchronous"
+echo "======================================================================"
+time $PYTHON -u 01_filter_fields.py --filename output/${SIM}.nc --write-mode synchronous --output-suffix _timingtest_sync \
+    2>&1 | tee logs/${JOB_NAME}_sync.out
+
+echo ""
+echo "======================================================================"
+echo "  Sanity check: load vs synchronous outputs should be numerically identical"
+echo "======================================================================"
+$PYTHON -u -c "
+import xarray as xr
+import numpy as np
+a = xr.open_dataset('output/${SIM}_filtered_velocities_timingtest_load.nc')
+b = xr.open_dataset('output/${SIM}_filtered_velocities_timingtest_sync.nc')
+assert set(a.data_vars) == set(b.data_vars), (set(a.data_vars), set(b.data_vars))
+worst = 0.0
+for v in a.data_vars:
+    diff = np.abs(a[v].values - b[v].values)
+    denom = np.abs(a[v].values).max()
+    rel = float(diff.max() / denom) if denom > 0 else float(diff.max())
+    worst = max(worst, rel)
+    print(f'  {v}: max relative difference = {rel:.2e}')
+print(f'Worst case: {worst:.2e} ({\"OK\" if worst < 1e-8 else \"WARNING: outputs differ more than expected\"})')
+"
+
+echo ""
+echo "======================================================================"
+echo "  Timings above (search for 'real' after each 'Run N/2' header)."
+echo "  Cleaning up test output files (${SIM}_filtered_velocities_timingtest_*.nc)."
+echo "======================================================================"
+rm -f output/${SIM}_filtered_velocities_timingtest_load.nc output/${SIM}_filtered_velocities_timingtest_sync.nc
+
+qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
