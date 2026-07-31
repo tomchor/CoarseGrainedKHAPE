@@ -23,6 +23,11 @@ NZ=${NZ:-32}
 # the simulation's own recorded filter_scales_m attribute (matching the online diagnostics automatically).
 # Set explicitly only to deliberately use different offline scales than the simulation's online ones.
 FILTER_SCALES_M=${FILTER_SCALES_M:-}
+# Defaults to "synchronous" (bounded memory, ~30% slower than "load" -- measured at 256x256x64, see
+# test_write_scheduler_timing.pbs) rather than "load" (fast, but OOMs at large resolutions -- the reason
+# this branch exists). Override with -v WRITE_MODE=load for smaller jobs where the speed matters more than
+# the memory headroom.
+WRITE_MODE=${WRITE_MODE:-synchronous}
 SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
 JOB_NAME="${SIM}_budgeting_filter"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
@@ -32,6 +37,6 @@ source ../hpc_env.sh
 FILTER_SCALES_FLAG=()
 [ -n "$FILTER_SCALES_M" ] && FILTER_SCALES_FLAG=(--filter-scales $FILTER_SCALES_M)
 
-time $PYTHON -u 01_filter_fields.py --filename output/${SIM}.nc "${FILTER_SCALES_FLAG[@]}" 2>&1 | tee logs/${JOB_NAME}.out
+time $PYTHON -u 01_filter_fields.py --filename output/${SIM}.nc --write-mode $WRITE_MODE "${FILTER_SCALES_FLAG[@]}" 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

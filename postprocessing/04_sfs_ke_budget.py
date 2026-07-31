@@ -3,8 +3,7 @@
 import os
 from pathlib import Path
 import xarray as xr
-from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, write_dataset
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
@@ -17,6 +16,9 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from baroclinic adjustment simulation output")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--write-mode", choices=["load", "synchronous"], default="load",
+    help="How to avoid the dask-lazy .to_netcdf() write hang -- see write_dataset() in aux00_utils.py for "
+         "what each mode does and the measured cost of 'synchronous' relative to 'load'.")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -234,22 +236,15 @@ local_vars      = [v for v in sfs_ke_budget_terms.data_vars if v not in integrat
 fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
 integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
 
-# sfs_ke_budget_terms is still fully dask-lazy at this point (KE_of_sfs_flow, Π_K/ε_Kˢ read from the
-# chunked simulation file, and every integral, none of it .load()'d yet). Writing a
-# lazy Dataset via .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple
-# threads writing into the same HDF5 file handle -- the same hang risk fixed for
-# local_potential_energies_timeseries() in aux01_pe_functions.py. Loading each subset right before its own
-# write (rather than the whole Dataset up front) keeps peak memory the same as the two separate to_netcdf()
-# calls already imply.
-print("  Saving local fields...")
-with ProgressBar(minimum=5, dt=5):
-    local_fields = sfs_ke_budget_terms[local_vars].load()
-local_fields.to_netcdf(fields_filename)
+# sfs_ke_budget_terms is still fully dask-lazy at this point (KE_of_sfs_flow, Π_K/ε_Kˢ read from the chunked
+# simulation file, and every integral, none of it .load()'d yet) -- see write_dataset() in aux00_utils.py for
+# why that's an issue and what --write-mode does about it. Writing each subset separately (rather than the
+# whole Dataset at once) keeps peak memory the same as the two separate to_netcdf() calls already imply.
+print(f"  Saving local fields (write-mode={args.write_mode})...")
+write_dataset(sfs_ke_budget_terms[local_vars], fields_filename, write_mode=args.write_mode)
 print(f"  Fields saved to:     {fields_filename}")
 
-print("  Saving integrated timeseries...")
-with ProgressBar(minimum=5, dt=5):
-    integrated_fields = sfs_ke_budget_terms[integrated_vars].load()
-integrated_fields.to_netcdf(integrated_filename)
+print(f"  Saving integrated timeseries (write-mode={args.write_mode})...")
+write_dataset(sfs_ke_budget_terms[integrated_vars], integrated_filename, write_mode=args.write_mode)
 print(f"  Integrated saved to: {integrated_filename}")
 #---

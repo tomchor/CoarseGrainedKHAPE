@@ -4,8 +4,7 @@ import os
 from pathlib import Path
 import time
 import xarray as xr
-from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid
+from src.aux00_utils import load_dataset_and_grid, write_dataset
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
 
@@ -15,6 +14,9 @@ parser = argparse.ArgumentParser(description="Calculate cross-scale APE transfer
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--write-mode", choices=["load", "synchronous"], default="load",
+    help="How to avoid the dask-lazy .to_netcdf() write hang -- see write_dataset() in aux00_utils.py for "
+         "what each mode does and the measured cost of 'synchronous' relative to 'load'.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -73,17 +75,12 @@ print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{ref_suffix}.nc"))
-# Force full computation before writing -- energy_transfer is still fully dask-lazy at this point (Π_A, the
-# APE->KE exchange terms, and their volume integrals, concatenated across filter scales, none of it .load()'d
-# yet). Writing a lazy Dataset via .to_netcdf() computes it via dask's threaded scheduler *during* the write,
-# with multiple threads writing into the same HDF5 file handle -- the same hang risk fixed for
-# local_potential_energies_timeseries() in aux01_pe_functions.py (see that function's comment for the
-# diagnosed mechanism and a real observed stall). Loading here first makes the write purely synchronous.
-print("  Computing energy_transfer (forces the dask graph before the write)...")
+# energy_transfer is still fully dask-lazy at this point (Π_A, the APE->KE exchange terms, and their volume
+# integrals, concatenated across filter scales, none of it .load()'d yet) -- see write_dataset() in
+# aux00_utils.py for why that's an issue and what --write-mode does about it.
+print(f"  Computing and writing energy_transfer (write-mode={args.write_mode})...")
 t0 = time.time()
-with ProgressBar(minimum=5, dt=5):
-    energy_transfer = energy_transfer.load()
-print(f"  energy_transfer computed  ({time.time()-t0:.1f}s)")
-energy_transfer.to_netcdf(output_filename)
+write_dataset(energy_transfer, output_filename, write_mode=args.write_mode)
+print(f"  energy_transfer computed and saved  ({time.time()-t0:.1f}s)")
 print(f"Results saved to: {output_filename}")
 #---
