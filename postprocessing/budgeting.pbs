@@ -10,7 +10,7 @@
 #PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=8:mem=256GB:ngpus=0
+#PBS -l select=1:ncpus=8:mem=384GB:ngpus=0
 #PBS -l job_priority=regular
 
 # Runs 02-06: density sort, energy transfer, SFS KE/APE budgets, and the per-scale budget plot.
