@@ -218,7 +218,8 @@ fig.legend(handles=legend_handles, loc="upper center", ncol=len(legend_handles),
 
 fig.suptitle(f"{stem}, ℓ={ℓ_km}km, t={t_days:.1f}d, z={z_sel:.0f}m", fontsize=13, y=1.1)
 
-outfile = FIGURES / f"{stem}_vorticity_strain_flux_l{ℓ_km}km.pdf"
+z_m = int(round(z_sel))
+outfile = FIGURES / f"{stem}_vorticity_strain_flux_l{ℓ_km}km_z{z_m}m.pdf"
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---

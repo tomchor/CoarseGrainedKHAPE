@@ -15,7 +15,9 @@
 
 # Final figures and animations from the post-processed budgets (budgeting.pbs must have run first).
 #   plot3_budgets.py           -- combined 2x2 KE/APE budget panel across both filter scales
-#   plot5_vorticity_strain_flux.py, plot6_middepth_snapshots.py -- once per filter scale
+#   plot5_vorticity_strain_flux.py, plot6_middepth_snapshots.py -- once per filter scale, at each depth in
+#                                  Z_VALUES_M (mid-depth and surface by default; both scripts' own --z default
+#                                  is mid-depth alone, this loop adds the surface pass)
 #   anim2_surface_buoyancy.py  -- surface buoyancy GIF
 #   anim3_panels.py            -- once per filter scale (surface fields + budget time series GIF)
 set -eo pipefail
@@ -27,6 +29,10 @@ NZ=${NZ:-32}
 # budget file, and the per-scale loop below (plot5/plot6/anim3) reads every scale from that same file.
 # Set explicitly to restrict/override which scales get plotted.
 FILTER_SCALES_M=${FILTER_SCALES_M:-}
+# Depths (meters) plot5/plot6 run at, per filter scale -- -500 matches both scripts' own --z default
+# (mid-depth); 0 resolves to the shallowest cell center (surface) via their existing --z "nearest available"
+# selection. Override to a different (space-separated) set of depths if these two aren't what you want.
+Z_VALUES_M=${Z_VALUES_M:--500 0}
 SIM=bci_Nx${NX}_Ny${NY}_Nz${NZ}
 JOB_NAME="${SIM}_plots"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
@@ -54,8 +60,10 @@ print(' '.join(str(float(x)) for x in ds.filter_scale.values))
 fi
 
 for FS in $LOOP_SCALES; do
-    time $PYTHON -u plot5_vorticity_strain_flux.py --filename output/${SIM}.nc --filter-scale $FS 2>&1 | tee -a $LOG
-    time $PYTHON -u plot6_middepth_snapshots.py    --filename output/${SIM}.nc --filter-scale $FS 2>&1 | tee -a $LOG
+    for Z in $Z_VALUES_M; do
+        time $PYTHON -u plot5_vorticity_strain_flux.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
+        time $PYTHON -u plot6_middepth_snapshots.py    --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
+    done
 done
 
 time $PYTHON -u anim2_surface_buoyancy.py --filename output/${SIM}.nc 2>&1 | tee -a $LOG
