@@ -10,7 +10,7 @@
 #PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=8:mem=384GB:ngpus=0
+#PBS -l select=1:ncpus=8:mem=732GB:ngpus=0
 #PBS -l job_priority=regular
 
 # Many-filter-scale sweep, step 1 of 2 (see CLAUDE.md: sweep1's --scale-min/--scale-max/--n-scales
