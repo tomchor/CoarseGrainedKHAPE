@@ -318,14 +318,32 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
     # because _run is never called again after this point -- reassignment doesn't depend on that.
     rho_all = None
 
-    rho_sorted_list, dz_sorted_list = [], []
-    for rho_1d_sorted, dz_1d_sorted, z_1d_sorted in results:
-        coord = dict(z_1d_sorted=z_1d_sorted)
-        rho_sorted_list.append(xr.DataArray(rho_1d_sorted, dims="z_1d_sorted", coords=coord))
-        dz_sorted_list.append(xr.DataArray(dz_1d_sorted, dims="z_1d_sorted", coords=coord))
+    # Fill pre-allocated (time, N) arrays directly instead of building a list of per-timestep DataArrays
+    # and then xr.concat()-ing a second, separate copy of the same data -- avoids ~5x peak memory for what's
+    # otherwise just a reshuffling of already-computed per-timestep results (the two OOMs hit this session
+    # were both inside this class of doubling, one here and one in local_potential_energies_timeseries()).
+    N = len(results[0][0])
+    rho_sorted_arr = np.empty((n_times, N))
+    dz_sorted_arr  = np.empty((n_times, N))
+    z_1d_sorted    = results[0][2]
+    for i, (rho_1d_sorted, dz_1d_sorted, z_1d_sorted_i) in enumerate(results):
+        rho_sorted_arr[i] = rho_1d_sorted
+        dz_sorted_arr[i]  = dz_1d_sorted
+        # z_1d_sorted = cumsum(sorted cell heights) + offset (see _sort_single_timestep) depends only on
+        # cell volumes and their sorted order, not on which cells ended up there -- for a uniform-volume
+        # grid (true throughout this codebase; confirmed directly against a real dataset) it's provably
+        # time-invariant, since reordering a constant array by any permutation returns the same array.
+        # Asserted rather than assumed silently, so a future non-uniform grid fails loudly here instead of
+        # silently dropping real per-timestep variation that this single shared coordinate can't represent.
+        assert np.array_equal(z_1d_sorted_i, z_1d_sorted), \
+            "z_1d_sorted differs across timesteps -- the uniform-cell-volume assumption behind this " \
+            "function's single shared z_1d_sorted coordinate no longer holds"
+    results = None
 
-    rho_sorted_da = xr.concat(rho_sorted_list, dim="time").assign_coords(time=ds.time)
-    dz_sorted_da  = xr.concat(dz_sorted_list,  dim="time").assign_coords(time=ds.time)
+    rho_sorted_da = xr.DataArray(rho_sorted_arr, dims=("time", "z_1d_sorted"),
+                                 coords={"time": ds.time, "z_1d_sorted": z_1d_sorted})
+    dz_sorted_da  = xr.DataArray(dz_sorted_arr,  dims=("time", "z_1d_sorted"),
+                                 coords={"time": ds.time, "z_1d_sorted": z_1d_sorted})
 
     return xr.Dataset(dict(rho_sorted=rho_sorted_da, dz_sorted=dz_sorted_da))
 #---
@@ -476,26 +494,35 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
 
     # --- Reassemble results into xarray ---
     rho_t0  = ds[density_name].isel(time=0)
-    coords0 = rho_t0.coords
     dims0   = rho_t0.dims
+    shape0  = rho_t0.shape
+    # "time" excluded here (rather than reused from coords0 as-is) since .isel(time=0) keeps it as a scalar
+    # coordinate -- it's added back below as the real (n_times,)-shaped coordinate for the new leading
+    # "time" dimension, which would otherwise conflict with the leftover scalar of the same name.
+    coords0 = {k: v for k, v in rho_t0.coords.items() if k != "time"}
 
-    local_ape_list     = []
-    local_z0_list      = []
-    local_upsilon_list = []
-    local_D_list       = []
-
-    for ape_3d, z0_3d, upsilon_3d, D_3d in results:
-        local_ape_list.append(    xr.DataArray(ape_3d,     dims=dims0, coords=coords0))
-        local_z0_list.append(     xr.DataArray(z0_3d,      dims=dims0, coords=coords0))
-        local_upsilon_list.append(xr.DataArray(upsilon_3d, dims=dims0, coords=coords0))
-        local_D_list.append(      xr.DataArray(D_3d,       dims=dims0, coords=coords0))
+    # Fill pre-allocated (time, …) arrays directly instead of building a list of per-timestep DataArrays
+    # and then xr.concat()-ing a second, separate copy of the same data -- avoids ~8x peak memory (4 fields
+    # x list+concat) for what's otherwise just a reshuffling of already-computed per-timestep results.
+    local_ape_np     = np.empty((n_times, *shape0))
+    local_z0_np      = np.empty((n_times, *shape0))
+    local_upsilon_np = np.empty((n_times, *shape0))
+    local_D_np       = np.empty((n_times, *shape0))
+    for i, (ape_3d, z0_3d, upsilon_3d, D_3d) in enumerate(results):
+        local_ape_np[i]     = ape_3d
+        local_z0_np[i]      = z0_3d
+        local_upsilon_np[i] = upsilon_3d
+        local_D_np[i]       = D_3d
+    results = None
 
     if verbose_level > 0: print("\nDone!")
 
-    local_ape_4d     = xr.concat(local_ape_list,     dim="time").assign_coords(time=ds.time)
-    local_z0_4d      = xr.concat(local_z0_list,      dim="time").assign_coords(time=ds.time)
-    local_upsilon_4d = xr.concat(local_upsilon_list, dim="time").assign_coords(time=ds.time)
-    local_D_4d        = xr.concat(local_D_list,       dim="time").assign_coords(time=ds.time)
+    time_dims0   = ("time",) + dims0
+    time_coords0 = {**coords0, "time": ds.time}
+    local_ape_4d     = xr.DataArray(local_ape_np,     dims=time_dims0, coords=time_coords0)
+    local_z0_4d      = xr.DataArray(local_z0_np,      dims=time_dims0, coords=time_coords0)
+    local_upsilon_4d = xr.DataArray(local_upsilon_np, dims=time_dims0, coords=time_coords0)
+    local_D_4d        = xr.DataArray(local_D_np,       dims=time_dims0, coords=time_coords0)
 
     tpe = local_TPE(ds[density_name], z_name=z_name)
     rpe = local_TPE(rho_sorted, z_name="z_1d_sorted")
