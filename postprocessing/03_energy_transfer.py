@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 #+++ Imports
+import gc
 import os
 from pathlib import Path
 import time
@@ -54,19 +55,45 @@ ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
-#+++ Calculate cross-scale transfer terms
+#+++ Calculate cross-scale transfer terms (checkpointed per filter scale)
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
 # Π_K (cross-scale KE transfer, horizontal-only) is now computed online by the simulation itself
 # (KineticEnergyCrossScaleFlux, restricted to dims=(1,2)) -- see 04_sfs_ke_budget.py, which reads it
 # straight from the simulation NetCDF instead of from this script's output. Only the APE cross-scale
 # transfer Π_A and the APE↔KE exchange are computed offline here.
-energy_transfer = calculate_energy_transfer(ds, filter_scales,
-                                            ds_filt=ds_filt,
-                                            rho_sorted=ds_sorted.rho_sorted,
-                                            dz_sorted=ds_sorted.dz_sorted,
-                                            n_workers=n_workers,
-                                            include_pi_k=False)
+#
+# Looped one scale at a time and checkpointed to disk -- same pattern as 05_sfs_ape_budget.py's per-scale
+# loop -- so a scale's full lazy graph (and everything upstream of it) doesn't stay reachable for the rest
+# of the script. calculate_energy_transfer() itself is unchanged (still called once per scale, just with a
+# single-element filter_scales list): it's also used by sweep2_energy_transfer.py, so its own internals are
+# left alone here rather than adding checkpointing inside the shared function.
+transfer_list = []
+checkpoint_files = []
+for ℓ in filter_scales:
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
+    checkpoint_files.append(checkpoint_path)
+
+    if checkpoint_path.exists():
+        print(f"\n--- filter_scale = {ℓ:.4f} (loading from checkpoint) ---")
+        transfer_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
+        continue
+
+    transfer_ℓ = calculate_energy_transfer(ds, [ℓ],
+                                           ds_filt=ds_filt,
+                                           rho_sorted=ds_sorted.rho_sorted,
+                                           dz_sorted=ds_sorted.dz_sorted,
+                                           n_workers=n_workers,
+                                           include_pi_k=False)
+    print(f"  Computing and saving checkpoint (write-mode={args.write_mode})...")
+    t0 = time.time()
+    write_dataset(transfer_ℓ, str(checkpoint_path), write_mode=args.write_mode)
+    print(f"  Checkpoint computed and saved  ({time.time()-t0:.1f}s)")
+    del transfer_ℓ
+    gc.collect()
+    transfer_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
+
+energy_transfer = xr.concat(transfer_list, dim="filter_scale")
 print("\nDone!")
 #---
 
@@ -75,12 +102,17 @@ print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{ref_suffix}.nc"))
-# energy_transfer is still fully dask-lazy at this point (Π_A, the APE->KE exchange terms, and their volume
-# integrals, concatenated across filter scales, none of it .load()'d yet) -- see write_dataset() in
-# aux00_utils.py for why that's an issue and what --write-mode does about it.
+# energy_transfer is dask-lazy here too -- each piece re-read from its own on-disk checkpoint above
+# (open_dataset(...).chunk() is always lazy regardless of the checkpoint's own data having been eager on
+# disk) -- see write_dataset() in aux00_utils.py for why that's an issue and what --write-mode does about it.
 print(f"  Computing and writing energy_transfer (write-mode={args.write_mode})...")
 t0 = time.time()
 write_dataset(energy_transfer, output_filename, write_mode=args.write_mode)
 print(f"  energy_transfer computed and saved  ({time.time()-t0:.1f}s)")
 print(f"Results saved to: {output_filename}")
+
+print("\nDeleting intermediate checkpoint files...")
+for f in checkpoint_files:
+    f.unlink(missing_ok=True)
+    print(f"  Deleted: {f.name}")
 #---

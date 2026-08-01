@@ -312,6 +312,12 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
     if verbose_level > 0:
         print("\nDone!")
 
+    # rho_all is the full raw (time, …) field -- not needed past this point, but stays reachable for the
+    # rest of the function (Python doesn't scope-limit within a function) unless explicitly cleared here.
+    # Reassigning rather than `del` since _run's closure over rho_all makes plain `del rho_all` only safe
+    # because _run is never called again after this point -- reassignment doesn't depend on that.
+    rho_all = None
+
     rho_sorted_list, dz_sorted_list = [], []
     for rho_1d_sorted, dz_1d_sorted, z_1d_sorted in results:
         coord = dict(z_1d_sorted=z_1d_sorted)
@@ -460,6 +466,13 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
         results = [results_unordered[i] for i in range(n_times)]
 
     if verbose_level > 0: print("\nDone (time loop)!")
+
+    # rho_all_np (the full raw (time, …) field) and task_args (which holds per-timestep views into it) are
+    # not needed past this point, but stay reachable for the rest of the function unless cleared here --
+    # task_args must be cleared too, since a numpy view keeps its base array's buffer alive regardless of
+    # whether the base array's own name is still bound.
+    rho_all_np = None
+    task_args = None
 
     # --- Reassemble results into xarray ---
     rho_t0  = ds[density_name].isel(time=0)
