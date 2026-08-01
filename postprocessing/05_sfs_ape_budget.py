@@ -14,7 +14,7 @@ from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, load_energy_transfer, write_dataset
 from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
-    local_potential_energies_timeseries,  # used for filtered density in loop
+    local_potential_energies_timeseries,  # used for full_local_pes, and as a fallback for filtered density
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
@@ -171,14 +171,30 @@ for ℓ in filter_scales:
     ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
     print(f"  ρ̄ calculated  ({time.time()-t0:.1f}s)")
 
-    t0 = time.time()
-    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, full_local_pes.rho_sorted, full_local_pes.dz_sorted,
-                                                         density_name="ρ̄", n_workers=n_workers)
-    print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
+    # z₀(ρ̄)/Υˡ/Dˡ/Ea(ρ̄, z) (local_potential_energies_timeseries() on ds_filt_ℓ) are the same, expensive,
+    # per-timestep computation that 03_energy_transfer.py's calculate_energy_transfer() already does
+    # internally for this exact scale (same ds_filt_ℓ, same reference rho_sorted/dz_sorted) -- it normally
+    # discards everything but Υˡ once Π_A is built, but with include_filt_local_pes=True it persists the
+    # rest to energy_transfer too, so read them back here instead of recomputing. Falls back to computing
+    # it directly if energy_transfer predates that flag (e.g. rerunning 05 alone against an older 03 output).
+    if all(v in energy_transfer for v in ("z₀(ρ̄)", "Υˡ", "Dˡ", "Ea(ρ̄, z)")):
+        filt_z0      = energy_transfer["z₀(ρ̄)"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+        filt_upsilon = energy_transfer["Υˡ"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+        filt_D       = energy_transfer["Dˡ"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+        filt_ape     = energy_transfer["Ea(ρ̄, z)"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    else:
+        print("  energy_transfer output predates include_filt_local_pes -- recomputing "
+              "local_potential_energies_timeseries() on ds_filt_ℓ (rerun 03_energy_transfer.py to avoid this)")
+        t0 = time.time()
+        filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, full_local_pes.rho_sorted, full_local_pes.dz_sorted,
+                                                             density_name="ρ̄", n_workers=n_workers)
+        print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
+        filt_z0, filt_upsilon, filt_D, filt_ape = filt_local_pes.z0, filt_local_pes.upsilon, filt_local_pes.D, filt_local_pes.ape
+        del filt_local_pes
 
     t0 = time.time()
     full_local_ape_filtered = gaussian_filter.apply(full_local_pes.ape, dims=filtered_dimensions)
-    subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
+    subfilter_local_ape = full_local_ape_filtered - filt_ape
     print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
@@ -186,7 +202,7 @@ for ℓ in filter_scales:
     # stencil matching the simulation's own advection scheme -- see calculate_sfs_ape_dissipation()'s
     # docstring for why (reverted from the analytic D(ρ)-based reconstruction).
     sfs_ape_dissipation = calculate_sfs_ape_dissipation(
-        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, κh, κv, gaussian_filter,
+        ds_full.ρ, full_local_pes.upsilon, filt_upsilon, κh, κv, gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_density=ds_filt_ℓ.ρ̄,)
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
@@ -196,7 +212,7 @@ for ℓ in filter_scales:
     int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
 
     t0 = time.time()
-    R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
+    R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_z0,
                                      full_local_pes.dz_sorted, gaussian_filter,
                                      filter_dims=filtered_dimensions, n_workers=n_workers)
     print(f"  R_s  ({time.time()-t0:.1f}s)")
@@ -225,15 +241,15 @@ for ℓ in filter_scales:
         "ρ̄": ds_filt_ℓ.ρ̄,
         # Reference heights
         "z₀(ρ)": full_local_pes.z0,
-        "z₀(ρ̄)": filt_local_pes.z0,
+        "z₀(ρ̄)": filt_z0,
         # Buoyancy displacement potentials
         "Υ": full_local_pes.upsilon,
-        "Υˡ": filt_local_pes.upsilon,
+        "Υˡ": filt_upsilon,
         "D": full_local_pes.D,
-        "Dˡ": filt_local_pes.D,
+        "Dˡ": filt_D,
         # Local APE fields
         "Ea(ρ, z)": full_local_pes.ape,
-        "Ea(ρ̄, z)": filt_local_pes.ape,
+        "Ea(ρ̄, z)": filt_ape,
         "Ēa(ρ, z)": full_local_ape_filtered,
         "Eaˢ(ρ, z)": subfilter_local_ape,
         # Local budget terms
@@ -255,18 +271,19 @@ for ℓ in filter_scales:
         budget_ℓ["∫-ε_Aˢ dV"].attrs["method"] = "residual estimate (implicit LES): -∂ₜE_A^s - exchange + Π_A + Rˢ"
         budget_ℓ["residual_A"].attrs["method"] = "≈0 by construction: ε_Aˢ is defined as the residual estimate (implicit LES)"
 
-    # budget_ℓ mixes eager (filt_local_pes.*, from the already-fixed local_potential_energies_timeseries())
-    # with lazy (full_local_pes.*, re-read from its own on-disk checkpoint above -- open_dataset(...).chunk()
-    # is always lazy regardless of how the source data was originally computed) and other lazy pieces (ρ̄,
-    # sfs_ape_dissipation, R_s, etc.) -- see write_dataset() in aux00_utils.py for why that's an issue and
-    # what --write-mode does about it.
+    # budget_ℓ mixes lazy pieces throughout: full_local_pes.* (re-read from its own on-disk checkpoint above
+    # -- open_dataset(...).chunk() is always lazy regardless of how the source data was originally computed),
+    # filt_z0/filt_upsilon/filt_D/filt_ape (same, now read from energy_transfer's on-disk output instead of
+    # local_potential_energies_timeseries() directly -- eager only in the energy_transfer-predates-the-flag
+    # fallback above), and other lazy pieces (ρ̄, sfs_ape_dissipation, R_s, etc.) -- see write_dataset() in
+    # aux00_utils.py for why that's an issue and what --write-mode does about it.
     print(f"  Computing and saving checkpoint (write-mode={args.write_mode})...")
     t0 = time.time()
     write_dataset(budget_ℓ, str(checkpoint_path), write_mode=args.write_mode)
     print(f"  Checkpoint computed and saved  ({time.time()-t0:.1f}s)")
 
     # Free memory before the next iteration
-    del ds_filt_ℓ, filt_local_pes, full_local_ape_filtered, subfilter_local_ape
+    del ds_filt_ℓ, filt_z0, filt_upsilon, filt_D, filt_ape, full_local_ape_filtered, subfilter_local_ape
     del sfs_ape_dissipation, R_s, dAPE_dt, budget_ℓ
     del ape_to_ke_exchange, int_ape_to_ke_exchange
     del int_dAPE_dt, int_sfs_ape_dissipation, int_R_s

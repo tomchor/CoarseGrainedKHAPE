@@ -63,6 +63,11 @@ print("Calculating cross-scale transfer terms...")
 # straight from the simulation NetCDF instead of from this script's output. Only the APE cross-scale
 # transfer Π_A and the APE↔KE exchange are computed offline here.
 #
+# include_filt_local_pes=True: calculate_energy_transfer() already computes z₀(ρ̄)/Υˡ/Dˡ/Ea(ρ̄, z) internally
+# per scale (via local_potential_energies_timeseries() on the filtered density) but normally discards all but
+# Υˡ once Π_A is built. Persisting the rest here lets 05_sfs_ape_budget.py read them back from this script's
+# output instead of computing local_potential_energies_timeseries() on the same ds_filt_ℓ a second time.
+#
 # Looped one scale at a time and checkpointed to disk -- same pattern as 05_sfs_ape_budget.py's per-scale
 # loop -- so a scale's full lazy graph (and everything upstream of it) doesn't stay reachable for the rest
 # of the script. calculate_energy_transfer() itself is unchanged (still called once per scale, just with a
@@ -84,7 +89,8 @@ for ℓ in filter_scales:
                                            rho_sorted=ds_sorted.rho_sorted,
                                            dz_sorted=ds_sorted.dz_sorted,
                                            n_workers=n_workers,
-                                           include_pi_k=False)
+                                           include_pi_k=False,
+                                           include_filt_local_pes=True)
     print(f"  Computing and saving checkpoint (write-mode={args.write_mode})...")
     t0 = time.time()
     write_dataset(transfer_ℓ, str(checkpoint_path), write_mode=args.write_mode)
