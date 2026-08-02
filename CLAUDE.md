@@ -104,6 +104,28 @@ independent, since neither branch was ever tested with the other active) so `int
 exists by the time it's needed. `--implicit` alone (no bottom drag) is unaffected -- the extra subtraction
 is itself gated on `bottom_drag`.
 
+**Post-processing write mode (`--write-mode`, `01_filter_fields.py`/`03_energy_transfer.py`/
+`04_sfs_ke_budget.py`/`05_sfs_ape_budget.py`):** `{load,synchronous}`, default `load`. Both avoid the same
+underlying bug: writing a Dataset that still has unevaluated dask arrays computes them via dask's default
+*threaded* scheduler *during* the `.to_netcdf()` call, with multiple threads writing into the same HDF5 file
+handle -- a real, observed hang (a checkpoint write once sat at 0% progress for 38+ minutes with near-zero
+CPU, not a crash), since the underlying HDF5 C library isn't reliably thread-safe for concurrent writes.
+`load` eagerly `.load()`s the full Dataset into memory before writing -- fast, but needs the whole thing to
+fit in memory at once (OOMs at large resolutions, e.g. 512x512x128). `synchronous` forces dask's
+single-threaded scheduler for just the write, which still streams/computes chunk-by-chunk (bounded memory)
+but avoids the hang -- measured ~30% slower than `load` for `01_filter_fields.py` at 256x256x64
+(`test_write_scheduler_timing.pbs`, both modes run back-to-back on the same node/input so only the write
+strategy differs). `01_filter_fields.py` also has `--output-suffix` (appended before `.nc`) so a
+`load`-vs-`synchronous` timing comparison run against the same input doesn't overwrite itself.
+`budgeting.pbs`/`budgeting_filter.pbs`/`sweep_filter.pbs`/`sweep_transfer.pbs` default to
+`WRITE_MODE=synchronous` (override via `-v WRITE_MODE=load`) -- these are the production-scale jobs this
+mode exists for, so defaulting to safe-but-slower avoids silently falling back to the mode that fails at
+scale. The shared `write_dataset()` helper (`aux00_utils.py`) implements both; `02_sort_density.py` has no
+`--write-mode` flag at all, since `sorted_timeseries()` builds its result from eager numpy throughout (no
+lazy graph ever reaches its write) -- see the Notes entry on `sorted_timeseries()`/
+`local_potential_energies_timeseries()`'s memory fixes for why that script OOM'd anyway at high time
+resolution, a completely different mechanism than the write hang.
+
 ### HPC job submission
 
 `submit_*.sh`/`*.pbs` (repo root and `postprocessing/`) are adapted for `baroclinic_adjustment.jl`/BCI
@@ -141,7 +163,10 @@ to `budgeting_filter.pbs`/`01_filter_fields.py` and `plots.pbs` -- **left unset 
 "use whatever the simulation actually used" rather than a separate hardcoded default; see the "Filter
 scales: single source of truth" note below), `FIXED_REF=0|1|both` (fixed-in-time vs. recomputed reference
 density profile; `both` submits both budgeting variants, sharing one filter-step run), `SWEEP=1`
-(`submit_all_pbs.sh` only, adds the sweep branch after budgeting).
+(`submit_all_pbs.sh` only, adds the sweep branch after budgeting), `WRITE_MODE` (`budgeting.pbs`/
+`budgeting_filter.pbs`/`sweep_filter.pbs`/`sweep_transfer.pbs` only, passed through to the underlying
+scripts' own `--write-mode` -- see "Post-processing write mode" above; left unset means "use that PBS
+script's own default," which is `synchronous` for all four).
 
 **Filter scales: single source of truth.** `baroclinic_adjustment.jl`'s `--filter_scales_m` (online
 diagnostics) and the offline pipeline's `--filter-scales`/`FILTER_SCALES_M` used to be two fully independent
@@ -167,14 +192,33 @@ offline without rerunning the simulation). The only thing that changed is what h
 specify it: previously a silent, independently-hardcoded guess; now derived from the one place that
 actually knows what was used.
 
-The `plots` stage runs `plot3_budgets.py`, `plot5_vorticity_strain_flux.py`/`plot6_middepth_snapshots.py`
-(once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the budget file),
-`anim2_surface_buoyancy.py`, and `anim3_panels.py` (once per filter scale) -- the latter depends
-specifically on the `FIXED_REF=0` budgeting output (no
-`--fixed-reference` support in the plotting scripts themselves), so `submit_budgeting.sh` skips plots
-automatically if only `FIXED_REF=1` was requested. `simulation.pbs`'s default `mem=64GB` is sized for a
-modest resolution and is a *static* PBS resource request (doesn't scale with `NX*NY*NZ` automatically) --
-bump it by hand in `simulation.pbs` for much larger grids. **Before first use**, every `*.pbs` file needs
+The `plots` stage runs `plot3_budgets.py`; `plot5_vorticity_strain_flux.py`/`plot6_middepth_snapshots.py`
+(once per filter scale -- `FILTER_SCALES_M` if set, else every scale in the budget file -- and, within
+that, once per depth in `Z_VALUES_M`, default `"-500 0"` i.e. mid-depth then surface; override with a
+different space-separated list of meters if those two aren't what you want); `anim2_surface_buoyancy.py`;
+and `anim3_panels.py` (once per filter scale) -- the latter depends specifically on the `FIXED_REF=0`
+budgeting output (no `--fixed-reference` support in the plotting scripts themselves), so
+`submit_budgeting.sh` skips plots automatically if only `FIXED_REF=1` was requested. Both `plot5`/`plot6`
+take `--z` (meters, nearest available cell center; each script's own default is mid-depth, `-500`) and bake
+the *resolved* depth into their output filename (`z{z_m}m`, from the actual nearest-cell value, not the raw
+`--z` request) so running the same filter scale at two different depths doesn't silently overwrite the
+first file with the second -- neither filename included depth at all before this.
+
+**Post-processing memory sizing.** Every `*.pbs` file's `#PBS -l select=...mem=...` is a *static* resource
+request that doesn't scale with `NX*NY*NZ` (or with simulation length) automatically -- `simulation.pbs`
+defaults to `mem=64GB`, sized for a modest resolution; bump it by hand for much larger grids.
+`budgeting.pbs`/`budgeting_filter.pbs`/`sweep_filter.pbs`/`sweep_transfer.pbs` have all needed bumping in
+practice (`budgeting_filter.pbs` needed 384GB at 512x512x128; `budgeting.pbs` needed 384GB then 732GB
+chasing real OOMs at 512x512x128 and then a 256x256x64-but-961-timestep run; `sweep_filter.pbs`/
+`sweep_transfer.pbs` bumped to 732GB alongside it). The 961-timestep case is the important lesson: it OOM'd
+at the *same* memory budget that had just worked fine on a *larger-grid* 512x512x128/81-timestep run,
+because the dominant cost in `02_sort_density.py`/`03_energy_transfer.py` (via `sorted_timeseries()`/
+`local_potential_energies_timeseries()`, see Notes) scales with `n_times × Nx × Ny × Nz`, not grid size
+alone -- a long, fine-time-resolution run can need more memory than a much bigger single-snapshot-heavy
+grid. Those two functions have since been rewritten to cut their own peak memory substantially (see Notes),
+but the underlying guidance stands: if a run has an unusually large *time* dimension (many timesteps, e.g.
+from a small `--output_interval_hours`), don't assume a mem budget that worked at a similar grid size but
+far fewer timesteps will still be enough. **Before first use**, every `*.pbs` file needs
 its `#PBS -A`/`#PBS -M` placeholders (`CHANGE_ME`) replaced with your own account code and email (PBS
 directives are parsed statically, so these can't be centralized), and `hpc_env.sh`'s `PYTHON` placeholder
 needs to point at your own HPC Python environment (must have `postprocessing/tests/requirements.txt`
@@ -258,9 +302,11 @@ invocation picks it up automatically.
   (`Π_K_ℓ50km`, `ε_Kˢ_ℓ50km`, etc.). This used to be offline-only (an Oceanostics bug crashed the online
   multi-direction `GaussianFilter` for a periodic y-direction -- see Notes) but the fix landed in
   Oceanostics v0.17.3, and `SubFilterKineticEnergyDissipationRate` (the missing SFS-dissipation
-  diagnostic) was added in the still-unmerged `tc/sfs-ke` branch (pinned in `Project.toml`/`Manifest.toml`
-  via `Pkg.add(url=..., rev="tc/sfs-ke")` -- check whether tomchor/Oceanostics.jl#266 has merged and
-  released before assuming this pin is still needed). Both were validated against the previous offline
+  diagnostic) was added in the `tc/sfs-ke` branch (pinned in `Project.toml`/`Manifest.toml` via
+  `Pkg.add(url=..., rev="tc/sfs-ke")`). tomchor/Oceanostics.jl#266, the PR behind that branch, has since
+  merged (2026-07-16) -- the pin could move to a proper tagged release/`main` instead of the branch; see the
+  Notes entry below on a newer `main`-branch Oceanostics module this pin doesn't include for why that's now
+  more than a tidiness concern. Both were validated against the previous offline
   Python implementation before switching over (0.99 spatial correlation, rms agreement within ~1-10%).
 - Πₖ is the **full 3D contraction** (`KineticEnergyCrossScaleFlux(model, filter; dims=(1,2,3))`): w is a
   genuine prognostic variable in this `NonhydrostaticModel`, with its own momentum equation and dissipative
@@ -281,9 +327,63 @@ Same 01-06 structure as KHAPE, adapted for horizontal (x,y) filtering instead of
 |--------|--------|
 | `01_filter_fields.py` | filters in (x,y) instead of (x,z); filter scales are free parameters again (no longer need to match an online `filter_ℓs`) |
 | `02_sort_density.py` | unchanged -- the Winters sort is dimension-agnostic |
-| `03_energy_transfer.py` | Πₖ is no longer computed here (`include_pi_k=False`) -- it's read straight from the simulation NetCDF now; still computes Π_A and the APE↔KE exchange offline |
-| `04_sfs_ke_budget.py` | reads Πₖ and ε_Kˢ directly from the simulation output (`ds[f"Π_K_ℓ{ℓ_km}km"]`, `ds[f"ε_Kˢ_ℓ{ℓ_km}km"]`) instead of computing/loading them; still computes the SFS KE density (LHS) offline via the stress-tensor trace, full 3D (i,j ∈ {1,2,3}) to stay dimensionally consistent with the online Πₖ/ε_Kˢ now that w is prognostic |
-| `05_sfs_ape_budget.py` | filters in (x,y); diffusivity κ now read from `nu`/`Pr` global attributes (a constant `ScalarDiffusivity`), not a `ds.κ` spatial field (which only exists for non-constant closures and was never actually populated here) |
+| `03_energy_transfer.py` | Πₖ is no longer computed here (`include_pi_k=False`) -- it's read straight from the simulation NetCDF now; still computes Π_A and the APE↔KE exchange offline. Loops over filter scales one at a time (calling `calculate_energy_transfer()` with a single-element list per scale) and checkpoints each scale to disk before moving to the next -- see "Checkpointing and cross-script reuse" below |
+| `04_sfs_ke_budget.py` | reads Πₖ and ε_Kˢ directly from the simulation output (`ds[f"Π_K_ℓ{ℓ_km}km"]`, `ds[f"ε_Kˢ_ℓ{ℓ_km}km"]`) instead of computing/loading them; still computes the SFS KE density (LHS) offline via the stress-tensor trace, full 3D (i,j ∈ {1,2,3}) to stay dimensionally consistent with the online Πₖ/ε_Kˢ now that w is prognostic. Also checkpoints per filter scale (see below); still independently recomputes `b_r`/the APE↔KE exchange term that `03` already computed and persisted -- a known, not-yet-fixed duplication, see Notes |
+| `05_sfs_ape_budget.py` | filters in (x,y); diffusivity κ now read from `nu`/`Pr` global attributes (a constant `ScalarDiffusivity`), not a `ds.κ` spatial field (which only exists for non-constant closures and was never actually populated here). Reads the filtered-density local potential-energy fields (z₀(ρ̄), Υˡ, Dˡ, Ea(ρ̄,z)) back from `03`'s output instead of recomputing them -- see "Checkpointing and cross-script reuse" below |
+
+**Checkpointing and cross-script reuse.** `05_sfs_ape_budget.py` originated the pattern both `03` and `04`
+now also use: per filter scale, compute the budget, write it to a per-scale checkpoint file, `del`/
+`gc.collect()` the in-memory/lazy result, then reopen the checkpoint lazily before moving to the next scale
+-- bounds peak memory to ~1 filter scale regardless of scale count or time resolution, instead of every
+scale's full (lazy) graph staying reachable until one final write at the end of the script. Checkpoints are
+deleted once the script's own final output is written successfully; each script also skips recomputing a
+scale whose checkpoint already exists on disk (resume-after-partial-failure, at the cost of silently reusing
+a stale checkpoint if the input data changed underneath it without the checkpoint being cleaned up first).
+
+`03_energy_transfer.py`'s `calculate_energy_transfer()` (`aux02_ke_functions.py`) already computes the
+filtered-density local potential-energy fields (z₀(ρ̄), Υˡ, Dˡ, Ea(ρ̄,z), via
+`local_potential_energies_timeseries()` on `ds_filt_ℓ`) per scale, purely as an intermediate for Π_A --
+only Υˡ is actually used, the rest was discarded. `05_sfs_ape_budget.py` then independently called the
+exact same function with the exact same inputs to get those same fields for real -- the same expensive
+per-timestep computation run twice across the pipeline for one result. `calculate_energy_transfer()` gained
+an `include_filt_local_pes=False` parameter (mirroring the existing `include_pi_k` pattern): when `03` sets
+it `True`, those four fields ride along in the checkpoint/final-write machinery it already has, and
+`05_sfs_ape_budget.py` reads them back (same `.sel(filter_scale=..., method="nearest")` pattern it already
+uses to reuse Π_A from `03` and the APE→KE exchange term from `04`) instead of calling
+`local_potential_energies_timeseries()` on `ds_filt_ℓ` itself. Falls back to the old direct-computation path
+if `03`'s output predates the flag (e.g. rerunning `05` alone against an older `03` output), rather than
+hard-failing. Off by default in `calculate_energy_transfer()` itself, since `sweep2_energy_transfer.py` (the
+only other caller, typically run with many more filter scales) has no use for these fields and already has
+a documented memory sensitivity at high scale counts (see below) that persisting more per-scale data would
+only worsen.
+
+`04_sfs_ke_budget.py` has an analogous, still-unfixed duplication with `03`: both independently compute
+`b_r` (via `calculate_b_r`) and its filtered/exchange-term derivatives at the same filter scale, and `04`'s
+copy is what `05` actually reads (via `ke_budget`, not `03`'s copy) -- so `03`'s own version of this
+specific term is computed and persisted but never read by anything downstream. Since `04` doesn't share code
+with `sweep2` the way `calculate_energy_transfer()` does, fixing this doesn't need an opt-in flag -- just
+have `04` read `ape_to_ke_exchange`/`∫(SFS APE->KE) dV` from `03`'s `_energy_transfer.nc` (via
+`load_energy_transfer()`, which `05` already uses) instead of recomputing them.
+
+`aux01_pe_functions.py`'s `sorted_timeseries()` (used by `02_sort_density.py`) and
+`local_potential_energies_timeseries()` (used inside `calculate_energy_transfer()` and directly by `05`)
+used to (a) keep the full raw per-timestep input array reachable for the rest of the function after the
+per-timestep sort/compute loop was done with it, and (b) build their `(time, ...)` outputs by appending
+per-timestep `xr.DataArray`s to a Python list and then `xr.concat()`-ing a *second*, separate copy of the
+same data -- meaning the list and the concatenated result were both alive simultaneously at peak, on top of
+the still-reachable raw input. Both were the actual root cause behind two OOMs (a 512x512x128 grid-driven
+failure inside `local_potential_energies_timeseries()`, and a 256x256x64/961-timestep failure inside
+`sorted_timeseries()` -- see "Post-processing memory sizing" above). Fixed by reassigning the raw input to
+`None` once the per-timestep loop is done with it (not `del`, since `sorted_timeseries()`'s `_run` closure
+over the raw input means a bare `del` would only be safe because `_run` is never called again after that
+point -- reassignment doesn't depend on that), and by filling pre-allocated `(time, ...)` arrays directly
+instead of list-then-`concat()`. `sorted_timeseries()`'s `z_1d_sorted` coordinate (the sorted profile's
+vertical positions) is computed once and asserted equal across all timesteps rather than left to
+`xr.concat`'s own coordinate reconciliation -- it's provably time-invariant on this codebase's
+uniform-cell-volume grid (reordering a constant array by any permutation returns the same array; confirmed
+directly against real data), so a single shared value is correct, but the assertion means a future
+non-uniform grid fails loudly here instead of silently dropping real per-timestep variation. Verified
+bit-identical output before/after on a real (if small) local run, including budget-closure tests.
 
 `aux00_utils.py`'s `GaussianFilter` class filters (x,y), both periodic (`mode='wrap'` on both), replacing
 KH's (x periodic, z bounded `mode='nearest'`). `condense_velocities` (u,v,w) is used throughout instead of
@@ -301,10 +401,21 @@ Hovmöller of time vs. ℓ) have been adapted for BCI: `sweep1`'s filter-scale r
 (`--scale-min`/`--scale-max` default to 2x the grid spacing and 40% of the domain width Lx respectively,
 rather than the old hardcoded KH range in different units), `sweep2`'s log message now says "x and y" not
 "x and z", and `sweep3`'s `SymLogNorm(linthresh=...)` scales with the data's own magnitude (`vmax*1e-3`)
-instead of a fixed absolute value tuned for KH's much smaller Πₖ/Π_A magnitudes. Note `sweep2` calls
-`calculate_energy_transfer` without `--fixed-reference`, so it redoes a full Winters sort per filter scale
-(the sort itself doesn't depend on filter scale, but nothing shares it across scales) -- fine for a handful
-of scales, expensive for `sweep1`'s default 30-scale sweep on a full-length run.
+instead of a fixed absolute value tuned for KH's much smaller Πₖ/Π_A magnitudes.
+
+Correction to a stale earlier note here: `sweep2` calls `calculate_energy_transfer()` **once**, passing the
+*entire* `filter_scales` array (unlike `03_energy_transfer.py`, which now loops one scale at a time -- see
+"Checkpointing and cross-script reuse" below). Without `--fixed-reference`, `rho_sorted`/`dz_sorted` start
+as `None`, so `calculate_energy_transfer()` runs `sorted_timeseries()` itself -- but that call sits *before*
+its own `for ℓ in filter_scales:` loop, so the sort happens once per `calculate_energy_transfer()` call, not
+once per filter scale (confirmed directly by reading the current code). What *is* still true and expensive
+for a 30-scale sweep: `calculate_energy_transfer()`'s per-scale loop has no checkpointing (deliberately left
+alone when `03` got it, specifically so `sweep2` -- the loop's other caller -- wouldn't be affected), so
+every scale's `filt_local_pes` reference stays alive via the lazy `Π_A` graph until the whole multi-scale
+result is concatenated at the end -- confirmed as the cause of a real OOM on a 384x384x64, n_scales=30
+sweep run (see the `filt_local_pes` comment in `aux02_ke_functions.py`). Parallelizing `sweep2` across
+scales would need this restructured first (pull the per-scale loop out to the script level, the way `03`'s
+now is) -- there's currently no natural per-scale seam to submit as separate concurrent jobs.
 
 `sweep3` also gained a second row of panels that was previously missing: it already computed a `1/ℓ`
 coordinate (`inv_scale`) specifically so a proper spectrum line plot could use it as the x-axis, but the
@@ -362,9 +473,9 @@ APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_or
 
 ### Key dependencies
 - **Python**: `numpy`, `xarray`, `scipy`, `matplotlib`, `dask`, `gcm_filters`, `netcdf4`
-- **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch, not yet a
-  tagged release -- see the Notes entry on the online Πₖ/ε_Kˢ switch), `NCDatasets`, `CairoMakie` (Julia
-  1.11.2)
+- **Julia**: `Oceananigans` v0.110.8, `Oceanostics` v0.18.0 (pinned to the `tc/sfs-ke` branch -- see the
+  Notes entry on the online Πₖ/ε_Kˢ switch, and the separate Notes entry below on a newer `main`-branch
+  Oceanostics module this pin doesn't include), `NCDatasets`, `CairoMakie` (Julia 1.11.2)
 
 ## Physics Reference
 
@@ -397,6 +508,21 @@ APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_or
   `indices=(:, :, grid.Nz)` surface output writer). The `SequentialGaussianFilter` workaround this repo used
   to carry (two sequential 1D passes instead of one `dims=(1,2)` call) has been removed now that the native
   filter works directly; Πₖ/ε_Kˢ are computed online (see Architecture) instead of deferred offline.
+- **Oceanostics gained an online APE module (on `main`, not yet in this repo's `tc/sfs-ke` pin).** PRs #272,
+  #274, #276 (merged 2026-07-22 through 2026-07-31 -- all *after* `tc/sfs-ke`'s own 2026-07-16 merge, so this
+  repo's pin doesn't include them) added `AvailablePotentialEnergyEquation`, providing
+  `AvailablePotentialEnergy`/`BuoyancyDisplacementPotential` (Υ, this codebase's `upsilon`)/
+  `AvailablePotentialEnergyDissipationRate` (ε_A, this codebase's `ε_Aˢ`-adjacent quantity)/
+  `PotentialToKineticEnergyConversion` online -- the APE-side analog of the Πₖ/ε_Kˢ online-diagnostic move
+  above. The PR description validates ε_A against "an independent offline (Python) implementation" in "a
+  Kelvin-Helmholtz APE study" -- almost certainly this codebase's own lineage (`CoarseGrainedKHAPE`). No
+  ready-made cross-scale APE flux (Π_A) diagnostic exists there yet -- the PR describes the contraction (Υ
+  with a sub-filter buoyancy flux) but doesn't implement it as a named function, so getting Π_A online would
+  still need new Julia code, analogous to `KineticEnergyCrossScaleFlux`. Moving ε_A/the exchange term online
+  would eliminate real, currently-offline cost in `04_sfs_ke_budget.py`/`05_sfs_ape_budget.py` (see the
+  Gaussian-filter scaling note below for why that cost is real and grows with resolution) -- but only for
+  *future* simulation runs; the online fields don't exist retroactively for already-completed `.nc` files.
+  Moving the pin off `tc/sfs-ke` (to a tagged release or `main`) is a prerequisite for any of this.
 - **NonhydrostaticModel replaced HydrostaticFreeSurfaceModel+ImplicitFreeSurface.** Motivated by comparing
   against tomchor's own Eady baroclinic-instability example (Oceanostics PR #260,
   `docs/examples/eady_baroclinic_instability.jl`), which uses `NonhydrostaticModel` and closes its
@@ -444,6 +570,36 @@ APE flux Π_A, single time/depth/filter-scale, 2x2 panel). Uses the same `fix_or
   defaults to a 2σ truncation radius (`ceil(Int, 2σ/Δ)` grid cells); this repo's offline
   `scipy.ndimage.gaussian_filter1d` defaults to 4σ (`truncate=4.0`). Verified numerically on a real w field:
   ~1.3% relative rms difference, 0.9999 correlation -- real but small, not yet fixed.
+- **Significant, unresolved: Gaussian filter cost scales worse than linearly with grid resolution.**
+  `GaussianFilter` (`aux00_utils.py`) sets kernel width in *grid points* from the physical filter scale ℓ and
+  the grid spacing (`σ_x = ℓ · _FWHM_TO_SIGMA / dx_min`) -- for a fixed physical ℓ and domain size, σ (in grid
+  points) grows linearly with resolution, since dx shrinks. `scipy.ndimage.gaussian_filter1d` is a *direct*
+  (non-FFT) correlation, cost `O(L·σ)` per line, not `O(L)` -- so doubling both horizontal grid dimensions for
+  the same physical filter scale roughly doubles the data volume but **~8x's the filtering cost** (L doubles,
+  σ doubles → 4x per line, x2 more lines from the other dimension also doubling). Reasoned through after a
+  real report: sweep per-scale cost went from ~1 min at 256x256x128 to >20 min at 512x512x128 (only 4x the
+  grid). The ~8x from filtering alone doesn't account for the full ~20x (there's also a smaller `O(N log N)`
+  contribution from the sort/searchsorted calls, plus likely cache/memory-bandwidth effects at 4x the data),
+  but it's the dominant, clearly-identifiable mechanism, and it gets worse the larger the filter scale is
+  relative to grid spacing -- true of most of the sweep's own scale range, since it spans from ~2 grid points
+  up to 40% of the domain width. Since this domain is fully doubly-periodic (already true throughout this
+  codebase), an FFT-based Gaussian filter (`O(L log L)`, independent of σ) is a natural, exact fit and would
+  turn this into close-to-linear scaling with data volume -- not yet implemented. This is a bigger lever for
+  *scaling to larger grids* specifically than any of the memory/redundant-computation fixes in the
+  Architecture section, which are constant-factor wins; this one fixes the scaling exponent itself.
+- **Verified: the Gaussian filter is exactly mean-preserving and zero-phase.** Domain mean of a filtered
+  field matches the unfiltered mean to floating-point precision (0.00e+00 relative difference, checked at
+  three filter scales against real `b`/`u` fields) -- expected from a normalized kernel (`gaussian_filter1d`'s
+  weights sum to 1) convolved periodically (`mode='wrap'`), which always exactly conserves the domain sum;
+  this is the property the cross-scale energy budget framework needs (large-scale + sub-filter-scale has to
+  sum back to the total). Filtered values also never exceed the raw field's range (a property of Gaussian
+  kernels' all-positive weights -- a weighted average can't overshoot, unlike a sharp spectral cutoff filter).
+  Also verified zero phase/spatial shift directly via the filter's impulse response (filtering a single
+  delta-function spike): centroid offset from the spike's own location was 0.00e+00 grid cells in x, ~1e-15
+  (floating-point roundoff) in y, with exact left/right symmetry at every offset. Expected from any symmetric
+  (even, non-causal) kernel -- unlike the causal IIR filters `scipy.signal.filtfilt` exists to fix, a Gaussian
+  kernel is already zero-phase by construction, so there's no need for (and no benefit from) a
+  forward-backward filtfilt-style pass here.
 - `online_ke_transfer_validation.md` is a KH-era dev note about computing Πₖ online and validating it against
   the offline pipeline -- it predates both this fork's move to fully-offline Πₖ/ε_Kˢ and the subsequent move
   back to online (see above), so it still doesn't describe current behavior, though the general idea

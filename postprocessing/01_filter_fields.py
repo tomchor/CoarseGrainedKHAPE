@@ -2,8 +2,7 @@
 #+++ Imports
 import os
 from pathlib import Path
-from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, filter_fields
+from src.aux00_utils import load_dataset_and_grid, filter_fields, write_dataset
 #---
 
 #+++ Configuration
@@ -15,6 +14,13 @@ parser.add_argument("--filter-scales", type=float, nargs="+", default=None,
          "filter_scales_m attribute (matching the online diagnostics) when present; falls back to "
          "50000 100000 for older files that predate that attribute. Pass explicitly to deliberately use "
          "different offline scales than the simulation's online ones.")
+parser.add_argument("--write-mode", choices=["load", "synchronous"], default="load",
+    help="How to avoid the dask-lazy .to_netcdf() write hang -- see write_dataset() in aux00_utils.py for "
+         "what each mode does and the measured cost of 'synchronous' relative to 'load'.")
+parser.add_argument("--output-suffix", default="",
+    help="Appended to the output filename before .nc (e.g. '_load'/'_sync'), so a load-vs-synchronous timing "
+         "comparison run on the same input doesn't have the second run overwrite the first's output. Empty "
+         "by default, matching normal (single-mode) usage.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -55,16 +61,11 @@ print("Done!")
 #+++ Save filtered fields
 print("\n" + "="*60)
 print("Saving filtered fields...")
-output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
-# Force full computation before writing -- ds_filt is still fully dask-lazy here (GaussianFilter.apply uses
-# xr.apply_ufunc(dask="parallelized"), which stays lazy on this chunked input). Writing a lazy Dataset via
-# .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple threads writing
-# into the same HDF5 file handle -- a known hang risk, since the underlying HDF5 C library isn't reliably
-# thread-safe for it (see local_potential_energies_timeseries() in aux01_pe_functions.py for a real observed
-# stall of this kind). Loading here first makes the write purely synchronous.
-print("  Computing filtered fields (forces the dask graph before the write)...")
-with ProgressBar(minimum=5, dt=5):
-    ds_filt = ds_filt.load()
-ds_filt.to_netcdf(output_filename)
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities" + args.output_suffix + ".nc"))
+# ds_filt is still fully dask-lazy here (GaussianFilter.apply uses xr.apply_ufunc(dask="parallelized"), which
+# stays lazy on this chunked input) -- see write_dataset() in aux00_utils.py for why that's an issue and what
+# --write-mode does about it.
+print(f"  Computing and writing filtered fields (write-mode={args.write_mode})...")
+write_dataset(ds_filt, output_filename, write_mode=args.write_mode)
 print(f"Filtered fields saved to: {output_filename}")
 #---

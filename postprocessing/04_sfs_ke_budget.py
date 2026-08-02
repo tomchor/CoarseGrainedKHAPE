@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 #+++ Imports
+import gc
 import os
 from pathlib import Path
 import xarray as xr
-from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, write_dataset
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
@@ -17,6 +17,9 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from baroclinic adjustment simulation output")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--write-mode", choices=["load", "synchronous"], default="load",
+    help="How to avoid the dask-lazy .to_netcdf() write hang -- see write_dataset() in aux00_utils.py for "
+         "what each mode does and the measured cost of 'synchronous' relative to 'load'.")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -97,8 +100,17 @@ print("Calculating budget terms for each filter scale...")
 dV = ds_full.dV
 dA = ds.Δx_caa * ds.Δy_aca  # for the bottom-drag work terms, which are boundary (area), not volume, integrals -- ds_full is a subset (b, dV, uᵢ only) that drops Δx_caa/Δy_aca
 budget_list = []
+checkpoint_files = []
 
 for ℓ in filter_scales:
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
+    checkpoint_files.append(checkpoint_path)
+
+    if checkpoint_path.exists():
+        print(f"\n--- filter_scale = {ℓ:.4f} (loading from checkpoint) ---")
+        budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
+        continue
+
     print(f"\n--- filter_scale = {ℓ:.4f} ---")
 
     gaussian_filter = make_gaussian_filter(ℓ, ds)
@@ -215,7 +227,26 @@ for ℓ in filter_scales:
         budget_ℓ["∫-(bottom drag work, LS) dA"]  = -int_bottom_drag_work_LS
         budget_ℓ["∫-(bottom drag work, SFS) dA"] = -int_bottom_drag_work_SFS
 
-    budget_list.append(budget_ℓ)
+    # Checkpoint to disk and drop the in-memory/lazy reference before the next scale -- same pattern as
+    # 05_sfs_ape_budget.py's per-scale loop, so peak memory is bounded to ~1 filter scale regardless of how
+    # many scales or how much time resolution the run has, instead of every scale's full lazy graph staying
+    # reachable (via budget_list) all the way to the final write at the bottom of this script.
+    print(f"  Computing and saving checkpoint (write-mode={args.write_mode})...")
+    write_dataset(budget_ℓ, str(checkpoint_path), write_mode=args.write_mode)
+
+    del gaussian_filter, ds_filt_ℓ, u_i_full, u_i_bar_full
+    del sfs_stress_tensor, sfs_stress_tensor_trace, sfs_ke_density
+    del b_r_filt, ape_to_ke_exchange, dKE_dt
+    del int_dKE_dt, int_ape_to_ke_exchange
+    del Π_K_ℓ, sfs_ke_dissipation, int_Π_K_ℓ, int_sfs_ke_dissipation
+    del residual, budget_ℓ
+    if bottom_drag:
+        del τx_b_bar, τy_b_bar, τu_b_bar, u_b_bar, v_b_bar
+        del bottom_drag_work_LS, bottom_drag_work_SFS
+        del int_bottom_drag_work_LS, int_bottom_drag_work_SFS
+    gc.collect()
+
+    budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
 
 sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
                                                               dims="filter_scale",
@@ -234,22 +265,21 @@ local_vars      = [v for v in sfs_ke_budget_terms.data_vars if v not in integrat
 fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
 integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
 
-# sfs_ke_budget_terms is still fully dask-lazy at this point (KE_of_sfs_flow, Π_K/ε_Kˢ read from the
-# chunked simulation file, and every integral, none of it .load()'d yet). Writing a
-# lazy Dataset via .to_netcdf() computes it via dask's threaded scheduler *during* the write, with multiple
-# threads writing into the same HDF5 file handle -- the same hang risk fixed for
-# local_potential_energies_timeseries() in aux01_pe_functions.py. Loading each subset right before its own
-# write (rather than the whole Dataset up front) keeps peak memory the same as the two separate to_netcdf()
-# calls already imply.
-print("  Saving local fields...")
-with ProgressBar(minimum=5, dt=5):
-    local_fields = sfs_ke_budget_terms[local_vars].load()
-local_fields.to_netcdf(fields_filename)
+# sfs_ke_budget_terms is dask-lazy here too -- xr.concat() of per-scale checkpoint reloads (each
+# open_dataset(...).chunk() is lazy regardless of the checkpoint's own data having been eager on disk) --
+# see write_dataset() in aux00_utils.py for why that's an issue and what --write-mode does about it. Writing
+# each subset separately (rather than the whole Dataset at once) keeps peak memory the same as the two
+# separate to_netcdf() calls already imply.
+print(f"  Saving local fields (write-mode={args.write_mode})...")
+write_dataset(sfs_ke_budget_terms[local_vars], fields_filename, write_mode=args.write_mode)
 print(f"  Fields saved to:     {fields_filename}")
 
-print("  Saving integrated timeseries...")
-with ProgressBar(minimum=5, dt=5):
-    integrated_fields = sfs_ke_budget_terms[integrated_vars].load()
-integrated_fields.to_netcdf(integrated_filename)
+print(f"  Saving integrated timeseries (write-mode={args.write_mode})...")
+write_dataset(sfs_ke_budget_terms[integrated_vars], integrated_filename, write_mode=args.write_mode)
 print(f"  Integrated saved to: {integrated_filename}")
+
+print("\nDeleting intermediate checkpoint files...")
+for f in checkpoint_files:
+    f.unlink(missing_ok=True)
+    print(f"  Deleted: {f.name}")
 #---

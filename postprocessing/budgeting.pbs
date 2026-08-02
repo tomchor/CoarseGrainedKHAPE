@@ -5,12 +5,12 @@
 #PBS -e logs/bci_budgeting.log
 # Note: job name above is a default; qalter below updates it at runtime based on Nx/Ny/Nz/FIXED_REF
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
-#PBS -l walltime=08:00:00
+#PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=8:mem=256GB:ngpus=0
+#PBS -l select=1:ncpus=8:mem=732GB:ngpus=0
 #PBS -l job_priority=regular
 
 # Runs 02-06: density sort, energy transfer, SFS KE/APE budgets, and the per-scale budget plot.
@@ -26,12 +26,19 @@ FIXED_REF=${FIXED_REF:-0}
 JOB_NAME="${SIM}_budgeting${REF_SUFFIX}"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
+# Defaults to "synchronous" (bounded memory, ~30% slower than "load" -- measured at 256x256x64, see
+# test_write_scheduler_timing.pbs) rather than "load" (fast, but OOMs at large resolutions -- the reason
+# this branch exists). Only affects 03/04/05 (02 and 06 don't have a dask-lazy write to guard against --
+# see write_dataset() in aux00_utils.py and 02_sort_density.py's own comment). Override with
+# -v WRITE_MODE=load for smaller jobs where the speed matters more than the memory headroom.
+WRITE_MODE=${WRITE_MODE:-synchronous}
+
 source ../hpc_env.sh
 
 time $PYTHON -u 02_sort_density.py    --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
-time $PYTHON -u 03_energy_transfer.py --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u 04_sfs_ke_budget.py   --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u 05_sfs_ape_budget.py  --filename output/${SIM}.nc --n-workers 8 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 03_energy_transfer.py --filename output/${SIM}.nc --n-workers 8 --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 04_sfs_ke_budget.py   --filename output/${SIM}.nc               --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 05_sfs_ape_budget.py  --filename output/${SIM}.nc --n-workers 8 --write-mode $WRITE_MODE $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 time $PYTHON -u 06_plot_budgets.py    --filename output/${SIM}.nc               $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

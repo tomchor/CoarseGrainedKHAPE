@@ -92,9 +92,10 @@ plot_field(axes[0,1], zeta_norm, f"Rossby number ζ/f\nt={t_days:.1f}d, z={z_sel
 plot_field(axes[1,0], Pi_K,      f"cross-scale KE flux Πₖ (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m")
 plot_field(axes[1,1], Pi_A,      f"cross-scale APE flux Π_A (ℓ={ℓ_km}km)\nt={t_days:.1f}d, z={z_sel:.0f}m")
 
-fig.suptitle(f"{stem}: mid-depth snapshots", fontsize=14)
+fig.suptitle(f"{stem}: z={z_sel:.0f}m snapshots", fontsize=14)
 
-outfile = FIGURES / f"{stem}_middepth_snapshots_l{ℓ_km}km_t{t_days:.0f}d.pdf"
+z_m = int(round(z_sel))
+outfile = FIGURES / f"{stem}_middepth_snapshots_l{ℓ_km}km_z{z_m}m_t{t_days:.0f}d.pdf"
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---

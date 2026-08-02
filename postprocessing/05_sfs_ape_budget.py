@@ -11,10 +11,10 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux00_utils import load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter, load_energy_transfer, write_dataset
 from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
-    local_potential_energies_timeseries,  # used for filtered density in loop
+    local_potential_energies_timeseries,  # used for full_local_pes, and as a fallback for filtered density
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
@@ -30,6 +30,11 @@ parser = argparse.ArgumentParser(description="Calculate SFS APE budget from baro
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--write-mode", choices=["load", "synchronous"], default="load",
+    help="How to avoid the dask-lazy .to_netcdf() write hang -- see write_dataset() in aux00_utils.py for "
+         "what each mode does and the measured cost of 'synchronous' relative to 'load'. Only affects the "
+         "per-scale checkpoint and final result writes below; the full_local_pes checkpoint is already fully "
+         "eager by construction (see local_potential_energies_timeseries()) and unaffected by this flag.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -166,14 +171,30 @@ for ℓ in filter_scales:
     ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
     print(f"  ρ̄ calculated  ({time.time()-t0:.1f}s)")
 
-    t0 = time.time()
-    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, full_local_pes.rho_sorted, full_local_pes.dz_sorted,
-                                                         density_name="ρ̄", n_workers=n_workers)
-    print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
+    # z₀(ρ̄)/Υˡ/Dˡ/Ea(ρ̄, z) (local_potential_energies_timeseries() on ds_filt_ℓ) are the same, expensive,
+    # per-timestep computation that 03_energy_transfer.py's calculate_energy_transfer() already does
+    # internally for this exact scale (same ds_filt_ℓ, same reference rho_sorted/dz_sorted) -- it normally
+    # discards everything but Υˡ once Π_A is built, but with include_filt_local_pes=True it persists the
+    # rest to energy_transfer too, so read them back here instead of recomputing. Falls back to computing
+    # it directly if energy_transfer predates that flag (e.g. rerunning 05 alone against an older 03 output).
+    if all(v in energy_transfer for v in ("z₀(ρ̄)", "Υˡ", "Dˡ", "Ea(ρ̄, z)")):
+        filt_z0      = energy_transfer["z₀(ρ̄)"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+        filt_upsilon = energy_transfer["Υˡ"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+        filt_D       = energy_transfer["Dˡ"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+        filt_ape     = energy_transfer["Ea(ρ̄, z)"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
+    else:
+        print("  energy_transfer output predates include_filt_local_pes -- recomputing "
+              "local_potential_energies_timeseries() on ds_filt_ℓ (rerun 03_energy_transfer.py to avoid this)")
+        t0 = time.time()
+        filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, full_local_pes.rho_sorted, full_local_pes.dz_sorted,
+                                                             density_name="ρ̄", n_workers=n_workers)
+        print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
+        filt_z0, filt_upsilon, filt_D, filt_ape = filt_local_pes.z0, filt_local_pes.upsilon, filt_local_pes.D, filt_local_pes.ape
+        del filt_local_pes
 
     t0 = time.time()
     full_local_ape_filtered = gaussian_filter.apply(full_local_pes.ape, dims=filtered_dimensions)
-    subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
+    subfilter_local_ape = full_local_ape_filtered - filt_ape
     print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
 
     t0 = time.time()
@@ -181,7 +202,7 @@ for ℓ in filter_scales:
     # stencil matching the simulation's own advection scheme -- see calculate_sfs_ape_dissipation()'s
     # docstring for why (reverted from the analytic D(ρ)-based reconstruction).
     sfs_ape_dissipation = calculate_sfs_ape_dissipation(
-        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, κh, κv, gaussian_filter,
+        ds_full.ρ, full_local_pes.upsilon, filt_upsilon, κh, κv, gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_density=ds_filt_ℓ.ρ̄,)
     print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
@@ -191,7 +212,7 @@ for ℓ in filter_scales:
     int_ape_to_ke_exchange = ke_budget["∫(SFS APE->KE) dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
 
     t0 = time.time()
-    R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
+    R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_z0,
                                      full_local_pes.dz_sorted, gaussian_filter,
                                      filter_dims=filtered_dimensions, n_workers=n_workers)
     print(f"  R_s  ({time.time()-t0:.1f}s)")
@@ -220,15 +241,15 @@ for ℓ in filter_scales:
         "ρ̄": ds_filt_ℓ.ρ̄,
         # Reference heights
         "z₀(ρ)": full_local_pes.z0,
-        "z₀(ρ̄)": filt_local_pes.z0,
+        "z₀(ρ̄)": filt_z0,
         # Buoyancy displacement potentials
         "Υ": full_local_pes.upsilon,
-        "Υˡ": filt_local_pes.upsilon,
+        "Υˡ": filt_upsilon,
         "D": full_local_pes.D,
-        "Dˡ": filt_local_pes.D,
+        "Dˡ": filt_D,
         # Local APE fields
         "Ea(ρ, z)": full_local_pes.ape,
-        "Ea(ρ̄, z)": filt_local_pes.ape,
+        "Ea(ρ̄, z)": filt_ape,
         "Ēa(ρ, z)": full_local_ape_filtered,
         "Eaˢ(ρ, z)": subfilter_local_ape,
         # Local budget terms
@@ -250,28 +271,19 @@ for ℓ in filter_scales:
         budget_ℓ["∫-ε_Aˢ dV"].attrs["method"] = "residual estimate (implicit LES): -∂ₜE_A^s - exchange + Π_A + Rˢ"
         budget_ℓ["residual_A"].attrs["method"] = "≈0 by construction: ε_Aˢ is defined as the residual estimate (implicit LES)"
 
-    # budget_ℓ mixes eager (filt_local_pes.*, from the already-fixed local_potential_energies_timeseries())
-    # with lazy (full_local_pes.*, re-read from its own on-disk checkpoint above -- open_dataset(...).chunk()
-    # is always lazy regardless of how the source data was originally computed) and other lazy pieces (ρ̄,
-    # sfs_ape_dissipation, R_s, etc.). This is the exact eager+lazy mix that caused a real write hang in
-    # local_potential_energies_timeseries() (see that function's comment in aux01_pe_functions.py): writing a
-    # mixed Dataset via .to_netcdf() computes the lazy pieces via dask's threaded scheduler *during* the
-    # write, with multiple threads writing into the same HDF5 file handle. Loading here first makes the
-    # write purely synchronous; peak memory is unchanged since .to_netcdf() would have had to materialize
-    # the same data anyway, just later and via a different (thread-concurrent) path.
-    print(f"  Computing budget_ℓ (forces the dask graph before the checkpoint write)...")
+    # budget_ℓ mixes lazy pieces throughout: full_local_pes.* (re-read from its own on-disk checkpoint above
+    # -- open_dataset(...).chunk() is always lazy regardless of how the source data was originally computed),
+    # filt_z0/filt_upsilon/filt_D/filt_ape (same, now read from energy_transfer's on-disk output instead of
+    # local_potential_energies_timeseries() directly -- eager only in the energy_transfer-predates-the-flag
+    # fallback above), and other lazy pieces (ρ̄, sfs_ape_dissipation, R_s, etc.) -- see write_dataset() in
+    # aux00_utils.py for why that's an issue and what --write-mode does about it.
+    print(f"  Computing and saving checkpoint (write-mode={args.write_mode})...")
     t0 = time.time()
-    with ProgressBar(minimum=5, dt=5):
-        budget_ℓ = budget_ℓ.load()
-    print(f"  budget_ℓ computed  ({time.time()-t0:.1f}s)")
-
-    print(f"  Saving checkpoint...")
-    t0 = time.time()
-    budget_ℓ.to_netcdf(str(checkpoint_path))
-    print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
+    write_dataset(budget_ℓ, str(checkpoint_path), write_mode=args.write_mode)
+    print(f"  Checkpoint computed and saved  ({time.time()-t0:.1f}s)")
 
     # Free memory before the next iteration
-    del ds_filt_ℓ, filt_local_pes, full_local_ape_filtered, subfilter_local_ape
+    del ds_filt_ℓ, filt_z0, filt_upsilon, filt_D, filt_ape, full_local_ape_filtered, subfilter_local_ape
     del sfs_ape_dissipation, R_s, dAPE_dt, budget_ℓ
     del ape_to_ke_exchange, int_ape_to_ke_exchange
     del int_dAPE_dt, int_sfs_ape_dissipation, int_R_s
@@ -301,19 +313,16 @@ integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_i
 
 # sfs_ape_budget_terms is fully dask-lazy here too -- xr.concat() of per-scale checkpoint reloads (each
 # open_dataset(...).chunk() is lazy regardless of the checkpoint's own data having been eager on disk) plus
-# ds_full.ρ. Same hang risk as the checkpoint write above; loading each subset right before its own write
-# (rather than the whole Dataset up front) keeps peak memory the same as the two separate to_netcdf() calls
-# already imply -- comparable to what a single filter scale's worth of local fields already costs above.
-print("  Saving local fields...")
-with ProgressBar(minimum=5, dt=5):
-    local_fields = sfs_ape_budget_terms[local_vars].load()
-local_fields.to_netcdf(fields_filename)
+# ds_full.ρ -- see write_dataset() in aux00_utils.py for why that's an issue and what --write-mode does about
+# it. Writing each subset separately (rather than the whole Dataset at once) keeps peak memory the same as
+# the two separate to_netcdf() calls already imply -- comparable to what a single filter scale's worth of
+# local fields already costs above.
+print(f"  Saving local fields (write-mode={args.write_mode})...")
+write_dataset(sfs_ape_budget_terms[local_vars], fields_filename, write_mode=args.write_mode)
 print(f"  Fields saved to:     {fields_filename}")
 
-print("  Saving integrated timeseries...")
-with ProgressBar(minimum=5, dt=5):
-    integrated_fields = sfs_ape_budget_terms[integrated_vars].load()
-integrated_fields.to_netcdf(integrated_filename)
+print(f"  Saving integrated timeseries (write-mode={args.write_mode})...")
+write_dataset(sfs_ape_budget_terms[integrated_vars], integrated_filename, write_mode=args.write_mode)
 print(f"  Integrated saved to: {integrated_filename}")
 
 print("\nDeleting intermediate checkpoint files...")

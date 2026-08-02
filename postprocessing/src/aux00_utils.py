@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
+import dask
+from dask.diagnostics.progress import ProgressBar
 
 PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
 
@@ -9,6 +11,33 @@ PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
 def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
     """Integrate a DataArray over spatial dimensions"""
     return (da * dV).sum(dims)
+#---
+
+#+++ Write a (possibly still dask-lazy) Dataset to netCDF
+def write_dataset(ds, path, write_mode="load"):
+    """Write ds to path, avoiding the dask-lazy .to_netcdf() write hang: writing a Dataset that still has
+    unevaluated dask arrays computes them via dask's default *threaded* scheduler *during* the write, with
+    multiple threads writing into the same HDF5 file handle -- a known hang risk, since the underlying HDF5
+    C library isn't reliably thread-safe for it (see local_potential_energies_timeseries() in
+    aux01_pe_functions.py for a real observed stall of this kind).
+
+    write_mode="load" (default): eagerly .load() the full Dataset into memory before writing -- fast, but
+    requires the whole thing to fit in memory at once (OOMs at large resolutions, e.g. 512x512x128).
+    write_mode="synchronous": force dask's single-threaded synchronous scheduler for just the write, which
+    still streams/computes chunk-by-chunk (bounded memory, like the original streaming design) but avoids
+    the multi-threaded-write hang. Measured ~30% slower than "load" for 01_filter_fields.py at 256x256x64
+    (see test_write_scheduler_timing.pbs) -- a real but modest cost next to a job that otherwise OOMs.
+    """
+    if write_mode == "load":
+        with ProgressBar(minimum=5, dt=5):
+            ds = ds.load()
+        ds.to_netcdf(path)
+    elif write_mode == "synchronous":
+        with dask.config.set(scheduler="synchronous"):
+            with ProgressBar(minimum=5, dt=5):
+                ds.to_netcdf(path)
+    else:
+        raise ValueError(f"write_mode must be 'load' or 'synchronous', got {write_mode!r}")
 #---
 
 #+++ Load data
