@@ -510,9 +510,35 @@ y₂ = +params.Ly/4
 double_ramp(y, Δy) = ramp(y - y₁, Δy) - ramp(y - y₂, Δy)
 
 bᵢ(x, y, z) = params.N2 * min(z, -params.mixed_layer_depth) + Δb * double_ramp(y, Δy) + ϵb * randn()
+#---
 
-set!(model, b=bᵢ)
-@info "Initial conditions set"
+#+++ Set initial conditions: u in thermal-wind balance with the front (v=w=0 -- the front is x-invariant,
+# so the balanced flow is purely zonal), plus the buoyancy front itself (bᵢ, defined above).
+# ramp is piecewise-linear, so its derivative is a boxcar of height 1/Δy over the ramp's transition width --
+# the y-derivative of bᵢ's front term is then Δb * double_ramp_prime(y, Δy), i.e. ∂b/∂y, following exactly
+# the same two-ramps structure as bᵢ/double_ramp above (so this is visibly "the derivative of that", not a
+# separately-derived expression that could drift out of sync with it).
+ramp_prime(y, Δy) = (-Δy/2 < y < Δy/2) ? 1/Δy : zero(y)
+double_ramp_prime(y, Δy) = ramp_prime(y - y₁, Δy) - ramp_prime(y - y₂, Δy)
+
+# Reused directly from the model's own coriolis object (not recomputed from params.latitude independently)
+# so this is guaranteed consistent with whatever Coriolis parameter the momentum equation itself actually
+# uses going forward -- a hand-rederived β could silently drift from Oceananigans' own value (e.g. a
+# different assumed planetary radius) without erroring.
+f₀ = model.coriolis.f₀
+β  = model.coriolis.β
+f_cor(y) = f₀ + β * y
+
+# Thermal wind: f ∂u/∂z = -∂b/∂y, integrated from a reference level z_ref where u=0. z_ref = -Lz/2
+# (mid-depth) specifically so the initial state carries no barotropic (depth-independent) velocity
+# component -- integrating from any other level would leave a spurious depth-uniform u offset, since
+# nothing else in this setup drives a real barotropic flow for that offset to correspond to.
+z_ref = -params.Lz/2
+db_dy(y) = Δb * double_ramp_prime(y, Δy)
+u_geo(x, y, z) = -(db_dy(y) / f_cor(y)) * (z - z_ref)
+
+set!(model, u=u_geo, b=bᵢ)
+@info "Initial conditions set (u initialized in thermal-wind balance, z_ref=$(z_ref)m)"
 #---
 
 #+++ Setup simulation
