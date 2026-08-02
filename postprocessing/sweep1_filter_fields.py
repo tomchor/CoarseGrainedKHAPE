@@ -2,6 +2,7 @@
 #+++ Imports
 import os
 from pathlib import Path
+import dask
 import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
@@ -93,8 +94,14 @@ with xr.open_mfdataset(tmp_files, combine="by_coords", decode_timedelta=False,
     merged.attrs.update(ds.attrs)
     merged.attrs["filter_dims"] = "x_caa,y_aca"
     write_job = merged.to_netcdf(output_filename, compute=False)
-    with ProgressBar(minimum=5, dt=5):
-        write_job.compute()
+    # Forced single-threaded: computing write_job under dask's default *threaded* scheduler means multiple
+    # threads write into the same HDF5 file handle -- the same hang write_dataset() (aux00_utils.py) exists
+    # to avoid for 01/03/04/05, confirmed as a real 3+ hour stall here (frozen at 0% progress, not just slow).
+    # No "load"-style alternative offered, unlike write_dataset(): the whole point of this per-scale temp-file
+    # design is to never need the merged dataset fully in memory at once (see the comment above this loop).
+    with dask.config.set(scheduler="synchronous"):
+        with ProgressBar(minimum=5, dt=5):
+            write_job.compute()
 for f in tmp_files:
     os.remove(f)
 tmp_dir.rmdir()

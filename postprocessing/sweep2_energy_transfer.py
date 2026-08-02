@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import time
+import dask
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import load_dataset_and_grid
@@ -98,8 +99,14 @@ print("Merging per-timestep files...")
 with xr.open_mfdataset(tmp_files, combine="by_coords", decode_timedelta=False,
                        parallel=False, chunks={"time": 1}) as merged:
     write_job = merged.to_netcdf(output_filename, compute=False)
-    with ProgressBar(minimum=5, dt=5):
-        write_job.compute()
+    # Forced single-threaded: computing write_job under dask's default *threaded* scheduler means multiple
+    # threads write into the same HDF5 file handle -- the same hang write_dataset() (aux00_utils.py) exists
+    # to avoid for 01/03/04/05, confirmed as a real 3+ hour stall in sweep1's identical merge pattern (frozen
+    # at 0% progress, not just slow). No "load"-style alternative offered, unlike write_dataset(): the whole
+    # point of this per-timestep temp-file design is to never need the merged dataset fully in memory at once.
+    with dask.config.set(scheduler="synchronous"):
+        with ProgressBar(minimum=5, dt=5):
+            write_job.compute()
 for f in tmp_files:
     os.remove(f)
 tmp_dir.rmdir()
