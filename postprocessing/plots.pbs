@@ -59,9 +59,21 @@ print(' '.join(str(float(x)) for x in ds.filter_scale.values))
 ")
 fi
 
+# plot5's vorticity-strain histogram pools snapshots over a time range (see its own --time-min/--time-max)
+# rather than a single instant -- last 10 days of the run, so eddies are fully developed throughout the
+# window. Computed from the filtered-velocities file's own time coordinate rather than assuming a STOP_TIME
+# (plots.pbs doesn't otherwise track simulation length); a run shorter than 10 days just clips to its start,
+# since --time-min going below the earliest available time is a no-op for xarray's label-based slicing.
+TIME_MAX_DAYS=$($PYTHON -c "
+import xarray as xr
+ds = xr.open_dataset('output/${SIM}_filtered_velocities.nc', decode_times=False)
+print(float(ds.time.max()) / 86400)
+")
+TIME_MIN_DAYS=$($PYTHON -c "print(${TIME_MAX_DAYS} - 10)")
+
 for FS in $LOOP_SCALES; do
     for Z in $Z_VALUES_M; do
-        time $PYTHON -u plot5_vorticity_strain_flux.py --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
+        time $PYTHON -u plot5_vorticity_strain_flux.py --filename output/${SIM}.nc --filter-scale $FS --z $Z --time-min $TIME_MIN_DAYS 2>&1 | tee -a $LOG
         time $PYTHON -u plot6_middepth_snapshots.py    --filename output/${SIM}.nc --filter-scale $FS --z $Z 2>&1 | tee -a $LOG
     done
 done

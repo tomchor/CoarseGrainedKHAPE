@@ -17,7 +17,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Conditional-mean and net-contribution maps of Πₖ, Π_A, and Πₖ+Π_A in filtered vorticity-strain space")
 parser.add_argument("--filename", default="output/bci_Nx48_Ny48_Nz8.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=None, help="Target filter length scale in meters (nearest available; defaults to the smallest available)")
-parser.add_argument("--time", type=float, default=None, help="Target time in days (nearest available; defaults to the last available -- eddies should be fully developed by then)")
+parser.add_argument("--time-min", type=float, default=None, help="Start of the time range (days, inclusive; defaults to the earliest available time)")
+parser.add_argument("--time-max", type=float, default=None, help="End of the time range (days, inclusive; defaults to the latest available time)")
 parser.add_argument("--z", type=float, default=-500.0, help="Target depth in meters (nearest available cell center; default -500, mid-depth)")
 parser.add_argument("--n-bins", type=int, default=40, help="Number of bins per axis for the vorticity-strain JPDF (default 40)")
 parser.add_argument("--min-count", type=int, default=5, help="Bins with fewer than this many points are masked out in the conditional-mean/net panels (default 5)")
@@ -52,15 +53,19 @@ filt = xr.open_dataset(PP_OUTPUT / f"{stem}_filtered_velocities.nc", decode_time
 ℓ = float(filt.filter_scale.sel(filter_scale=ℓ_target, method="nearest"))
 ℓ_km = int(round(ℓ / 1000))
 
-t_target = args.time * 86400 if args.time is not None else float(filt.time.max())
-t_sel = float(filt.time.sel(time=t_target, method="nearest"))
-t_days = t_sel / 86400
+t_min_sec = args.time_min * 86400 if args.time_min is not None else float(filt.time.min())
+t_max_sec = args.time_max * 86400 if args.time_max is not None else float(filt.time.max())
+filt_t = filt.sel(time=slice(t_min_sec, t_max_sec))
+n_times = filt_t.sizes["time"]
+if n_times == 0:
+    raise ValueError(f"No available times in [{t_min_sec/86400:.2f}, {t_max_sec/86400:.2f}] days")
+t_days_actual = filt_t.time.values / 86400
+t_min_days, t_max_days = float(t_days_actual.min()), float(t_days_actual.max())
 
-sel = dict(filter_scale=ℓ, time=t_sel, method="nearest")
-ubar = fix_orientation(filt["ūᵢ"].sel(i=1, **sel, drop=True)).sel(z_aac=args.z, method="nearest")
-vbar = fix_orientation(filt["ūᵢ"].sel(i=2, **sel, drop=True)).sel(z_aac=args.z, method="nearest")
+ubar = fix_orientation(filt_t["ūᵢ"].sel(i=1, filter_scale=ℓ, method="nearest", drop=True)).sel(z_aac=args.z, method="nearest")
+vbar = fix_orientation(filt_t["ūᵢ"].sel(i=2, filter_scale=ℓ, method="nearest", drop=True)).sel(z_aac=args.z, method="nearest")
 z_sel = float(ubar.z_aac)
-print(f"ℓ = {ℓ:.4f} m ({ℓ_km} km), t = {t_days:.2f} days, z = {z_sel:.1f} m")
+print(f"ℓ = {ℓ:.4f} m ({ℓ_km} km), t = {t_min_days:.2f}-{t_max_days:.2f} days ({n_times} snapshots), z = {z_sel:.1f} m")
 
 sigma_n  = ubar.differentiate("x_caa") - vbar.differentiate("y_aca")
 sigma_s  = vbar.differentiate("x_caa") + ubar.differentiate("y_aca")
@@ -79,9 +84,11 @@ print("Loading Πₖ, Π_A...")
 ke_fields  = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc",  decode_times=False)
 ape_fields = xr.open_dataset(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc", decode_times=False)
 
-t_flux = float(ke_fields.time.sel(time=t_sel, method="nearest"))
-Pi_K = fix_orientation(ke_fields["Π_K"].sel(filter_scale=ℓ, time=t_flux, method="nearest")).sel(z_aac=args.z, method="nearest").values
-Pi_A = fix_orientation(ape_fields["Π_A"].sel(filter_scale=ℓ, time=t_flux, method="nearest")).sel(z_aac=args.z, method="nearest").values
+# Each of filt_t's own times is matched to its nearest neighbor in the flux files independently (vectorized
+# nearest-time selection, one match per snapshot) rather than a single shared lookup -- the three files can
+# have slightly different time grids/roundoff, same reasoning as sweep2's ds.reindex(time=ds_filt.time).
+Pi_K = fix_orientation(ke_fields["Π_K"].sel(filter_scale=ℓ, time=filt_t.time, method="nearest")).sel(z_aac=args.z, method="nearest").values
+Pi_A = fix_orientation(ape_fields["Π_A"].sel(filter_scale=ℓ, time=filt_t.time, method="nearest")).sel(z_aac=args.z, method="nearest").values
 Pi_total = Pi_K + Pi_A
 #---
 
@@ -91,11 +98,18 @@ ds_grid = load_dataset_and_grid(filename)
 dx_1d = ds_grid.Δx_caa.values
 dy_1d = ds_grid.Δy_aca.values
 area_2d = np.outer(dy_1d, dx_1d)  # matches (y_aca, x_caa) after fix_orientation
-A_total = area_2d.sum()
+
+# Broadcast the (time-independent) area weights across the time dimension so every included snapshot
+# contributes one full domain's worth of area-weighted samples to the JPDF/conditional means below --
+# snapshots are weighted equally regardless of the (possibly uneven) Δt between them, not by Δt itself,
+# consistent with how this codebase already treats multi-snapshot time series elsewhere (e.g. sweep3's
+# time-mean/std, which likewise treats each saved snapshot as one equally-weighted sample).
+area_3d = np.broadcast_to(area_2d, zeta_norm.shape)
+A_total = area_3d.sum()
 
 zeta_flat  = zeta_norm.ravel()
 sigma_flat = sigma_norm.ravel()
-area_flat  = area_2d.ravel()
+area_flat  = area_3d.ravel()
 Pi_K_flat, Pi_A_flat, Pi_total_flat = Pi_K.ravel(), Pi_A.ravel(), Pi_total.ravel()
 #---
 
@@ -216,10 +230,10 @@ legend_handles = [Line2D([0], [0], color="0.25", lw=1.2, linestyle=_LINESTYLES[i
 fig.legend(handles=legend_handles, loc="upper center", ncol=len(legend_handles), fontsize=9,
            frameon=False, bbox_to_anchor=(0.5, 1.06))
 
-fig.suptitle(f"{stem}, ℓ={ℓ_km}km, t={t_days:.1f}d, z={z_sel:.0f}m", fontsize=13, y=1.1)
+fig.suptitle(f"{stem}, ℓ={ℓ_km}km, t={t_min_days:.1f}-{t_max_days:.1f}d ({n_times} snapshots), z={z_sel:.0f}m", fontsize=13, y=1.1)
 
 z_m = int(round(z_sel))
-outfile = FIGURES / f"{stem}_vorticity_strain_flux_l{ℓ_km}km_z{z_m}m.pdf"
+outfile = FIGURES / f"{stem}_vorticity_strain_flux_l{ℓ_km}km_z{z_m}m_t{t_min_days:.0f}-{t_max_days:.0f}d.pdf"
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"Saved: {outfile}")
 #---
