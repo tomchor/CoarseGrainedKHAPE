@@ -101,12 +101,15 @@ validation scripts in `postprocessing/validation/`.
 state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
 (`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
 the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It
-also emits the online local available potential energy `E_a` (and its integral `∫E_a`). All of these
+also emits the online local available potential energy `E_a` (and its integral `∫E_a`), the buoyancy
+displacement potential `Υ` = z✶ − z, and the total APE dissipation rate `ε_A` = κ ∂ᵢb ∂ᵢΥ (and its
+integral `∫ε_A`). All of these
 go into the main output file, since one `NetCDFWriter` holds both grids; the resulting per-grid
 dimension suffixing is undone at load time by the post-processing loader, so the rest of the pipeline
 is unaffected. This is the online counterpart of what `02_sort_density.py` and the offline APE
-computation produce; `inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare the
-two. Each method carries its own full-domain sort per output, so this is off by default.
+computation produce; `inv06_compare_sorted_profiles.py`, `inv07_compare_local_ape.py` and
+`inv08_compare_ape_dissipation.py` compare the two. Each method carries its own full-domain sort per
+output, so this is off by default.
 
 ### Run a simulation + online-vs-offline validation
 
@@ -118,10 +121,11 @@ bash submit_validation_run.sh NZ=1024
 
 `submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
-Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, and the local APE offline and
-compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv07`),
+Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, the local APE,
+and the displacement potential Υ with the APE dissipation ε_A offline and
+compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv08`),
 writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
-`inv06` and `inv07` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
+`inv06`, `inv07` and `inv08` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 
