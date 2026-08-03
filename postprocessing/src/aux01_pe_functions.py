@@ -742,6 +742,49 @@ def calculate_ape_to_ke_exchange_term(w, b, filter, filter_dims=["x_caa", "y_aca
     return result
 #---
 
+#+++ Total APE dissipation
+def calculate_ape_dissipation(rho, upsilon, kappa, index_dim="i"):
+    """
+    Calculate the APE dissipation ε_A = κ ∇ρ · ∇Υ
+
+    The rate at which molecular diffusion destroys available potential energy: the
+    sink of the local APE equation of Wenegrat, Chor & Barkan (2026), where it
+    appears as -ε_A. Υ = g(z - z_*(ρ))/ρ₀ is the buoyancy displacement potential,
+    so writing it out, ε_A = κ(g/ρ₀)[∂ρ/∂z - ∇ρ·∇z_*]: the second part is the
+    diapycnal mixing rate of Winters et al. (1995) and the first is the diffusion
+    the reference state undergoes on its own, carrying no APE with it. The two
+    cancel exactly for a statically stable, horizontally uniform stratification,
+    where z_* = z and there is no available energy to destroy.
+
+    This is the building block of the sub-filter dissipation below, which is the
+    same expression evaluated on the full and on the filtered state, and it is what
+    the simulation computes online (`ε_A`, from Oceanostics'
+    `AvailablePotentialEnergyDissipationRate`);
+    `postprocessing/validation/inv08_compare_ape_dissipation.py` compares the two.
+
+    Parameters
+    ----------
+    rho : xr.DataArray
+        Density field ρ (the full field for the total dissipation, the filtered
+        field ρ̄ for its large-scale counterpart)
+    upsilon : xr.DataArray
+        Buoyancy displacement potential Υ = g(z - z_*(ρ))/ρ₀ built from the same
+        field, e.g. local_potential_energies_timeseries(...).upsilon
+    kappa : xr.DataArray or float
+        Diffusivity field κ
+    index_dim : str, optional
+        Name of the vector index dimension, default "i"
+
+    Returns
+    -------
+    xr.DataArray
+        APE dissipation ε_A [m² s⁻³] with the same spatial dimensions as rho
+    """
+    grad_rho = calculate_gradient(rho)
+    grad_upsilon = calculate_gradient(upsilon)
+    return kappa * (grad_rho * grad_upsilon).sum(dim=index_dim)
+#---
+
 #+++ SFS APE dissipation
 def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
                                   filter_dims=["x_caa", "y_aca"],
@@ -787,17 +830,12 @@ def calculate_sfs_ape_dissipation(rho, upsilon, upsilon_l, kappa, filter,
         SFS APE dissipation ε_Aˢ [J m⁻³ s⁻¹] with the same spatial dimensions as rho
     """
     # Term 1: filtered(κ ∇ρ · ∇Υ)
-    grad_rho = calculate_gradient(rho)
-    grad_upsilon = calculate_gradient(upsilon)
-    kappa_grad_dot = kappa * (grad_rho * grad_upsilon).sum(dim=index_dim)
-    term1 = filter.apply(kappa_grad_dot, dims=filter_dims)
+    term1 = filter.apply(calculate_ape_dissipation(rho, upsilon, kappa, index_dim=index_dim), dims=filter_dims)
 
-    # Term 2: κ ∇ρ̄ · ∇Υˡ
+    # Term 2: κ ∇ρ̄ · ∇Υˡ — the same expression evaluated on the filtered state
     if filtered_density is None:
         filtered_density = filter.apply(rho, dims=filter_dims)
-    grad_rho_bar = calculate_gradient(filtered_density)
-    grad_upsilon_l = calculate_gradient(upsilon_l)
-    term2 = kappa * (grad_rho_bar * grad_upsilon_l).sum(dim=index_dim)
+    term2 = calculate_ape_dissipation(filtered_density, upsilon_l, kappa, index_dim=index_dim)
 
     return term1 - term2
 #---
