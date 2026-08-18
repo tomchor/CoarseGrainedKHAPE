@@ -7,7 +7,8 @@ using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
-using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort
+using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
 using Oceanostics.AvailablePotentialEnergyEquation: BuoyancyDisplacementPotential, AvailablePotentialEnergyDissipationRate
 using Oceanostics.ProgressMessengers
@@ -69,7 +70,7 @@ let s = ArgParseSettings()
             default = 0.05
 
         "--filter_ls"
-            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields, Πₖ, ε_Kˢ). The offline budget pipeline's --filter-scales must be a subset of these (default: 1 7)"
+            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields, Πₖ, ε_Kˢ, and ε_Aˢ under --save_sorted). The offline budget pipeline's --filter-scales must be a subset of these (default: 1 7)"
             arg_type = Int
             nargs = '+'
             default = [1, 7]
@@ -79,7 +80,7 @@ let s = ArgParseSettings()
             action = :store_true
 
         "--save_sorted"
-            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), the local APE Eₐ, and the buoyancy displacement potential Υ with the total APE dissipation ε_A. Adds a few 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
+            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), the local APE Eₐ, the buoyancy displacement potential Υ with the total APE dissipation ε_A, and the sub-filter APE dissipation ε_Aˢ at each online filter scale. Adds a few 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
             action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
@@ -263,10 +264,16 @@ to_center(ψ) = @at (Center, Center, Center) ψ
 _filter_N(σ) = (2 * max(1, floor(Int, 4σ / minimum_xspacing(grid) + 0.5)) + 1,
                 2 * max(1, floor(Int, 4σ / minimum_zspacing(grid) + 0.5)) + 1)
 
+# One reusable, offline-matched filter per scale, shared by the KE diagnostics here and by the
+# sub-filter APE dissipation under --save_sorted below.
+function matched_filter(ℓ)
+    σ = _FWHM_to_σ(ℓ)
+    return GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))
+end
+
 _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
-    σ = _FWHM_to_σ(ℓ)
-    gf = GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))   # reusable, matched-to-offline filter
+    gf = matched_filter(ℓ)
 
     Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
     ε_Ks = SubFilterKineticEnergyEquation.SubFilterKineticEnergyDissipationRate(model, gf) # εˢ = filter(ε) - εˡ
@@ -346,7 +353,31 @@ if save_sorted
     ε_A = AvailablePotentialEnergyDissipationRate(model, z✶_heaviside; upsilon=Υ)
     ∫ε_A = Integral(ε_A)
 
-    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, Υ, ε_A, ∫ε_A)
+    # Sub-filter APE dissipation ε_Aˢ = filter(ε_A) - ε_Aˡ at each online filter scale, from
+    # Oceanostics' SubFilterAvailablePotentialEnergyDissipationRate. This is the diffusive sink of the
+    # sub-filter APE budget and the last of its terms the offline pipeline recomputed in Python;
+    # 05_sfs_ape_budget.py now reads it back, exactly as 04_sfs_ke_budget.py reads Π_K and ε_Kˢ.
+    #
+    # Both states are measured against ONE shared reference profile, which is what makes
+    # filter(ε_A) - ε_Aˡ a decomposition rather than a difference of two unrelated quantities, so the
+    # method has to be a `ProfileLookup`. Handing it the `VerticalSort` column built above shares that
+    # sort across every filter scale instead of re-sorting per scale, and the lookup is also exactly
+    # the offline semantics: `local_potential_energies_timeseries` gets z₀(ρ̄) by a nearest-density
+    # search of the *filtered* density into the *full* field's sorted profile.
+    #
+    # One definitional difference from the offline `calculate_sfs_ape_dissipation`: the online ε_Aˡ
+    # contracts the *filtered flux* q̄ᵢ = filter(κ∂ᵢb) with ∇Υˡ, while the offline second term rebuilds
+    # the flux from the filtered density as κ∇ρ̄. Those agree for the constant κ used here (filtering
+    # and differencing are both convolutions on a uniform grid) away from the boundaries; inv09
+    # quantifies what is left, alongside the conservative-vs-centered difference inv08 already measures.
+    _ape_pairs = Pair{Symbol, Any}[]
+    for ℓ in filter_ℓs
+        ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, matched_filter(ℓ); method=ProfileLookup(z✶_1dsort))
+        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)") => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As))
+    end
+    sfs_ape_fields = (; _ape_pairs...)
+
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, Υ, ε_A, ∫ε_A, sfs_ape_fields...)
 end
 #---
 

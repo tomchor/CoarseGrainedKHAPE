@@ -1,0 +1,207 @@
+#!/usr/bin/env python
+"""
+Compare the online (Oceanostics, simulation-time) sub-filter APE dissipation rate ε_Aˢ against the
+offline (Python post-processing) one, at every filter scale.
+
+The simulation computes, at each scale ℓ in its online `filter_ℓs` and each output,
+
+    ε_Aˢ = filter(ε_A) - ε_Aˡ ,   ε_Aˡ = -q̄ᵢ ∂ᵢΥˡ ,   q̄ᵢ = filter(κ ∂ᵢb) ,   Υˡ = z✶(b̄) - z
+
+(Oceanostics' `SubFilterAvailablePotentialEnergyDissipationRate`), the diffusive sink of the sub-filter
+APE budget of Wenegrat, Chor & Barkan (2026). `05_sfs_ape_budget.py` reads it straight back, the same
+way `04_sfs_ke_budget.py` reads Π_K and ε_Kˢ, so this script is what stands between that budget and a
+silently wrong online field. The offline expression it is checked against is the one the pipeline used
+to call, `calculate_sfs_ape_dissipation`, still kept in `src/aux01_pe_functions.py`.
+
+Three differences between the two, none of them errors, all of them measured here:
+
+  * **The second term.** Online, ε_Aˡ contracts the *filtered flux* q̄ᵢ = filter(κ∂ᵢb) with ∇Υˡ.
+    Offline, it rebuilds the flux from the filtered density instead, as κ∇ρ̄. For the constant κ used
+    here the two agree in the interior, since filtering and differencing are both convolutions on a
+    uniform grid and commute, but not against the walls where the filter's edge extension and the
+    derivative's one-sided stencil disagree.
+
+  * **Discretization**, the same one `inv08` measures for the total ε_A: the online form pairs the two
+    factors on the face where both differences live and interpolates the product to the cell center,
+    while `calculate_gradient` takes centered derivatives at the center and multiplies those. On a
+    grid-scale-sharp interface the centered form filters out exactly the correlation the product is
+    made of, so the offline value runs low.
+
+  * **Ties**, as in `inv08`: the online reference heights come from a `ProfileLookup`, which puts a run
+    of equal buoyancy at the mid-height of the band it fills, where the offline z₀ takes the run's
+    bottom slot. This cancels out of ∇Υ, so it reaches ε_Aˢ only through the boundary bands.
+
+The offline sort runs on the *unpadded* (true) domain, the like-for-like control for the online one, as
+in `inv07`/`inv08`; the padding effect is quantified once, in `inv06`.
+
+With `--tolerance` the script exits nonzero if any relative difference exceeds it (see `aux_check.py`);
+without it, it only reports. `tests/test_online_vs_offline.py` runs it in CI.
+"""
+#+++ Imports
+import logging
+import os
+import sys
+from pathlib import Path
+import numpy as np
+import xarray as xr
+import matplotlib.pyplot as plt
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
+from aux_check import add_tolerance_arg, set_tolerance, check, finalize
+from src.aux00_utils import (load_dataset_and_grid, integrate, make_gaussian_filter, open_grid_group,
+                             model_grid_suffix, strip_grid_suffix)
+from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, sorted_timeseries,
+                                    local_potential_energies_timeseries, calculate_sfs_ape_dissipation)
+from src.aux03_plotting import run_label
+#---
+
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
+print = logging.info
+
+#+++ Configuration
+import argparse
+parser = argparse.ArgumentParser(description="Compare online vs offline sub-filter APE dissipation ε_Aˢ")
+parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file (run with --save_sorted)")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
+parser.add_argument("--time", type=float, default=None, help="Target time for the snapshot maps (default: midpoint of simulation)")
+parser.add_argument("--z-window", type=float, default=6.0, help="Half-height of the z window shown in the snapshot maps (default: 6h; None for the full domain)")
+parser.add_argument("--n-workers", type=int, default=1, help="Thread-pool workers for the offline sorts and APE")
+add_tolerance_arg(parser)
+args = parser.parse_args()
+set_tolerance(args.tolerance)
+
+print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # validation/ → postprocessing/ → repo root
+FIGURES = REPO_ROOT / "figures" / "validation"
+FIGURES.mkdir(parents=True, exist_ok=True)
+filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
+stem = Path(filename).stem
+FILTER_DIMS = ["x_caa", "z_aac"]
+
+
+def online_name(ℓ, suffix=""):
+    """Online output variable for scale ℓ, matching the Julia Symbol("ε_As_ℓ$(ℓ)")."""
+    tag = f"{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{ℓ}"
+    return f"ε_As_ℓ{tag}{suffix}"
+#---
+
+#+++ Load the padded dataset and the online fields
+print("Loading simulation data...")
+ds = load_dataset_and_grid(filename)          # z-padded; also strips the model grid's _gridN suffix
+ds = ds.chunk({"time": 1})
+
+# The true (unpadded) domain, read from the grid group, as in inv07/inv08.
+grid = open_grid_group(filename)
+z_bot, z_top = float(grid.z.min()), float(grid.z.max())
+in_domain = dict(z_aac=slice(z_bot, z_top))
+
+for ℓ in args.filter_scales:
+    for name in (online_name(ℓ), online_name(ℓ, "_int")):
+        if name not in ds:
+            raise SystemExit(f"Online field '{name}' not in {filename} — rerun the simulation with "
+                             f"--save_sorted and a matching --filter_ls (needs the Oceanostics "
+                             f"`SubFilterAvailablePotentialEnergyEquation`).")
+
+if args.time is None:
+    args.time = float(ds.time.values[len(ds.time) // 2])
+t_sel = float(ds.time.sel(time=args.time, method="nearest").values)
+print(f"Selected snapshot time = {t_sel:.3f}  (requested {args.time})")
+#---
+
+#+++ Rebuild the unpadded state and sort it once (shared by every filter scale)
+print("Building the unpadded dataset and sorting the full buoyancy...")
+ds_raw = xr.open_dataset(filename, decode_times=False, chunks={}).chunk({"time": 1})
+ds_raw = strip_grid_suffix(ds_raw, model_grid_suffix(ds_raw))
+ds_raw["dV"]   = ds_raw.Δx_caa * ds_raw.Δy_aca * ds_raw.Δz_aac
+ds_raw["LxLy"] = float(grid.x[-1] - grid.x[0]) * float(grid.y[-1] - grid.y[0])
+ds_raw.attrs["z_min"] = z_bot
+ds_raw.attrs["z_max"] = z_top
+
+κ = float(ds_raw.attrs["κ"])
+dV = ds_raw["dV"]
+print(f"  Diffusivity κ = {κ:.4e}")
+
+ds_rho = ds_raw[["b", "dV", "LxLy"]].copy()
+ds_rho.attrs.update(ds_raw.attrs)
+ds_rho = calculate_density_fields_from_buoyancy(ds_rho, buoyancy_name="b", density_name="ρ")
+
+# One sort of the full field, shared by every scale — which is also what the online diagnostics do,
+# since they are all handed the same `VerticalSort` column to look up into.
+sorted_state = sorted_timeseries(ds_rho, field_to_sort="ρ", n_workers=args.n_workers, verbose_level=0)
+full_local_pes = local_potential_energies_timeseries(ds_rho, sorted_state.rho_sorted, sorted_state.dz_sorted,
+                                                     density_name="ρ", n_workers=args.n_workers, verbose_level=0)
+#---
+
+#+++ Per-scale comparison
+label = run_label(ds.attrs)
+zw = args.z_window
+integrals = {}
+
+for ℓ in args.filter_scales:
+    print("\n" + "="*70)
+    print(f"  filter scale ℓ = {ℓ:g}")
+    print("="*70)
+
+    gf = make_gaussian_filter(ℓ, ds_raw)
+
+    # ρ̄ from the filtered buoyancy, exactly as the budget pipeline builds it (01 filters b, then 05
+    # converts), and Υˡ from looking that filtered density up in the *full* field's sorted profile.
+    ds_filt = xr.Dataset({"b̄": gf.apply(ds_rho["b"], dims=FILTER_DIMS)})
+    ds_filt.attrs.update(ds_raw.attrs)
+    ds_filt = calculate_density_fields_from_buoyancy(ds_filt, buoyancy_name="b̄", density_name="ρ̄")
+    filt_local_pes = local_potential_energies_timeseries(ds_filt, sorted_state.rho_sorted, sorted_state.dz_sorted,
+                                                         density_name="ρ̄", n_workers=args.n_workers, verbose_level=0)
+
+    offline = calculate_sfs_ape_dissipation(ds_rho["ρ"], full_local_pes.upsilon, filt_local_pes.upsilon,
+                                            κ, gf, filter_dims=FILTER_DIMS,
+                                            filtered_density=ds_filt["ρ̄"]).rename("ε_Aˢ")
+    online = ds[online_name(ℓ)].sel(**in_domain)
+
+    on_snap  = online.sel(time=t_sel, method="nearest").squeeze().compute()
+    off_snap = offline.sel(time=t_sel, method="nearest").squeeze().compute()
+    diff = on_snap - off_snap
+    rms_online = float(np.sqrt(np.nanmean(on_snap.values**2)))
+    rms_field = float(np.sqrt(np.nanmean(diff.values**2))) / rms_online if rms_online > 0 else float("inf")
+    check(rms_field, f"    ε_Aˢ field (ℓ={ℓ:g}): rms(diff)/rms(online) = {rms_field:.3e},  "
+                     f"max|diff| = {float(np.nanmax(np.abs(diff.values))):.3e},  rms(online) = {rms_online:.3e}", print)
+
+    offline_int  = integrate(offline, dV).squeeze().compute()
+    online_int   = ds[online_name(ℓ, "_int")].squeeze(drop=True).reindex(time=offline_int.time, method="nearest").compute()
+    denom = float(np.sqrt(np.nanmean(offline_int.values**2)))
+    rms_int = float(np.sqrt(np.nanmean((online_int.values - offline_int.values)**2))) / denom if denom > 0 else float("inf")
+    check(rms_int, f"    ∫ε_Aˢ dV (ℓ={ℓ:g}): rms(online - offline)/rms(offline) = {rms_int:.3e}", print)
+    integrals[ℓ] = (offline_int, online_int)
+
+    # Maps: online | offline | difference
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), constrained_layout=True)
+    vmax = max(float(np.nanpercentile(np.abs(on_snap.values), 99)), float(np.nanpercentile(np.abs(off_snap.values), 99)))
+    vmax = vmax if vmax > 0 else 1.0
+    kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
+    on_snap.plot(ax=axes[0], **kw);  axes[0].set_title("Online ε_Aˢ")
+    off_snap.plot(ax=axes[1], **kw); axes[1].set_title("Offline ε_Aˢ")
+    diff.plot(ax=axes[2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+    axes[2].set_title("Difference (online − offline)")
+    for a in axes:
+        if zw is not None:
+            a.set_ylim(-zw, zw)
+        a.set_aspect("equal")
+    fig.suptitle(f"Online vs offline ε_Aˢ   ℓ = {ℓ:g}   t = {t_sel:.1f}" + (f"   {label}" if label else ""))
+    out = FIGURES / f"inv09_sfs_ape_dissipation_maps_{stem}_l{ℓ:g}_t{t_sel:.1f}.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"    Saved {out}")
+#---
+
+#+++ Integral time series, all scales on one figure
+fig, ax = plt.subplots(figsize=(7, 4.2), constrained_layout=True)
+for i, (ℓ, (offline_int, online_int)) in enumerate(integrals.items()):
+    ax.plot(offline_int.time, offline_int, lw=2.5, color=f"C{i}", label=f"offline  ℓ={ℓ:g}")
+    ax.plot(online_int.time, online_int, "--", lw=1.6, color=f"C{i}", label=f"online  ℓ={ℓ:g}")
+ax.set(xlabel="time", ylabel="∫ε_Aˢ dV", title="Volume-integrated sub-filter APE dissipation")
+ax.legend(fontsize=9)
+ax.grid(alpha=0.3)
+fig.suptitle("Online vs offline ∫ε_Aˢ dV" + (f"   {label}" if label else ""))
+out = FIGURES / f"inv09_sfs_ape_dissipation_integral_{stem}.png"
+fig.savefig(out, dpi=150, bbox_inches="tight")
+print(f"\nSaved {out}")
+#---
+
+finalize(print)

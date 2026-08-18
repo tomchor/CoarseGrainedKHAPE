@@ -3,8 +3,8 @@ Check that the simulation's online diagnostics match the offline post-processing
 
 Several diagnostics that the offline pipeline would otherwise recompute in Python are computed online
 by the Julia simulation instead (the filtered fields, the cross-scale KE flux Π_K, the SFS KE
-dissipation ε_Kˢ, and the Winters sorted reference state), and the pipeline then reads them straight
-out of the simulation output. Nothing else in the test suite compares the two implementations: the
+dissipation ε_Kˢ, the Winters sorted reference state, and the sub-filter APE dissipation ε_Aˢ), and
+the pipeline then reads them straight out of the simulation output. Nothing else in the test suite compares the two implementations: the
 budget-closure tests in `test_budgets.py` would only notice an online error large enough to break
 closure at the 10% level, and they cannot see the sorted state at all.
 
@@ -82,6 +82,18 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 # catches is what it is for: a sign error, a factor, or Υ built from the wrong reference state — the
 # online kernel was separately checked to reproduce its own conservative form to 3.6e-16, so anything
 # at the tens-of-percent level here is a real discrepancy rather than arithmetic.
+#
+# `inv09` (the sub-filter ε_Aˢ that `05_sfs_ape_budget.py` now reads online) inherits inv08's
+# discretization gap, and carries one definitional difference of its own in the second term: online
+# ε_Aˡ contracts the filtered flux filter(κ∂ᵢb) with ∇Υˡ, while offline it rebuilds the flux from the
+# filtered density as κ∇ρ̄. For the constant κ used here those agree in the interior (filtering and
+# differencing are both convolutions on a uniform grid, so they commute) and part ways only against the
+# walls. Being a difference of two comparable quantities, ε_Aˢ could have amplified the gap the way
+# ε_Kˢ does; measured at Nz=192/Re=262 it does not, landing at inv08's level:
+#   7.8e-02 (field, l=1)   1.4e-01 (int eps_As dV, l=1)
+#   4.0e-02 (field, l=7)   1.1e-01 (int eps_As dV, l=7)
+# so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
+
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
@@ -89,6 +101,7 @@ CASES = [
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
     pytest.param("inv08_compare_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="ape_dissipation"),
+    pytest.param("inv09_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
 ]
 
 

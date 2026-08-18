@@ -17,7 +17,6 @@ from src.aux01_pe_functions import (
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
-    calculate_sfs_ape_dissipation,
 )
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -116,6 +115,12 @@ ke_budget = xr.merge([
 ])
 print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}")
 
+# ε_Aˢ is computed online by the simulation (no offline recompute). Map a filter scale to its
+# sim-output variable name, matching the Julia Symbol("<var>_ℓ$(ℓ)"). The offline expression is kept in
+# `calculate_sfs_ape_dissipation` and cross-checked against the online field by validation/inv09.
+def online_name(var, ℓ):
+    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
+
 dV = ds_full.dV
 budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
@@ -151,12 +156,14 @@ for ℓ in filter_scales:
     subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
     print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
 
-    t0 = time.time()
-    sfs_ape_dissipation = calculate_sfs_ape_dissipation(
-        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
-        filter_dims=filtered_dimensions,
-        filtered_density=ds_filt_ℓ.ρ̄,)
-    print(f"  sfs_ape_dissipation  ({time.time()-t0:.1f}s)")
+    # ε_Aˢ from the online sim output, integrated on the budget (padded) grid so it is consistent with
+    # the other terms (the padding region repeats each edge value, so every gradient there vanishes and
+    # ε_Aˢ ≈ 0, exactly as for Π_K and ε_Kˢ in 04).
+    if online_name("ε_As", ℓ) not in ds:
+        raise KeyError(f"Online field '{online_name('ε_As', ℓ)}' not in sim output; run the simulation "
+                       f"with --save_sorted, and make sure the budget filter scales are a subset of its "
+                       f"online filter_ℓs (got ℓ={ℓ}).")
+    sfs_ape_dissipation = ds[online_name("ε_As", ℓ)]
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
     ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
