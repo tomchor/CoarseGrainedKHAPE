@@ -353,23 +353,6 @@ if save_sorted
     ε_A = AvailablePotentialEnergyDissipationRate(model, z✶_heaviside; upsilon=Υ)
     ∫ε_A = Integral(ε_A)
 
-    # Sub-filter APE dissipation ε_Aˢ = filter(ε_A) - ε_Aˡ at each online filter scale, from
-    # Oceanostics' SubFilterAvailablePotentialEnergyDissipationRate. This is the diffusive sink of the
-    # sub-filter APE budget and the last of its terms the offline pipeline recomputed in Python;
-    # 05_sfs_ape_budget.py now reads it back, exactly as 04_sfs_ke_budget.py reads Π_K and ε_Kˢ.
-    #
-    # Both states are measured against ONE shared reference profile, which is what makes
-    # filter(ε_A) - ε_Aˡ a decomposition rather than a difference of two unrelated quantities, so the
-    # method has to be a `ProfileLookup`. Handing it the `VerticalSort` column built above shares that
-    # sort across every filter scale instead of re-sorting per scale, and the lookup is also exactly
-    # the offline semantics: `local_potential_energies_timeseries` gets z₀(ρ̄) by a nearest-density
-    # search of the *filtered* density into the *full* field's sorted profile.
-    #
-    # One definitional difference from the offline `calculate_sfs_ape_dissipation`: the online ε_Aˡ
-    # contracts the *filtered flux* q̄ᵢ = filter(κ∂ᵢb) with ∇Υˡ, while the offline second term rebuilds
-    # the flux from the filtered density as κ∇ρ̄. Those agree for the constant κ used here (filtering
-    # and differencing are both convolutions on a uniform grid) away from the boundaries; inv09
-    # quantifies what is left, alongside the conservative-vs-centered difference inv08 already measures.
     _ape_pairs = Pair{Symbol, Any}[]
     for ℓ in filter_ℓs
         ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, matched_filter(ℓ); method=ProfileLookup(z✶_1dsort))
