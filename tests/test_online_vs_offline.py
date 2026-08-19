@@ -14,10 +14,13 @@ already do them. Each recomputes its diagnostic offline, compares against the on
 Those scripts also write the comparison figures, which is why they run as subprocesses rather than
 being imported: they are top-level scripts, not modules.
 
-Only the time-varying reference is covered. The quantities here are reference-independent — a filtered
-field, Π_K and ε_Kˢ are built from velocities alone, and the sorted state is a property of the
+Only the time-varying reference is covered. Most of these quantities are reference-independent — a
+filtered field, Π_K and ε_Kˢ are built from velocities alone, and the sorted state is a property of the
 instantaneous buoyancy field — so running them again under `--fixed-reference` would repeat identical
-work on identical inputs.
+work on identical inputs. ε_Aˢ is the exception: it does depend on the reference state, and the online
+one is always the sort of the current buoyancy, so `05_sfs_ape_budget.py` reads it only for the
+time-varying reference and recomputes it offline under `--fixed-reference`. There is nothing to compare
+in that variant either way.
 
 `inv03` (the S̄/τ tensor components) is not included: it needs a `--save_tensors` run, which writes six
 extra 3D fields per filter scale, and the quantities it checks already enter Π_K, which `inv02` covers.
