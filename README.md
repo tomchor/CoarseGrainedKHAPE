@@ -101,15 +101,14 @@ validation scripts in `postprocessing/validation/`.
 state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
 (`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
 the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It
-also emits the online local available potential energy `E_a` (and its integral `∫E_a`), the buoyancy
-displacement potential `Υ` = z✶ − z, the total APE dissipation rate `ε_A` = κ ∂ᵢb ∂ᵢΥ (and its
-integral `∫ε_A`), and the sub-filter APE dissipation `ε_As_ℓ<ℓ>` at each online filter scale, which
-`05_sfs_ape_budget.py` reads back instead of recomputing. All of these
+also emits the online local available potential energy `E_a` (and its integral `∫E_a`) and the
+sub-filter APE dissipation `ε_As_ℓ<ℓ>` at each online filter scale, which `05_sfs_ape_budget.py` reads
+back instead of recomputing. All of these
 go into the main output file, since one `NetCDFWriter` holds both grids; the resulting per-grid
 dimension suffixing is undone at load time by the post-processing loader, so the rest of the pipeline
 is unaffected. This is the online counterpart of what `02_sort_density.py` and the offline APE
 computation produce; `inv06_compare_sorted_profiles.py`, `inv07_compare_local_ape.py` and
-`inv08_compare_ape_dissipation.py` and `inv09_compare_sfs_ape_dissipation.py` compare the two. Each method carries its own full-domain sort per
+`inv09_compare_sfs_ape_dissipation.py` compare the two. Each method carries its own full-domain sort per
 output, so this is off by default.
 
 ### Run a simulation + online-vs-offline validation
@@ -123,10 +122,10 @@ bash submit_validation_run.sh NZ=1024
 `submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
 Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, the local APE,
-the displacement potential Υ with the APE dissipation ε_A, and the sub-filter APE dissipation ε_Aˢ offline and
+and the sub-filter APE dissipation ε_Aˢ offline and
 compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv09`),
 writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
-`inv06`, `inv07`, `inv08` and `inv09` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
+`inv06`, `inv07` and `inv09` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 

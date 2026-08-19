@@ -21,18 +21,18 @@ Three differences between the two, none of them errors, all of them measured her
     uniform grid and commute, but not against the walls where the filter's edge extension and the
     derivative's one-sided stencil disagree.
 
-  * **Discretization**, the same one `inv08` measures for the total ε_A: the online form pairs the two
+  * **Discretization**: the online form pairs the two
     factors on the face where both differences live and interpolates the product to the cell center,
     while `calculate_gradient` takes centered derivatives at the center and multiplies those. On a
     grid-scale-sharp interface the centered form filters out exactly the correlation the product is
     made of, so the offline value runs low.
 
-  * **Ties**, as in `inv08`: the online reference heights come from a `ProfileLookup`, which puts a run
+  * **Ties**: the online reference heights come from a `ProfileLookup`, which puts a run
     of equal buoyancy at the mid-height of the band it fills, where the offline z₀ takes the run's
     bottom slot. This cancels out of ∇Υ, so it reaches ε_Aˢ only through the boundary bands.
 
 The offline sort runs on the *unpadded* (true) domain, the like-for-like control for the online one, as
-in `inv07`/`inv08`; the padding effect is quantified once, in `inv06`.
+in `inv07`; the padding effect is quantified once, in `inv06`.
 
 With `--tolerance` the script exits nonzero if any relative difference exceeds it (see `aux_check.py`);
 without it, it only reports. `tests/test_online_vs_offline.py` runs it in CI.
@@ -89,7 +89,7 @@ print("Loading simulation data...")
 ds = load_dataset_and_grid(filename)          # z-padded; also strips the model grid's _gridN suffix
 ds = ds.chunk({"time": 1})
 
-# The true (unpadded) domain, read from the grid group, as in inv07/inv08.
+# The true (unpadded) domain, read from the grid group, as in inv07.
 grid = open_grid_group(filename)
 z_bot, z_top = float(grid.z.min()), float(grid.z.max())
 in_domain = dict(z_aac=slice(z_bot, z_top))

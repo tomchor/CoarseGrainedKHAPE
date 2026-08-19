@@ -71,25 +71,16 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 # volume integral both agree to ~1e-11, so it is held at 1e-6 (six orders of headroom over the measured
 # value, and still far below the percent level a real physics regression would show).
 #
-# `inv08` (Υ and the total APE dissipation ε_A) is back in the approximate group, and for a reason
-# specific to it: the online ε_A pairs its two factors on the face where both differences live and
-# interpolates the product to the cell center, while the offline `calculate_gradient` takes centered
-# derivatives at the center and multiplies those — which filters out exactly the grid-scale correlation
-# that product is made of. On the grid-scale-sharp interface of a mixing billow the offline integral
-# therefore runs systematically low. Measured at Nz=192/Re=262: 5.7e-03 (Υ field, at the midpoint
-# time), 6.2e-02 (ε_A field), 1.2e-01 (∫ε_A dV), so 0.30 is ~2.5x the worst. The gap shrinks with
-# resolution, and CI resolves the same flow 2.7x finer, so these are upper bounds. What it still
-# catches is what it is for: a sign error, a factor, or Υ built from the wrong reference state — the
-# online kernel was separately checked to reproduce its own conservative form to 3.6e-16, so anything
-# at the tens-of-percent level here is a real discrepancy rather than arithmetic.
-#
-# `inv09` (the sub-filter ε_Aˢ that `05_sfs_ape_budget.py` now reads online) inherits inv08's
-# discretization gap, and carries one definitional difference of its own in the second term: online
-# ε_Aˡ contracts the filtered flux filter(κ∂ᵢb) with ∇Υˡ, while offline it rebuilds the flux from the
-# filtered density as κ∇ρ̄. For the constant κ used here those agree in the interior (filtering and
-# differencing are both convolutions on a uniform grid, so they commute) and part ways only against the
-# walls. Being a difference of two comparable quantities, ε_Aˢ could have amplified the gap the way
-# ε_Kˢ does; measured at Nz=192/Re=262 it does not, landing at inv08's level:
+# `inv09` (the sub-filter ε_Aˢ that `05_sfs_ape_budget.py` reads online) is approximate for two
+# reasons. First, discretization: the online form pairs its two factors on the face where both
+# differences live and interpolates the product to the cell center, while the offline
+# `calculate_gradient` takes centered derivatives at the center and multiplies those, which filters out
+# exactly the grid-scale correlation that product is made of. Second, a definitional difference in the
+# second term: online ε_Aˡ contracts the filtered flux filter(κ∂ᵢb) with ∇Υˡ, while offline it rebuilds
+# the flux from the filtered density as κ∇ρ̄. For the constant κ used here those agree in the interior
+# (filtering and differencing are both convolutions on a uniform grid, so they commute) and part ways
+# only against the walls. Being a difference of two comparable quantities, ε_Aˢ could have amplified
+# the first gap the way ε_Kˢ does; measured at Nz=192/Re=262 it does not:
 #   7.8e-02 (field, l=1)   1.4e-01 (int eps_As dV, l=1)
 #   4.0e-02 (field, l=7)   1.1e-01 (int eps_As dV, l=7)
 # so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
@@ -100,7 +91,6 @@ CASES = [
     pytest.param("inv05_compare_dissipation.py", 0.5, [], id="eps_Ks"),
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
-    pytest.param("inv08_compare_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="ape_dissipation"),
     pytest.param("inv09_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
 ]
 
