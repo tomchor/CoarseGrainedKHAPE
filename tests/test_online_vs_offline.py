@@ -3,11 +3,10 @@ Check that the simulation's online diagnostics match the offline post-processing
 
 Several diagnostics that the offline pipeline would otherwise recompute in Python are computed online
 by the Julia simulation instead (the filtered fields, the cross-scale KE flux Π_K, the SFS KE
-dissipation ε_Kˢ, the Winters sorted reference state, the sub-filter KE Kˢ, and the sub-filter APE Eₐˢ
-with its dissipation ε_Aˢ), and the pipeline then reads them straight out of the simulation output.
-Nothing else in the test suite compares the two implementations: the budget-closure tests in
-`test_budgets.py` would only notice an online error large enough to break closure at the 10% level, and
-they cannot see the sorted state at all.
+dissipation ε_Kˢ, the Winters sorted reference state, and the sub-filter APE dissipation ε_Aˢ), and
+the pipeline then reads them straight out of the simulation output. Nothing else in the test suite compares the two implementations: the
+budget-closure tests in `test_budgets.py` would only notice an online error large enough to break
+closure at the 10% level, and they cannot see the sorted state at all.
 
 Rather than reimplement the comparisons, this runs the `postprocessing/validation/inv0*` scripts that
 already do them. Each recomputes its diagnostic offline, compares against the online field, and with
@@ -88,16 +87,7 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 #   7.8e-02 (field, l=1)   1.4e-01 (int eps_As dV, l=1)
 #   4.0e-02 (field, l=7)   1.1e-01 (int eps_As dV, l=7)
 # so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
-#
-# `inv09` (the sub-filter KE Kˢ) and `inv10` (the sub-filter APE Eₐˢ) are the tight pair among the
-# energies, and for the same reason: neither involves a derivative. Kˢ = filter(uᵢuⱼ) - ūᵢūⱼ and
-# Eₐˢ = filter(eₐ) - eₐˡ are built from the same Gaussian kernel on both sides, so the only difference
-# left is the filter implementation (Oceananigans versus scipy on a padded domain) and, for Eₐˢ, the
-# tie convention in the reference-height lookup. That is why they sit three orders below the
-# derivative-based comparisons above. Measured at Nz=192/Re=262:
-#   inv09  1.3e-03 (field, l=1)   2.4e-03 (int K_s dV, l=1)   [l=7 an order tighter still]
-#   inv10  2.5e-05 (field, l=1)   1.5e-03 (int E_as dV, l=1)  [l=7 an order tighter still]
-# so 0.01 is several times the worst and still tight enough that any real regression shows up.
+
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
@@ -105,8 +95,6 @@ CASES = [
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
     pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
-    pytest.param("inv09_compare_sfs_ke.py", 0.01, [], id="sfs_ke"),
-    pytest.param("inv10_compare_sfs_ape.py", 0.01, ["--n-workers", "2"], id="sfs_ape"),
 ]
 
 
