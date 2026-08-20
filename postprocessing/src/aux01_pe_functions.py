@@ -757,10 +757,11 @@ def calculate_ape_dissipation(rho, upsilon, kappa, index_dim="i"):
     where z_* = z and there is no available energy to destroy.
 
     This is the building block of the sub-filter dissipation below, which is the
-    same expression evaluated on the full and on the filtered state, and it is what
-    the simulation computes online (`ε_A`, from Oceanostics'
-    `AvailablePotentialEnergyDissipationRate`);
-    `postprocessing/validation/inv08_compare_ape_dissipation.py` compares the two.
+    same expression evaluated on the full and on the filtered state. The simulation
+    computes the same quantity online, inside Oceanostics'
+    `SubFilterAvailablePotentialEnergyDissipationRate`, but does not write it out on
+    its own: only the sub-filter combination is emitted, and
+    `postprocessing/validation/inv08_compare_sfs_ape_dissipation.py` checks that.
 
     Parameters
     ----------

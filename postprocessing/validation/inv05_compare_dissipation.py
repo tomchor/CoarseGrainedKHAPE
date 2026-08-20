@@ -100,7 +100,17 @@ if not filter_scales:
 label = run_label(ds.attrs)
 zw = args.z_window
 n_scales = len(filter_scales)
-fig, axes = plt.subplots(n_scales, 3, figsize=(15, 3.6 * n_scales), constrained_layout=True, squeeze=False)
+# One figure per script: the map rows plus a final row subdivided into the integral panels.
+fig = plt.figure(figsize=(15, 3.6 * n_scales + 4.6), constrained_layout=True)
+_gs = fig.add_gridspec(n_scales + 1, 3, height_ratios=[3.6] * n_scales + [4.6])
+axes = np.empty((n_scales, 3), dtype=object)
+for _i in range(n_scales):
+    for _k in range(3):
+        axes[_i, _k] = fig.add_subplot(_gs[_i, _k])
+_gs_int = _gs[n_scales, :].subgridspec(1, n_scales)
+ax2 = np.empty((1, n_scales), dtype=object)
+for _i in range(n_scales):
+    ax2[0, _i] = fig.add_subplot(_gs_int[0, _i])
 
 print("\nSnapshot comparison (bulk rms over the original domain):")
 for i, ℓ in enumerate(filter_scales):
@@ -128,18 +138,10 @@ for i, ℓ in enumerate(filter_scales):
     check(rel, f"  ℓ={ℓ:>4g}: rms(diff)/rms(online) = {rel:.2e},  max|diff| = {float(np.nanmax(np.abs(diff.values))):.2e}"
                f",  rms(online) = {rms_online:.2e}", print)
 
-suptitle = f"Online vs offline SFS KE dissipation ε_Kˢ   t = {t_sel:.1f}"
-if label:
-    suptitle += f"   {label}"
-fig.suptitle(suptitle, fontsize=13, y=1.01)
-outfile = str(FIGURES / f"{stem}_dissipation_comparison_maps_t{t_sel:.1f}.png")
-fig.savefig(outfile, dpi=150, bbox_inches="tight")
-print(f"Snapshot figure saved to: {outfile}")
 #---
 
 #+++ Volume-integrated dissipation ∫ε_Kˢ dV vs time
 dV_dom = ds.dV.sel(**in_domain)
-fig2, ax2 = plt.subplots(1, n_scales, figsize=(7 * n_scales, 4.2), constrained_layout=True, squeeze=False)
 
 print("\nVolume-integrated dissipation ∫ε_Kˢ dV (time-mean relative difference):")
 for i, ℓ in enumerate(filter_scales):
@@ -160,13 +162,13 @@ for i, ℓ in enumerate(filter_scales):
     rel = float(np.sqrt(np.nanmean((on_int_fld.values - off_int.values)**2))) / denom if denom > 0 else float("inf")
     check(rel, f"  ℓ={ℓ:>4g}: rms(online−offline)/rms(offline) = {rel:.2e}", print)
 
-suptitle = "Online vs offline volume-integrated SFS KE dissipation ∫ε_Kˢ dV"
+suptitle = f"Online vs offline SFS KE dissipation ε_Kˢ   maps at t = {t_sel:.1f}, volume integrals over the run"
 if label:
     suptitle += f"   {label}"
-fig2.suptitle(suptitle, fontsize=13, y=1.03)
-outfile2 = str(FIGURES / f"{stem}_dissipation_comparison_integral.png")
-fig2.savefig(outfile2, dpi=150, bbox_inches="tight")
-print(f"Integral figure saved to: {outfile2}")
+fig.suptitle(suptitle, fontsize=13)
+outfile = str(FIGURES / f"inv05_dissipation_comparison_{stem}_t{t_sel:.1f}.png")
+fig.savefig(outfile, dpi=150, bbox_inches="tight")
+print(f"\nFigure saved to: {outfile}")
 #---
 
 finalize(print)

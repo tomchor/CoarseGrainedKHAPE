@@ -3,8 +3,8 @@ Check that the simulation's online diagnostics match the offline post-processing
 
 Several diagnostics that the offline pipeline would otherwise recompute in Python are computed online
 by the Julia simulation instead (the filtered fields, the cross-scale KE flux Π_K, the SFS KE
-dissipation ε_Kˢ, and the Winters sorted reference state), and the pipeline then reads them straight
-out of the simulation output. Nothing else in the test suite compares the two implementations: the
+dissipation ε_Kˢ, the Winters sorted reference state, and the sub-filter APE dissipation ε_Aˢ), and
+the pipeline then reads them straight out of the simulation output. Nothing else in the test suite compares the two implementations: the
 budget-closure tests in `test_budgets.py` would only notice an online error large enough to break
 closure at the 10% level, and they cannot see the sorted state at all.
 
@@ -14,10 +14,13 @@ already do them. Each recomputes its diagnostic offline, compares against the on
 Those scripts also write the comparison figures, which is why they run as subprocesses rather than
 being imported: they are top-level scripts, not modules.
 
-Only the time-varying reference is covered. The quantities here are reference-independent — a filtered
-field, Π_K and ε_Kˢ are built from velocities alone, and the sorted state is a property of the
+Only the time-varying reference is covered. Most of these quantities are reference-independent — a
+filtered field, Π_K and ε_Kˢ are built from velocities alone, and the sorted state is a property of the
 instantaneous buoyancy field — so running them again under `--fixed-reference` would repeat identical
-work on identical inputs.
+work on identical inputs. ε_Aˢ is the exception: it does depend on the reference state, and the online
+one is always the sort of the current buoyancy, so `05_sfs_ape_budget.py` reads it only for the
+time-varying reference and recomputes it offline under `--fixed-reference`. There is nothing to compare
+in that variant either way.
 
 `inv03` (the S̄/τ tensor components) is not included: it needs a `--save_tensors` run, which writes six
 extra 3D fields per filter scale, and the quantities it checks already enter Π_K, which `inv02` covers.
@@ -71,24 +74,27 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 # volume integral both agree to ~1e-11, so it is held at 1e-6 (six orders of headroom over the measured
 # value, and still far below the percent level a real physics regression would show).
 #
-# `inv08` (Υ and the total APE dissipation ε_A) is back in the approximate group, and for a reason
-# specific to it: the online ε_A pairs its two factors on the face where both differences live and
-# interpolates the product to the cell center, while the offline `calculate_gradient` takes centered
-# derivatives at the center and multiplies those — which filters out exactly the grid-scale correlation
-# that product is made of. On the grid-scale-sharp interface of a mixing billow the offline integral
-# therefore runs systematically low. Measured at Nz=192/Re=262: 5.7e-03 (Υ field, at the midpoint
-# time), 6.2e-02 (ε_A field), 1.2e-01 (∫ε_A dV), so 0.30 is ~2.5x the worst. The gap shrinks with
-# resolution, and CI resolves the same flow 2.7x finer, so these are upper bounds. What it still
-# catches is what it is for: a sign error, a factor, or Υ built from the wrong reference state — the
-# online kernel was separately checked to reproduce its own conservative form to 3.6e-16, so anything
-# at the tens-of-percent level here is a real discrepancy rather than arithmetic.
+# `inv08` (the sub-filter ε_Aˢ that `05_sfs_ape_budget.py` reads online) is approximate for two
+# reasons. First, discretization: the online form pairs its two factors on the face where both
+# differences live and interpolates the product to the cell center, while the offline
+# `calculate_gradient` takes centered derivatives at the center and multiplies those, which filters out
+# exactly the grid-scale correlation that product is made of. Second, a definitional difference in the
+# second term: online ε_Aˡ contracts the filtered flux filter(κ∂ᵢb) with ∇Υˡ, while offline it rebuilds
+# the flux from the filtered density as κ∇ρ̄. For the constant κ used here those agree in the interior
+# (filtering and differencing are both convolutions on a uniform grid, so they commute) and part ways
+# only against the walls. Being a difference of two comparable quantities, ε_Aˢ could have amplified
+# the first gap the way ε_Kˢ does; measured at Nz=192/Re=262 it does not:
+#   7.8e-02 (field, l=1)   1.4e-01 (int eps_As dV, l=1)
+#   4.0e-02 (field, l=7)   1.1e-01 (int eps_As dV, l=7)
+# so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
+
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
     pytest.param("inv05_compare_dissipation.py", 0.5, [], id="eps_Ks"),
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
-    pytest.param("inv08_compare_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="ape_dissipation"),
+    pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
 ]
 
 
