@@ -136,7 +136,13 @@ label = run_label(ds.attrs)
 zw = args.z_window
 integrals = {}
 
-for ℓ in args.filter_scales:
+# One figure: a row of maps per filter scale, then the volume integrals spanning the row below.
+n_scales = len(args.filter_scales)
+fig = plt.figure(figsize=(15, 4.2 * n_scales + 4.6), constrained_layout=True)
+_gs = fig.add_gridspec(n_scales + 1, 3, height_ratios=[4.2] * n_scales + [4.6])
+map_axes = [[fig.add_subplot(_gs[i, k]) for k in range(3)] for i in range(n_scales)]
+
+for row, ℓ in enumerate(args.filter_scales):
     print("\n" + "="*70)
     print(f"  filter scale ℓ = {ℓ:g}")
     print("="*70)
@@ -171,35 +177,34 @@ for ℓ in args.filter_scales:
     check(rms_int, f"    ∫ε_Aˢ dV (ℓ={ℓ:g}): rms(online - offline)/rms(offline) = {rms_int:.3e}", print)
     integrals[ℓ] = (offline_int, online_int)
 
-    # Maps: online | offline | difference
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), constrained_layout=True)
+    # Maps: online | offline | difference, into this scale's row
+    axes = map_axes[row]
     vmax = max(float(np.nanpercentile(np.abs(on_snap.values), 99)), float(np.nanpercentile(np.abs(off_snap.values), 99)))
     vmax = vmax if vmax > 0 else 1.0
     kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
-    on_snap.plot(ax=axes[0], **kw);  axes[0].set_title("Online ε_Aˢ")
-    off_snap.plot(ax=axes[1], **kw); axes[1].set_title("Offline ε_Aˢ")
+    on_snap.plot(ax=axes[0], **kw);  axes[0].set_title(f"Online ε_Aˢ (ℓ={ℓ:g})")
+    off_snap.plot(ax=axes[1], **kw); axes[1].set_title(f"Offline ε_Aˢ (ℓ={ℓ:g})")
     diff.plot(ax=axes[2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
     axes[2].set_title("Difference (online − offline)")
     for a in axes:
         if zw is not None:
             a.set_ylim(-zw, zw)
         a.set_aspect("equal")
-    fig.suptitle(f"Online vs offline ε_Aˢ   ℓ = {ℓ:g}   t = {t_sel:.1f}" + (f"   {label}" if label else ""))
-    out = FIGURES / f"inv08_sfs_ape_dissipation_maps_{stem}_l{ℓ:g}_t{t_sel:.1f}.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
-    print(f"    Saved {out}")
+    axes[0].set_ylabel(f"ℓ = {ℓ:g}", fontsize=13)
 #---
 
-#+++ Integral time series, all scales on one figure
-fig, ax = plt.subplots(figsize=(7, 4.2), constrained_layout=True)
+#+++ Integral time series, all scales, in the figure's last row
+ax = fig.add_subplot(_gs[n_scales, :])
 for i, (ℓ, (offline_int, online_int)) in enumerate(integrals.items()):
     ax.plot(offline_int.time, offline_int, lw=2.5, color=f"C{i}", label=f"offline  ℓ={ℓ:g}")
     ax.plot(online_int.time, online_int, "--", lw=1.6, color=f"C{i}", label=f"online  ℓ={ℓ:g}")
 ax.set(xlabel="time", ylabel="∫ε_Aˢ dV", title="Volume-integrated sub-filter APE dissipation")
 ax.legend(fontsize=9)
 ax.grid(alpha=0.3)
-fig.suptitle("Online vs offline ∫ε_Aˢ dV" + (f"   {label}" if label else ""))
-out = FIGURES / f"inv08_sfs_ape_dissipation_integral_{stem}.png"
+
+fig.suptitle(f"Online vs offline ε_Aˢ   maps at t = {t_sel:.1f}, volume integrals over the run"
+             + (f"   {label}" if label else ""))
+out = FIGURES / f"inv08_sfs_ape_dissipation_{stem}_t{t_sel:.1f}.png"
 fig.savefig(out, dpi=150, bbox_inches="tight")
 print(f"\nSaved {out}")
 #---
