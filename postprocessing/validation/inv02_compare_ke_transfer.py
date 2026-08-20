@@ -174,7 +174,7 @@ suptitle = f"Online vs offline cross-scale KE transfer Π_K   maps at t = {t_sel
 if label:
     suptitle += f"   {label}"
 fig.suptitle(suptitle, fontsize=13)
-outfile = str(FIGURES / f"{stem}_ke_transfer_comparison_t{t_sel:.1f}.png")
+outfile = str(FIGURES / f"inv02_ke_transfer_comparison_{stem}_t{t_sel:.1f}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"\nFigure saved to: {outfile}")
 #---

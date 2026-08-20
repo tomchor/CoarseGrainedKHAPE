@@ -166,7 +166,7 @@ suptitle = f"Online vs offline SFS KE dissipation ε_Kˢ   maps at t = {t_sel:.1
 if label:
     suptitle += f"   {label}"
 fig.suptitle(suptitle, fontsize=13)
-outfile = str(FIGURES / f"{stem}_dissipation_comparison_t{t_sel:.1f}.png")
+outfile = str(FIGURES / f"inv05_dissipation_comparison_{stem}_t{t_sel:.1f}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"\nFigure saved to: {outfile}")
 #---

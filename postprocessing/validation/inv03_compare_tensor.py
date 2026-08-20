@@ -119,7 +119,7 @@ suptitle = f"Online vs offline {args.tensor} tensor {TENSOR_SYMBOL}   ℓ = {ℓ
 if label:
     suptitle += f"   {label}"
 fig.suptitle(suptitle, fontsize=13, y=1.01)
-outfile = str(FIGURES / f"{stem}_{args.tensor}_tensor_comparison_l{ℓ_tag}_t{t_sel:.1f}.png")
+outfile = str(FIGURES / f"inv03_{args.tensor}_tensor_comparison_{stem}_l{ℓ_tag}_t{t_sel:.1f}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"Figure saved to: {outfile}")
 #---

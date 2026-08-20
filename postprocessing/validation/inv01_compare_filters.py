@@ -112,7 +112,7 @@ if label:
     suptitle += f"   {label}"
 fig.suptitle(suptitle, fontsize=13, y=1.005)
 
-outfile = str(FIGURES / f"{stem}_filter_comparison_t{t_sel:.1f}.png")
+outfile = str(FIGURES / f"inv01_filter_comparison_{stem}_t{t_sel:.1f}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 print(f"\n  Figure saved to: {outfile}")
 #---

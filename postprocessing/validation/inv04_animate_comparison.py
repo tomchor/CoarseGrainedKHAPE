@@ -194,7 +194,7 @@ def update(frame):
     return [im for row in meshes for im in row] + [suptitle]
 
 
-outfile = str(ANIMATIONS / f"{stem}_{field_tag}_online_offline_comparison.mp4")
+outfile = str(ANIMATIONS / f"inv04_{field_tag}_online_offline_comparison_{stem}.mp4")
 print(f"\nRecording {len(times)} frames at {args.fps} fps...")
 writer = FFMpegWriter(fps=args.fps, metadata=dict(title=f"Online vs offline {field}"))
 anim = FuncAnimation(fig, update, frames=len(times), blit=False, cache_frame_data=False)
