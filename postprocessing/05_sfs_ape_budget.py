@@ -122,7 +122,7 @@ print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}
 # state, and the online one is always the sort of the *current* buoyancy. Under --fixed-reference every
 # other term here is measured against the t=0 profile instead, so mixing in the online ε_Aˢ would put
 # one term on a different reference state from the rest and the budget would not close. That variant
-# therefore falls back to the offline expression, which is also what validation/inv09 checks the online
+# therefore falls back to the offline expression, which is also what validation/inv08 checks the online
 # field against. Map a filter scale to its sim-output name, matching the Julia Symbol("<var>_ℓ$(ℓ)").
 def online_name(var, ℓ):
     return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"

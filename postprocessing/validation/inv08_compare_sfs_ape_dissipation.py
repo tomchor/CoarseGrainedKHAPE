@@ -185,7 +185,7 @@ for ℓ in args.filter_scales:
             a.set_ylim(-zw, zw)
         a.set_aspect("equal")
     fig.suptitle(f"Online vs offline ε_Aˢ   ℓ = {ℓ:g}   t = {t_sel:.1f}" + (f"   {label}" if label else ""))
-    out = FIGURES / f"inv09_sfs_ape_dissipation_maps_{stem}_l{ℓ:g}_t{t_sel:.1f}.png"
+    out = FIGURES / f"inv08_sfs_ape_dissipation_maps_{stem}_l{ℓ:g}_t{t_sel:.1f}.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
     print(f"    Saved {out}")
 #---
@@ -199,7 +199,7 @@ ax.set(xlabel="time", ylabel="∫ε_Aˢ dV", title="Volume-integrated sub-filter
 ax.legend(fontsize=9)
 ax.grid(alpha=0.3)
 fig.suptitle("Online vs offline ∫ε_Aˢ dV" + (f"   {label}" if label else ""))
-out = FIGURES / f"inv09_sfs_ape_dissipation_integral_{stem}.png"
+out = FIGURES / f"inv08_sfs_ape_dissipation_integral_{stem}.png"
 fig.savefig(out, dpi=150, bbox_inches="tight")
 print(f"\nSaved {out}")
 #---

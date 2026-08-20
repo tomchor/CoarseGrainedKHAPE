@@ -74,7 +74,7 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 # volume integral both agree to ~1e-11, so it is held at 1e-6 (six orders of headroom over the measured
 # value, and still far below the percent level a real physics regression would show).
 #
-# `inv09` (the sub-filter ε_Aˢ that `05_sfs_ape_budget.py` reads online) is approximate for two
+# `inv08` (the sub-filter ε_Aˢ that `05_sfs_ape_budget.py` reads online) is approximate for two
 # reasons. First, discretization: the online form pairs its two factors on the face where both
 # differences live and interpolates the product to the cell center, while the offline
 # `calculate_gradient` takes centered derivatives at the center and multiplies those, which filters out
@@ -94,7 +94,7 @@ CASES = [
     pytest.param("inv05_compare_dissipation.py", 0.5, [], id="eps_Ks"),
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
-    pytest.param("inv09_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
+    pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
 ]
 
 

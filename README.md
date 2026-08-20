@@ -108,7 +108,7 @@ go into the main output file, since one `NetCDFWriter` holds both grids; the res
 dimension suffixing is undone at load time by the post-processing loader, so the rest of the pipeline
 is unaffected. This is the online counterpart of what `02_sort_density.py` and the offline APE
 computation produce; `inv06_compare_sorted_profiles.py`, `inv07_compare_local_ape.py` and
-`inv09_compare_sfs_ape_dissipation.py` compare the two. Each method carries its own full-domain sort per
+`inv08_compare_sfs_ape_dissipation.py` compare the two. Each method carries its own full-domain sort per
 output, so this is off by default.
 
 ### Run a simulation + online-vs-offline validation
@@ -123,9 +123,9 @@ bash submit_validation_run.sh NZ=1024
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
 Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, the local APE,
 and the sub-filter APE dissipation ε_Aˢ offline and
-compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv09`),
+compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv08`),
 writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
-`inv06`, `inv07` and `inv09` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
+`inv06`, `inv07` and `inv08` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 
