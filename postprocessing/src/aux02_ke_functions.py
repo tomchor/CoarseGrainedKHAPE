@@ -255,7 +255,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18,
-                              include_pi_k=True):
+                              include_pi_k=True, online_pi_a=None):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -277,6 +277,14 @@ def calculate_energy_transfer(ds, filter_scales,
         with ``rho_sorted``.
     n_workers : int
         Number of threads for APE sorting (ThreadPoolExecutor).
+    online_pi_a : dict or None
+        Online Π_A fields keyed by filter scale, as written by the simulation
+        (``Π_A_ℓ<ℓ>``). When given, Π_A is read from there instead of being
+        recomputed, which also skips the sort of the filtered density that Υˡ
+        would otherwise need. Π_A is measured against a reference state, so the
+        caller must only pass this for the time-varying reference; under
+        ``--fixed-reference`` every other term uses the frozen t=0 profile and
+        the online field would be inconsistent with them.
     include_pi_k : bool
         If True (default) also compute the cross-scale KE flux Π_K. The KH budget
         pipeline computes Π_K online and passes include_pi_k=False to skip the
@@ -350,18 +358,22 @@ def calculate_energy_transfer(ds, filter_scales,
         wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄ᵣ")
 
         # --- APE cross-scale transfer ---
-        # Compute ρ̄ and the large-scale reference state z₀(ρ̄) → Υˡ
-        # Pass pre-sorted full-field reference state to avoid re-sorting each iteration
-        ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
-        filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                             rho_sorted=rho_sorted,
-                                                             dz_sorted=dz_sorted,
-                                                             n_workers=n_workers)
-        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ
-        Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
-                                              gaussian_filter, filter_dims=filtered_dimensions,
-                                              filtered_density=ds_filt_ℓ.ρ̄,
-                                              filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+        # Read the online Π_A when the caller has it; that also skips the sort of the filtered density
+        # that Υˡ would otherwise need, which is the expensive half of this loop. Otherwise recompute
+        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ from the large-scale reference state z₀(ρ̄), passing the
+        # pre-sorted full-field state so the sort is not repeated per scale.
+        if online_pi_a is not None:
+            Π_A = online_pi_a[ℓ]
+        else:
+            ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
+            filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
+                                                                 rho_sorted=rho_sorted,
+                                                                 dz_sorted=dz_sorted,
+                                                                 n_workers=n_workers)
+            Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
+                                                  gaussian_filter, filter_dims=filtered_dimensions,
+                                                  filtered_density=ds_filt_ℓ.ρ̄,
+                                                  filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
 
         int_Π_A                = integrate(Π_A, dV)
         int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)

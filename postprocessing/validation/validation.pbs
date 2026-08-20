@@ -43,6 +43,7 @@ time $PYTHON -u inv05_compare_dissipation.py   --filename $FILE 2>&1 | tee -a $L
 time $PYTHON -u inv06_compare_sorted_profiles.py --filename $FILE --n-workers 18 2>&1 | tee -a $LOG
 time $PYTHON -u inv07_compare_local_ape.py --filename $FILE --n-workers 18 2>&1 | tee -a $LOG
 time $PYTHON -u inv08_compare_sfs_ape_dissipation.py --filename $FILE --n-workers 18 2>&1 | tee -a $LOG
+time $PYTHON -u inv09_compare_ape_transfer.py --filename $FILE --n-workers 18 2>&1 | tee -a $LOG
 
 # Online-vs-offline comparison animations (online | offline | difference over time)
 time $PYTHON -u inv04_animate_comparison.py --filename $FILE --field Π_K  --max-frames 100 2>&1 | tee -a $LOG

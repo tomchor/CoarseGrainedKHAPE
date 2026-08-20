@@ -3,7 +3,8 @@ Check that the simulation's online diagnostics match the offline post-processing
 
 Several diagnostics that the offline pipeline would otherwise recompute in Python are computed online
 by the Julia simulation instead (the filtered fields, the cross-scale KE flux Π_K, the SFS KE
-dissipation ε_Kˢ, the Winters sorted reference state, and the sub-filter APE dissipation ε_Aˢ), and
+dissipation ε_Kˢ, the Winters sorted reference state, the cross-scale APE flux Π_A, and the sub-filter APE
+dissipation ε_Aˢ), and
 the pipeline then reads them straight out of the simulation output. Nothing else in the test suite compares the two implementations: the
 budget-closure tests in `test_budgets.py` would only notice an online error large enough to break
 closure at the 10% level, and they cannot see the sorted state at all.
@@ -88,6 +89,14 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 #   4.0e-02 (field, l=7)   1.1e-01 (int eps_As dV, l=7)
 # so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
 
+# `inv09` (the cross-scale APE flux Π_A that `03_energy_transfer.py` reads online) is the APE twin of
+# `inv02`, and is held at the same 1.0 for the same reason: it is a product of two
+# filtered-and-differentiated fields, so its *map* is the noisiest thing here even when the bulk
+# transfer is right. On top of inv02's arithmetic difference it carries the reference-height tie
+# convention, which is a constant over uniform fluid and so drops out of ∇Υˡ, reaching Π_A only near
+# the walls. Not yet calibrated against a measured value — inv02 measured 6.7e-01 on its map against
+# 9.4e-02 on its integral, and Π_A is expected to behave the same way; tighten once a green run
+# reports numbers.
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
@@ -95,6 +104,7 @@ CASES = [
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
     pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
+    pytest.param("inv09_compare_ape_transfer.py", 1.0, ["--n-workers", "2"], id="Pi_A"),
 ]
 
 

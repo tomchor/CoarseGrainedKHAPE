@@ -1397,11 +1397,9 @@ version = "0.110.5"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "accfa47c5b7740c37489810e93feef16198594f1"
-repo-rev = "tc/subfilter-ape"
-repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
+git-tree-sha1 = "05ab18dfb3d7ee2b3893c2e0c6097ee9ae939173"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
-version = "0.19.1"
+version = "0.19.2"
 
 [[deps.OffsetArrays]]
 git-tree-sha1 = "117432e406b5c023f665fa73dc26e79ec3630151"
