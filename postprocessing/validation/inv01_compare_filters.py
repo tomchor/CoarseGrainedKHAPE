@@ -65,61 +65,56 @@ for ℓ in args.filter_scales:
 print(f"  Computed {len(results)} field comparisons")
 #---
 
-#+++ Plot: one figure per field, one row per filter scale, 3 columns (online | offline | difference)
+#+++ Plot: one figure, one row per (field, filter scale), 3 columns (online | offline | difference)
 z_lim = (-4, 4)
-n_scales = len(args.filter_scales)
 label = run_label(ds.attrs)
 
+# Every (field, scale) pair that was actually compared, in field-major order, so each gets its own row
+# of the single figure this script writes.
+rows = [(name, ℓ) for name in field_names for ℓ in args.filter_scales if (name, ℓ) in results]
+if not rows:
+    raise SystemExit("No online filtered fields found to compare.")
+fig, axes = plt.subplots(len(rows), 3, figsize=(15, 3.5 * len(rows)), constrained_layout=True, squeeze=False)
+
 print("\nComparison summary:")
-for name in field_names:
-    if not any((name, ℓ) in results for ℓ in args.filter_scales):
-        continue
+for i, (name, ℓ) in enumerate(rows):
+    r = results[(name, ℓ)]
 
-    fig, axes = plt.subplots(n_scales, 3, figsize=(15, 3.5 * n_scales), constrained_layout=True, squeeze=False)
+    ℓ_str = int(ℓ) if ℓ == int(ℓ) else ℓ
+    vmax = max(float(np.nanpercentile(np.abs(r["online"].values), 98)), float(np.nanpercentile(np.abs(r["offline"].values), 98)))
+    kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
 
-    for i, ℓ in enumerate(args.filter_scales):
-        key = (name, ℓ)
-        if key not in results:
-            for k in range(3):
-                axes[i, k].set_visible(False)
-            continue
-        r = results[key]
+    r["online"].plot(ax=axes[i, 0], **kw)
+    axes[i, 0].set_title(f"Online {name}_ℓ{ℓ_str}")
 
-        ℓ_str = int(ℓ) if ℓ == int(ℓ) else ℓ
-        vmax = max(float(np.nanpercentile(np.abs(r["online"].values), 98)), float(np.nanpercentile(np.abs(r["offline"].values), 98)))
-        kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
+    r["offline"].plot(ax=axes[i, 1], **kw)
+    axes[i, 1].set_title(f"Offline {name} (ℓ={ℓ_str})")
 
-        r["online"].plot(ax=axes[i, 0], **kw)
-        axes[i, 0].set_title(f"Online {name}_ℓ{ℓ_str}")
+    r["diff"].plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+    axes[i, 2].set_title("Difference")
 
-        r["offline"].plot(ax=axes[i, 1], **kw)
-        axes[i, 1].set_title(f"Offline {name} (ℓ={ℓ_str})")
+    for k in range(3):
+        axes[i, k].set_ylim(*z_lim)
+        axes[i, k].set_aspect("equal")
 
-        r["diff"].plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
-        axes[i, 2].set_title("Difference")
+    axes[i, 0].set_ylabel(f"{name}   ℓ = {ℓ_str}", fontsize=13)
 
-        for k in range(3):
-            axes[i, k].set_ylim(*z_lim)
-            axes[i, k].set_aspect("equal")
+    diff = r["diff"].values
+    online_vals = r["online"].values
+    rms_diff = np.sqrt(np.nanmean(diff**2))
+    rms_online = np.sqrt(np.nanmean(online_vals**2))
+    rel_err = rms_diff / rms_online if rms_online > 0 else float("inf")
+    max_abs = np.nanmax(np.abs(diff))
+    check(rel_err, f"  {name}_ℓ{ℓ_str}: rms(diff)/rms(online) = {rel_err:.2e}, max|diff| = {max_abs:.2e}", print)
 
-        axes[i, 0].set_ylabel(f"ℓ = {ℓ_str}", fontsize=13)
+suptitle = f"Online vs offline Gaussian filter   t = {t_sel:.1f}"
+if label:
+    suptitle += f"   {label}"
+fig.suptitle(suptitle, fontsize=13, y=1.005)
 
-        diff = r["diff"].values
-        online_vals = r["online"].values
-        rms_diff = np.sqrt(np.nanmean(diff**2))
-        rms_online = np.sqrt(np.nanmean(online_vals**2))
-        rel_err = rms_diff / rms_online if rms_online > 0 else float("inf")
-        max_abs = np.nanmax(np.abs(diff))
-        check(rel_err, f"  {name}_ℓ{ℓ_str}: rms(diff)/rms(online) = {rel_err:.2e}, max|diff| = {max_abs:.2e}", print)
-
-    suptitle = f"Online vs offline Gaussian filter: {name}   t = {t_sel:.1f}"
-    if label:
-        suptitle += f"   {label}"
-    fig.suptitle(suptitle, fontsize=13, y=1.01)
-
-    outfile = str(FIGURES / f"{stem}_filter_comparison_{name}_t{t_sel:.1f}.png")
-    fig.savefig(outfile, dpi=150, bbox_inches="tight")
-    print(f"  Figure saved to: {outfile}")
+outfile = str(FIGURES / f"inv01_filter_comparison_{stem}_t{t_sel:.1f}.png")
+fig.savefig(outfile, dpi=150, bbox_inches="tight")
+print(f"\n  Figure saved to: {outfile}")
 #---
 
 finalize(print)

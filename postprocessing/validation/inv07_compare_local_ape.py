@@ -150,35 +150,34 @@ check(rms_int, f"    ∫Eₐ dV: rms(online - offline)/rms(offline) = {rms_int:.
 label = run_label(ds.attrs)
 zw = args.z_window
 
-# Field maps: online | offline | difference
-fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), constrained_layout=True)
+# One figure: the maps on top, the volume integral spanning the row below.
+fig = plt.figure(figsize=(15, 9), constrained_layout=True)
+gs = fig.add_gridspec(2, 3, height_ratios=[4.2, 4.2])
+axes = [fig.add_subplot(gs[0, k]) for k in range(3)]
 vmax = max(float(np.nanpercentile(np.abs(on_snap.values), 99)), float(np.nanpercentile(np.abs(off_snap.values), 99)))
 vmax = vmax if vmax > 0 else 1.0
 kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="magma_r", vmin=0, vmax=vmax)
-on_snap.plot(ax=axes[0], **kw);  axes[0].set_title(f"Online Eₐ")
-off_snap.plot(ax=axes[1], **kw); axes[1].set_title(f"Offline Eₐ")
+on_snap.plot(ax=axes[0], **kw);  axes[0].set_title(f"Online Eₐ   t = {t_sel:.1f}")
+off_snap.plot(ax=axes[1], **kw); axes[1].set_title(f"Offline Eₐ   t = {t_sel:.1f}")
 diff.plot(ax=axes[2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
 axes[2].set_title("Difference (online − offline)")
 for a in axes:
     if zw is not None:
         a.set_ylim(-zw, zw)
     a.set_aspect("equal")
-fig.suptitle(f"Online vs offline local APE Eₐ   t = {t_sel:.1f}" + (f"   {label}" if label else ""))
-out1 = FIGURES / f"inv07_local_ape_maps_{stem}_t{t_sel:.1f}.png"
-fig.savefig(out1, dpi=150, bbox_inches="tight")
-print(f"\nSaved {out1}")
 
-# Integral time series
-fig2, ax = plt.subplots(figsize=(7, 4.2), constrained_layout=True)
+ax = fig.add_subplot(gs[1, :])
 ax.plot(offline_int.time, offline_int, lw=2.5, label="offline")
 ax.plot(online_int_c.time, online_int_c, "--", lw=1.6, label="online")
 ax.set(xlabel="time", ylabel="∫Eₐ dV", title="Volume-integrated local APE")
 ax.legend(fontsize=9)
 ax.grid(alpha=0.3)
-fig2.suptitle(f"Online vs offline ∫Eₐ dV" + (f"   {label}" if label else ""))
-out2 = FIGURES / f"inv07_local_ape_integral_{stem}.png"
-fig2.savefig(out2, dpi=150, bbox_inches="tight")
-print(f"Saved {out2}")
+
+fig.suptitle(f"Online vs offline local APE Eₐ   maps at t = {t_sel:.1f}, volume integral over the run"
+             + (f"   {label}" if label else ""))
+out = FIGURES / f"inv07_local_ape_{stem}_t{t_sel:.1f}.png"
+fig.savefig(out, dpi=150, bbox_inches="tight")
+print(f"\nSaved {out}")
 #---
 
 finalize(print)

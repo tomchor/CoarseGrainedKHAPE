@@ -335,9 +335,19 @@ for k, v in Eb.items():
     check(abs(rel), msg, print) if k.startswith("online") else print(msg)
 #---
 
-#+++ Figure 1: the sorted profiles
+#+++ One figure, three blocks: the sorted profiles, the z✶ maps, and the ∫E_b time series
 label_run = run_label(ds.attrs)
-fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
+zw = args.z_window
+n = len(labels)
+fig = plt.figure(figsize=(max(11, 4.2 * n), 5 + 8 + 4.2), constrained_layout=True)
+_gs = fig.add_gridspec(4, 1, height_ratios=[5, 4, 4, 4.2])
+_gs_prof = _gs[0].subgridspec(1, 2)
+_gs_map0 = _gs[1].subgridspec(1, n)
+_gs_map1 = _gs[2].subgridspec(1, n)
+_gs_eb = _gs[3].subgridspec(1, 2)
+
+# Block 1: the sorted profiles
+axes = [fig.add_subplot(_gs_prof[0, k]) for k in range(2)]
 
 for lbl, prof in profiles.items():
     p = prof.sel(time=t_sel, method="nearest") if "time" in prof.dims else prof
@@ -360,16 +370,11 @@ axes[1].set(xlabel="(other − 1D-sort column) b✶ / B₀", ylabel="z✶", titl
 axes[1].legend(fontsize=8)
 axes[1].grid(alpha=0.3)
 
-fig.suptitle(f"Sorted reference profile — online vs offline   ({label_run},  t = {t_sel:.2f})")
-out1 = FIGURES / f"inv06_sorted_profile_{stem}.png"
-fig.savefig(out1, dpi=150)
-print(f"\nSaved {out1}")
 #---
 
-#+++ Figure 2: the reference-height maps
-zw = args.z_window
-n = len(labels)
-fig, axes = plt.subplots(2, n, figsize=(4.2 * n, 8), constrained_layout=True, squeeze=False)
+#+++ Block 2: the reference-height maps
+axes = np.array([[fig.add_subplot(_gs_map0[0, i]) for i in range(n)],
+                 [fig.add_subplot(_gs_map1[0, i]) for i in range(n)]], dtype=object)
 
 # Scale the z✶ maps to the true domain. z✶ is a height, so this is its natural range; the padded
 # offline sort assigns heights outside it, and letting those saturate the colormap is the point.
@@ -388,14 +393,10 @@ for i, lbl in enumerate(labels):
         for r in range(2):
             axes[r, i].set_ylim(-zw, zw)
 
-fig.suptitle(f"Winters reference height z✶ — online vs offline   ({label_run},  t = {t_sel:.2f})")
-out2 = FIGURES / f"inv06_reference_height_{stem}.png"
-fig.savefig(out2, dpi=150)
-print(f"Saved {out2}")
 #---
 
-#+++ Figure 3: RPE time series (the integral all methods must agree on)
-fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), constrained_layout=True)
+#+++ Block 3: RPE time series (the integral all methods must agree on)
+axes = [fig.add_subplot(_gs_eb[0, k]) for k in range(2)]
 Eb_t = {k: integrate(-b_true * v, dV).squeeze().compute() for k, v in z_star.items()}
 ref_t = Eb_t["online (ThreeDimensionalSort)"]
 for lbl, series in Eb_t.items():
@@ -408,10 +409,10 @@ for ax in axes:
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
 
-fig.suptitle(f"Background potential energy — online vs offline   ({label_run})")
-out3 = FIGURES / f"inv06_background_pe_{stem}.png"
-fig.savefig(out3, dpi=150)
-print(f"Saved {out3}")
+fig.suptitle(f"Winters sorted reference state — online vs offline   ({label_run},  profiles and maps at t = {t_sel:.2f})")
+out = FIGURES / f"inv06_sorted_state_{stem}.png"
+fig.savefig(out, dpi=150, bbox_inches="tight")
+print(f"\nSaved {out}")
 #---
 
 finalize(print)
