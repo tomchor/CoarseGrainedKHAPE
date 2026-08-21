@@ -94,14 +94,16 @@ for ℓ in filter_scales:
     sfs_ke_density = sfs_stress_tensor_trace / 2
 
     print("  APE->KE exchange term...")
-    b_r_filt = gaussian_filter.apply(b_r, dims=filtered_dimensions)
+    # b_r_l = -(g/ρ₀)(ρ̄ - ρ_ref): filtered density minus the unfiltered reference profile
+    # (cf. filter(b_r) = -(g/ρ₀)(ρ̄ - filter(ρ_ref)), which filters the reference too)
+    b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), ds_sorted.rho_sorted)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
         ds_full["uᵢ"].sel(i=3), # full w
         b_r,                    # relative buoyancy
         gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_w=ds_filt_ℓ["ūᵢ"].sel(i=3),
-        filtered_b=b_r_filt,
+        filtered_b=b_r_l,
     )
 
     # ∂KE_s/∂t   centred finite difference, staggered time grid

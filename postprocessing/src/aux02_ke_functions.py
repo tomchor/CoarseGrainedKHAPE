@@ -293,9 +293,9 @@ def calculate_energy_transfer(ds, filter_scales,
     Returns
     -------
     xr.Dataset
-        Dataset with Π_A, the SFS APE->KE exchange term and the coarse conversion
-        w̄·b̄ᵣ (plus their volume integrals) indexed by filter_scale — and Π_K (with
-        ∫Π_K dV) when include_pi_k=True.
+        Dataset with Π_A and the SFS APE->KE exchange term (plus their volume
+        integrals) indexed by filter_scale, and Π_K (with ∫Π_K dV) when
+        include_pi_k=True.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
     tensor_dimensions   = ("x_caa", "z_aac")
@@ -345,17 +345,17 @@ def calculate_energy_transfer(ds, filter_scales,
             Π_K = calculate_cross_scale_ke_flux(sfs_stress_tensor, strain_rate_tensor_l)
             ke_vars = {"Π_K": Π_K, "∫Π_K dV": integrate(Π_K, dV)}
 
-        # --- APE->KE conversion terms ---
-        # SFS exchange:        filter(w·b_r) - filter(w)·filter(b_r)
-        # Coarse conversion: filter(w) · filter(b_r)
-        w_bar   = ds_filt_ℓ["ūᵢ"].sel(i=3)
-        b_r_bar = gaussian_filter.apply(b_r, dims=filtered_dimensions)
+        # --- APE->KE conversion term ---
+        # SFS exchange: filter(w·b_r) - filter(w)·b_r_l
+        w_bar = ds_filt_ℓ["ūᵢ"].sel(i=3)
+        # b_r_l = -(g/ρ₀)(ρ̄ - ρ_ref): filtered density minus the unfiltered reference profile
+        # (cf. filter(b_r) = -(g/ρ₀)(ρ̄ - filter(ρ_ref)), which filters the reference too)
+        b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), rho_sorted)
         ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(w_full, b_r,
                                                                gaussian_filter,
                                                                filter_dims=filtered_dimensions,
                                                                filtered_w=w_bar,
-                                                               filtered_b=b_r_bar)
-        wbar_b_r_bar = (w_bar * b_r_bar).rename("w̄·b̄ᵣ")
+                                                               filtered_b=b_r_l)
 
         # --- APE cross-scale transfer ---
         # Read the online Π_A when the caller has it; that also skips the sort of the filtered density
@@ -377,15 +377,12 @@ def calculate_energy_transfer(ds, filter_scales,
 
         int_Π_A                = integrate(Π_A, dV)
         int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
-        int_wbar_b_r_bar       = integrate(wbar_b_r_bar, dV)
 
         transfer_vars = {
             "Π_A":                  Π_A,
             "SFS APE->KE exchange": ape_to_ke_exchange,
-            "w̄·b̄ᵣ":                 wbar_b_r_bar,
             "∫Π_A dV":              int_Π_A,
             "∫(SFS APE->KE) dV":    int_ape_to_ke_exchange,
-            "∫w̄·b̄ᵣ dV":             int_wbar_b_r_bar,
             **ke_vars,
         }
         transfer_list.append(xr.Dataset(transfer_vars))
