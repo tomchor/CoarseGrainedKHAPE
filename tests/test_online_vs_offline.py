@@ -97,6 +97,14 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 # the walls. Not yet calibrated against a measured value — inv02 measured 6.7e-01 on its map against
 # 9.4e-02 on its integral, and Π_A is expected to behave the same way; tighten once a green run
 # reports numbers.
+#
+# `inv10` is not an online-vs-offline comparison at all: every term of both budgets is now written by
+# the simulation, so it checks that the online budgets *close* on their own, with the same metric
+# `test_budgets.py` applies offline (rms(residual) / min over terms of rms(term)). It is held at the
+# same 0.10 threshold, which is what makes the two directly comparable. Measured at Nz=192/Re=262,
+# against the offline pipeline on the same run:
+#   KE  l=1  online 8.8%  offline 9.6%      KE  l=7  online 0.53%  offline 1.1%
+#   APE l=1  online 5.5%  offline 4.4%      APE l=7  online 1.9%   offline 2.4%
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
@@ -105,6 +113,7 @@ CASES = [
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
     pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
     pytest.param("inv09_compare_ape_transfer.py", 1.0, ["--n-workers", "2"], id="Pi_A"),
+    pytest.param("inv10_online_budget_closure.py", 0.10, [], id="online_budget_closure"),
 ]
 
 

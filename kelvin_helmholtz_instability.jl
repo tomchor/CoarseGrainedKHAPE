@@ -8,6 +8,10 @@ using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePotentialEnergyCrossScaleFlux
+using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
+using Oceanostics: FilteredAvailablePotentialToKineticEnergyConversion
+using Oceananigans.OutputWriters: TimeDerivative
+using Oceananigans.Simulations: TimeDerivativeCallback
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
 using Oceanostics.ProgressMessengers
@@ -16,6 +20,7 @@ using Oceanostics.ProgressMessengers
 Random.seed!(546)
 
 include("utils.jl")
+include("online_diagnostics.jl")   # the two budget terms Oceanostics does not provide
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()
@@ -276,8 +281,15 @@ for ℓ in filter_ℓs
 
     Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
     ε_Ks = SubFilterKineticEnergyEquation.SubFilterKineticEnergyDissipationRate(model, gf) # εˢ = filter(ε) - εˡ
+    K_s  = SubFilterKineticEnergy(model, gf)   # Kˢ = filter(K) - Kˡ = ½τⁱⁱ, the energy the budget below is of
+    # ∂ₜKˢ from Oceananigans' TimeDerivative. Listing it as an output registers a callback on
+    # IterationInterval(1), so the difference spans one model timestep and is centred at tⁿ - Δt/2 —
+    # effectively at tⁿ, which is where every other term sits. Differencing on the writer's own schedule
+    # instead would centre it half an output interval early and would not close.
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")  => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
-                     Symbol("ε_Ks_ℓ$(ℓ)") => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks))
+                     Symbol("ε_Ks_ℓ$(ℓ)") => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks),
+                     Symbol("K_s_ℓ$(ℓ)")  => K_s,  Symbol("K_s_ℓ$(ℓ)_int")  => Integral(K_s),
+                     Symbol("dKs_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(K_s), model))
 
     # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
     # online-vs-offline validation in postprocessing/validation/. Full 3D fields → gated behind
@@ -346,14 +358,36 @@ if save_sorted
     # The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides along: it is measured against the same
     # filtered reference state ε_Aˢ uses, so it shares the filter and the column and adds no sort. Both
     # are 2D x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K.
+    # The reference profile's own time derivative, shared by every R below. One callback keeps it up to
+    # date on IterationInterval(1), so ∂ₜb✶ spans a single model timestep like the other tendencies.
+    lookup = ProfileLookup(z✶_1dsort)
+    _∂ₜb✶_cb = TimeDerivativeCallback(reference_buoyancy(z✶_1dsort), model)
+    simulation.callbacks[:∂ₜb✶] = _∂ₜb✶_cb
+    ∂ₜb✶ = _∂ₜb✶_cb.func
+
+    # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
+    z✶_lookup = reference_height(model, method=lookup)
+    R_full = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
+
     _ape_pairs = Pair{Symbol, Any}[]
     for ℓ in filter_ℓs
         gf = matched_filter(ℓ)
-        lookup = ProfileLookup(z✶_1dsort)
         ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, gf; method=lookup)
         Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf; dims=(1, 3), method=lookup)
+        E_as = SubFilterAvailablePotentialEnergy(model, gf; method=lookup)
+        wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
+
+        # Rˢ = filter(R) - Rˡ, both measured against the same shared profile
+        z✶ˡ = reference_height(Field(gf(b)); method=lookup)
+        R_l = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶ˡ)
+        R_s = Field(gf(R_full)) - R_l
+
         push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)") => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
-                          Symbol("Π_A_ℓ$(ℓ)")  => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A))
+                          Symbol("Π_A_ℓ$(ℓ)")  => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
+                          Symbol("E_as_ℓ$(ℓ)") => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
+                          Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
+                          Symbol("R_s_ℓ$(ℓ)")  => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
+                          Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
     end
     sfs_ape_fields = (; _ape_pairs...)
 
