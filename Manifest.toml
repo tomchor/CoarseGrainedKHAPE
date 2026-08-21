@@ -1397,7 +1397,9 @@ version = "0.110.5"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "fc07d1cba846bf28653f74ffd3335b12605f5fe2"
+git-tree-sha1 = "941c05fcee115007e9939eac96400698051a75e7"
+repo-rev = "tc/ape-cross-scale-flux"
+repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
 version = "0.19.3"
 
