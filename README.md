@@ -123,9 +123,9 @@ bash submit_validation_run.sh NZ=1024
 runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
 Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, the local APE,
 and the sub-filter APE dissipation ε_Aˢ offline and
-compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv08`),
+compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv09`),
 writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
-`inv06`, `inv07` and `inv08` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
+`inv06`, `inv07`, `inv08` and `inv09` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 

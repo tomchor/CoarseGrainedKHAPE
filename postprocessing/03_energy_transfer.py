@@ -56,13 +56,37 @@ print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
 # Π_K (cross-scale KE transfer) is computed online by the simulation, so it is skipped here
-# (include_pi_k=False); this step computes the APE cross-scale transfer Π_A and the APE↔KE exchange.
+# (include_pi_k=False). Π_A is computed online too, but only usable for the time-varying reference:
+# it is measured against the reference state, and the online one is always the sort of the *current*
+# buoyancy, while --fixed-reference measures every other term against the frozen t=0 profile. So the
+# online field is read there, and recomputed offline here otherwise — the same split
+# `05_sfs_ape_budget.py` makes for ε_Aˢ. Reading it also skips the sort of the filtered density that
+# Υˡ needs, which is the expensive half of this step.
+def online_name(var, ℓ):
+    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
+
+# The online field is an optimisation, not a requirement: --save_sorted is off by default, so a
+# production run may simply not have it, and the offline path has to keep working. Fall back rather
+# than fail, and say which path was taken so a silent switch is visible in the log.
+online_pi_a = None
+if fixed_reference:
+    print("  Π_A: recomputing offline (fixed reference)")
+else:
+    missing = [ℓ for ℓ in filter_scales if online_name("Π_A", ℓ) not in ds]
+    if missing:
+        print(f"  Π_A: recomputing offline (no online field for ℓ={missing}; the simulation was run "
+              f"without --save_sorted, or with a different --filter_ls)")
+    else:
+        online_pi_a = {ℓ: ds[online_name("Π_A", ℓ)] for ℓ in filter_scales}
+        print("  Π_A: reading the online fields (time-varying reference)")
+
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
                                             rho_sorted=ds_sorted.rho_sorted,
                                             dz_sorted=ds_sorted.dz_sorted,
                                             n_workers=n_workers,
-                                            include_pi_k=False)
+                                            include_pi_k=False,
+                                            online_pi_a=online_pi_a)
 print("\nDone!")
 #---
 

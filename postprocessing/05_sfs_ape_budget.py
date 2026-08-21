@@ -162,21 +162,22 @@ for ℓ in filter_scales:
     subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
     print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
 
-    # ε_Aˢ: read the online field for the time-varying reference (integrated on the budget's padded grid,
-    # where the padding repeats each edge value so every gradient there vanishes and ε_Aˢ ≈ 0, exactly as
-    # for Π_K and ε_Kˢ in 04); recompute it offline against the frozen profile for --fixed-reference.
-    if fixed_reference:
+    # ε_Aˢ: read the online field when it is there and the reference is time-varying, integrated on the
+    # budget's padded grid (the padding repeats each edge value, so every gradient there vanishes and
+    # ε_Aˢ ≈ 0, exactly as for Π_K and ε_Kˢ in 04). It is an optimisation, not a requirement: the frozen
+    # profile makes it inconsistent with the other terms, and --save_sorted is off by default so a
+    # production run may not have it at all. Fall back to the offline expression in either case, naming
+    # the reason so a silent switch is visible in the log.
+    reason = ("fixed reference" if fixed_reference else
+              "no online field" if online_name("ε_As", ℓ) not in ds else None)
+    if reason is not None:
         t0 = time.time()
         sfs_ape_dissipation = calculate_sfs_ape_dissipation(
             ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
             filter_dims=filtered_dimensions,
             filtered_density=ds_filt_ℓ.ρ̄,)
-        print(f"  sfs_ape_dissipation (offline, fixed reference)  ({time.time()-t0:.1f}s)")
+        print(f"  sfs_ape_dissipation (offline, {reason})  ({time.time()-t0:.1f}s)")
     else:
-        if online_name("ε_As", ℓ) not in ds:
-            raise KeyError(f"Online field '{online_name('ε_As', ℓ)}' not in sim output; run the simulation "
-                           f"with --save_sorted, and make sure the budget filter scales are a subset of its "
-                           f"online filter_ℓs (got ℓ={ℓ}).")
         sfs_ape_dissipation = ds[online_name("ε_As", ℓ)]
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
