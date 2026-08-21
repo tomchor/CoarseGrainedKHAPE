@@ -65,16 +65,20 @@ print("Calculating cross-scale transfer terms...")
 def online_name(var, ℓ):
     return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
 
+# The online field is an optimisation, not a requirement: --save_sorted is off by default, so a
+# production run may simply not have it, and the offline path has to keep working. Fall back rather
+# than fail, and say which path was taken so a silent switch is visible in the log.
 online_pi_a = None
-if not fixed_reference:
+if fixed_reference:
+    print("  Π_A: recomputing offline (fixed reference)")
+else:
     missing = [ℓ for ℓ in filter_scales if online_name("Π_A", ℓ) not in ds]
     if missing:
-        raise KeyError(f"Online Π_A missing for ℓ={missing}; run the simulation with --save_sorted, and "
-                       f"make sure the budget filter scales are a subset of its online filter_ℓs.")
-    online_pi_a = {ℓ: ds[online_name("Π_A", ℓ)] for ℓ in filter_scales}
-    print("  Π_A: reading the online fields (time-varying reference)")
-else:
-    print("  Π_A: recomputing offline (fixed reference)")
+        print(f"  Π_A: recomputing offline (no online field for ℓ={missing}; the simulation was run "
+              f"without --save_sorted, or with a different --filter_ls)")
+    else:
+        online_pi_a = {ℓ: ds[online_name("Π_A", ℓ)] for ℓ in filter_scales}
+        print("  Π_A: reading the online fields (time-varying reference)")
 
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
