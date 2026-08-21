@@ -9,7 +9,7 @@ from src.aux03_plotting import run_label
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Two-panel sweep figure: cross-scale transfer & APE->KE exchange spectra (top); ℓ-derivative of exchange terms (bottom)")
+parser = argparse.ArgumentParser(description="Two-panel sweep figure: cross-scale transfer & SFS APE->KE exchange spectra (top); ℓ-derivative of the SFS exchange (bottom)")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
 def str2bool(s):
@@ -51,7 +51,6 @@ print(f"  Filter scales: {et.filter_scale.values}")
 C_PI_K   = "#2166ac"  # blue
 C_PI_A   = "#d6604d"  # red
 C_SFS    = "#1b7837"  # green
-C_RESOL  = "#762a83"  # purple
 LW       = 1.8
 MK       = "o"
 MS       = 4
@@ -60,12 +59,11 @@ MS       = 4
 #+++ Figure
 fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(7, 8), constrained_layout=True, sharex=True)
 
-#+++ Top panel: cross-scale transfer (Π_K, Π_A) and the two APE->KE exchange terms
+#+++ Top panel: cross-scale transfer (Π_K, Π_A) and the SFS APE->KE exchange
 for var, color, label_str in [
     ("∫Π_K dV",           C_PI_K,  r"$\Pi_K$  (cross-scale KE flux)"),
     ("∫Π_A dV",           C_PI_A,  r"$\Pi_A$  (cross-scale APE flux)"),
-    ("∫(SFS APE->KE) dV", C_SFS,   r"SFS APE$\to$KE exchange: $\overline{w\,b_r} - \bar w\,\bar b_r$"),
-    ("∫w̄·b̄ᵣ dV",          C_RESOL, r"Coarse APE$\to$KE conversion: $\bar w\,\bar b_r$"),
+    ("∫(SFS APE->KE) dV", C_SFS,   r"SFS APE$\to$KE exchange: $\overline{w\,b_r} - \bar w\,b_r^\ell$"),
 ]:
     ax_top.plot(et.inv_scale, et[var].values, color=color, lw=LW, label=label_str)
 
@@ -90,14 +88,11 @@ ax_top.text(0.98, 0.04, ",  ".join(info_parts), transform=ax_top.transAxes, font
             ha="right", va="bottom", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 #---
 
-#+++ Bottom panel: ℓ-derivative of the SFS and coarse exchange terms
-d_sfs   = et["∫(SFS APE->KE) dV"].differentiate("filter_scale")
-d_resol = et["∫w̄·b̄ᵣ dV"].differentiate("filter_scale")
+#+++ Bottom panel: ℓ-derivative of the SFS exchange term
+d_sfs = et["∫(SFS APE->KE) dV"].differentiate("filter_scale")
 
-ax_bot.plot(et.inv_scale, d_sfs.values,   color=C_SFS,   lw=LW,
-            label=r"$\partial_\ell \int(\overline{w\,b_r}-\bar w\,\bar b_r)\,dV$  (SFS exchange)")
-ax_bot.plot(et.inv_scale, d_resol.values, color=C_RESOL, lw=LW,
-            label=r"$\partial_\ell \int \bar w\,\bar b_r\,dV$  (coarse conversion)")
+ax_bot.plot(et.inv_scale, d_sfs.values, color=C_SFS, lw=LW,
+            label=r"$\partial_\ell \int(\overline{w\,b_r}-\bar w\,b_r^\ell)\,dV$  (SFS exchange)")
 
 ax_bot.axhline(0, color="k", lw=0.8, ls="--")
 for ℓ in [1, 7]:
@@ -107,7 +102,7 @@ ax_bot.set_yscale("symlog", linthresh=1e-2)
 ax_bot.grid(True, alpha=0.3)
 ax_bot.set_xlabel("Inverse of filter scale 1/ℓ")
 ax_bot.set_ylabel(r"$\partial_\ell$ of exchange rate")
-ax_bot.set_title("Filter-scale derivative of APE↔KE exchange terms")
+ax_bot.set_title("Filter-scale derivative of the SFS APE↔KE exchange")
 ax_bot.legend(loc="best", fontsize=9, framealpha=0.9)
 #---
 
