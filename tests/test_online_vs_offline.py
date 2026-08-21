@@ -90,13 +90,14 @@ SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 # so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
 
 # `inv09` (the cross-scale APE flux Π_A that `03_energy_transfer.py` reads online) is the APE twin of
-# `inv02`, and is held at the same 1.0 for the same reason: it is a product of two
-# filtered-and-differentiated fields, so its *map* is the noisiest thing here even when the bulk
-# transfer is right. On top of inv02's arithmetic difference it carries the reference-height tie
-# convention, which is a constant over uniform fluid and so drops out of ∇Υˡ, reaching Π_A only near
-# the walls. Not yet calibrated against a measured value — inv02 measured 6.7e-01 on its map against
-# 9.4e-02 on its integral, and Π_A is expected to behave the same way; tighten once a green run
-# reports numbers.
+# `inv02`, and was expected to be as loose: both are a product of two filtered-and-differentiated
+# fields, and inv02's map measures 6.7e-01 against 9.4e-02 on its integral. It is not. Measured at
+# Nz=192/Re=262:
+#   2.7e-02 (field, l=1)   9.9e-04 (int Pi_A dV, l=1)
+#   5.3e-02 (field, l=7)   5.5e-03 (int Pi_A dV, l=7)
+# an order tighter than Π_K, because Υˡ is a reference height — a lookup into a sorted profile, smooth
+# where the strain that Π_K differentiates is not. So 0.15 is ~3x the worst, and unlike the 1.0 this
+# replaces it is tight enough to catch a factor of two.
 #
 # `inv10` is not an online-vs-offline comparison at all: every term of both budgets is now written by
 # the simulation, so it checks that the online budgets *close* on their own, with the same metric
@@ -112,7 +113,7 @@ CASES = [
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
     pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
-    pytest.param("inv09_compare_ape_transfer.py", 1.0, ["--n-workers", "2"], id="Pi_A"),
+    pytest.param("inv09_compare_ape_transfer.py", 0.15, ["--n-workers", "2"], id="Pi_A"),
     pytest.param("inv10_online_budget_closure.py", 0.10, [], id="online_budget_closure"),
 ]
 
