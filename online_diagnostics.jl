@@ -25,10 +25,8 @@ using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics
 using Oceanostics: CustomKFO
 using Oceanostics.BackgroundPotentialEnergyEquation: reference_height, reference_buoyancy, VerticalSort,
-                                                     ProfileLookup, SortedReferenceHeightField,
-                                                     buoyancy_field
-using Oceanostics.AvailablePotentialEnergyEquation: BuoyancyDisplacementPotential, ReferenceBuoyancyAnomaly,
-                                                     AvailablePotentialToKineticEnergyConversion
+                                                     ProfileLookup, SortedReferenceHeightField
+using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialToKineticEnergyConversion
 using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialToKineticEnergyConversion
 
 import Oceananigans.Fields: compute!
