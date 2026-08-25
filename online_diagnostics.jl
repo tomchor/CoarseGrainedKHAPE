@@ -21,27 +21,24 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: Zᶜᶜᶜ
 using Oceananigans.Fields: Field, CenterField, FieldStatus, compute_at!, interior, set_status!
 using Oceananigans.Grids: Center, Face, znode
-using Oceananigans.Operators: ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics
 using Oceanostics: CustomKFO
 using Oceanostics.BackgroundPotentialEnergyEquation: reference_height, reference_buoyancy, VerticalSort,
                                                      ProfileLookup, SortedReferenceHeightField,
-                                                     reference_buoyancy_at_height, buoyancy_field
-using Oceanostics.AvailablePotentialEnergyEquation: BuoyancyDisplacementPotential
+                                                     buoyancy_field
+using Oceanostics.AvailablePotentialEnergyEquation: BuoyancyDisplacementPotential, ReferenceBuoyancyAnomaly,
+                                                     AvailablePotentialToKineticEnergyConversion
+using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialToKineticEnergyConversion
 
 import Oceananigans.Fields: compute!
 import Oceananigans.AbstractOperations: operation_name
 
 #+++ Sub-filter APE → KE conversion
-# τ(w, b_r) = filter(w b_r) - w̄ b_rˡ, with b_r = b - b✶(z) and b_rˡ = b̄ - b✶(z). The reference profile
-# is *not* filtered in either term, matching the convention Oceanostics' filtered conversion uses, so
-# that the filtered and sub-filter halves sum to filter(w b_r) exactly. `w` lives on the z face, so
-# each product is formed there and interpolated to the center, as both upstream conversions do.
-@inline b_rᶜᶜᶜ(i, j, k, grid, b, b✶z) = @inbounds b[i, j, k] - b✶z[i, j, k]
-
-@inline wb_rᶜᶜᶠ(i, j, k, grid, w, b, b✶z) = @inbounds w[i, j, k] * ℑzᵃᵃᶠ(i, j, k, grid, b_rᶜᶜᶜ, b, b✶z)
-
+# τ(w, b_r) = filter(w b_r) - w̄ b_rˡ. Both halves come from Oceanostics as of 0.20.0: the full-field
+# conversion is `AvailablePotentialToKineticEnergyConversion` and the filtered one is
+# `FilteredAvailablePotentialToKineticEnergyConversion`, so the two are formed with identical
+# co-location and the same unfiltered reference profile, and this is only their difference.
 @inline subfilter_conversion_ccc(i, j, k, grid, wb_rˢ) = @inbounds wb_rˢ[i, j, k]
 
 const SubFilterAvailablePotentialToKineticEnergyConversion = CustomKFO{<:typeof(subfilter_conversion_ccc)}
@@ -64,8 +61,8 @@ The reference profile is **not** filtered in either term, following the upstream
 `b̄ - b✶(z)`, not `filter(b_r)`. That is what makes the two halves an exact decomposition, and it is
 the one place this differs from the offline `calculate_ape_to_ke_exchange_term`, which filters `b_r`.
 
-`method` has to be a `ProfileLookup`, as for every filtered-state diagnostic: the reference profile is
-the sorted state of the *full* buoyancy, which the filtered field is measured against.
+`method` has to be a `ProfileLookup` holding a profile, as for every filtered-state diagnostic: both
+halves must be measured against the same reference state, the sorted state of the *full* buoyancy.
 """
 function SubFilterAvailablePotentialToKineticEnergyConversion(model, filter; method = ProfileLookup(),
                                                               geopotential_height = Oceananigans.Models.model_geopotential_height(model))
@@ -74,17 +71,10 @@ function SubFilterAvailablePotentialToKineticEnergyConversion(model, filter; met
                              profile, so that the filtered and sub-filter halves share one reference state. Pass \
                              `ProfileLookup(z✶_column)` with a column built by `reference_height(model, method=VerticalSort())`."))
 
-    b   = buoyancy_field(model, model.buoyancy, geopotential_height)
-    b̄   = Field(filter(b))
-    w   = model.velocities.w
-    w̄   = Field(filter(w))
-    b✶z = reference_buoyancy_at_height(model.grid, method.profile)
-
-    # filter(w b_r) and w̄ b_rˡ, each formed on the face and interpolated to the center, then differenced
-    wb_r  = KernelFunctionOperation{Center, Center, Center}(
-                (i, j, k, grid, w, b, b✶z) -> ℑzᵃᵃᶜ(i, j, k, grid, wb_rᶜᶜᶠ, w, b, b✶z), model.grid, w, b, b✶z)
-    w̄b_rˡ = KernelFunctionOperation{Center, Center, Center}(
-                (i, j, k, grid, w̄, b̄, b✶z) -> ℑzᵃᵃᶜ(i, j, k, grid, wb_rᶜᶜᶠ, w̄, b̄, b✶z), model.grid, w̄, b̄, b✶z)
+    # w b_r on the full field, and w̄ b_rˡ on the filtered one, both from upstream
+    z✶    = reference_height(model; method, geopotential_height)
+    wb_r  = AvailablePotentialToKineticEnergyConversion(model, z✶)
+    w̄b_rˡ = FilteredAvailablePotentialToKineticEnergyConversion(model, filter; method, geopotential_height)
 
     wb_rˢ = Field(filter(Field(wb_r))) - Field(w̄b_rˡ)
 
