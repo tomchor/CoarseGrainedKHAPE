@@ -1401,8 +1401,8 @@ version = "0.110.16"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "cbf1eff1f8aa1705b2b26d66221fc925dc3a6727"
-repo-rev = "tc/filtered-ape-ke-conversion"
+git-tree-sha1 = "7a21b7393a1695cd10582332e67c062d9ca6fc53"
+repo-rev = "tc/subfilter-ape-ke-conversion"
 repo-url = "https://github.com/tomchor/Oceanostics.jl.git"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
 version = "0.20.0"

@@ -9,7 +9,7 @@ using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
-using Oceanostics: FilteredAvailablePotentialToKineticEnergyConversion
+using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
 using Oceananigans.Simulations: TimeDerivativeCallback
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
@@ -20,7 +20,7 @@ using Oceanostics.ProgressMessengers
 Random.seed!(546)
 
 include("utils.jl")
-include("online_diagnostics.jl")   # the two budget terms Oceanostics does not provide
+include("online_diagnostics.jl")   # the one budget term Oceanostics does not provide
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()

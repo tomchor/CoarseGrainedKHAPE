@@ -1,84 +1,25 @@
-# Online budget terms that Oceanostics does not (yet) provide, for the coarse-grained KE and APE
-# budgets of Wenegrat, Chor & Barkan (2026). Everything else the budgets need is upstream; these two
-# are what is left:
+# The one online budget term Oceanostics does not provide, for the coarse-grained APE budget of
+# Wenegrat, Chor & Barkan (2026):
 #
-#   SubFilterAvailablePotentialToKineticEnergyConversion   τ(w, b_r) = filter(w b_r) - w̄ b_rˡ
-#   ReferenceTendencyCorrection                            R = ∫_{z✶}^{z} ∂ₜb✶(z̃) dz̃
+#   ReferenceTendencyCorrection   R = ∫_{z✶}^{z} ∂ₜb✶(z̃) dz̃
 #
-# The conversion is the sub-filter half of the split whose filtered half Oceanostics exports as
-# `FilteredAvailablePotentialToKineticEnergyConversion`: together they sum to filter(w b_r), so the two
-# budgets exchange exactly what the full field converts.
+# R exists because the local APE is measured against a reference state that itself evolves: a parcel's
+# APE changes even when neither the parcel nor its buoyancy moves, simply because b✶ has shifted
+# underneath it. See the note on `ReferenceTendencyCorrection` for why it is built from the reference
+# profile's own time derivative rather than from ∂ₜeₐ.
 #
-# R is the term that exists because the local APE is measured against a reference state that itself
-# evolves: a parcel's APE changes even when neither the parcel nor its buoyancy moves, simply because
-# b✶ has shifted underneath it. See the note on `ReferenceTendencyCorrection` for why it is built from
-# the reference profile's own time derivative rather than from ∂ₜeₐ.
+# Everything else both budgets need is upstream, the sub-filter APE→KE conversion τ(w, b_r) included
+# (Oceanostics `SubFilterAvailablePotentialToKineticEnergyConversion`, PR #301).
 
-using Oceananigans: NonhydrostaticModel
-using Oceananigans.AbstractOperations: KernelFunctionOperation, @at
+using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture, on_architecture, CPU
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: Zᶜᶜᶜ
-using Oceananigans.Fields: Field, CenterField, FieldStatus, compute_at!, interior, set_status!
+using Oceananigans.Fields: Field, FieldStatus, compute_at!, interior, set_status!
 using Oceananigans.Grids: Center, Face, znode
-using Oceananigans.OutputWriters: TimeDerivative
-using Oceanostics
-using Oceanostics: CustomKFO
-using Oceanostics.BackgroundPotentialEnergyEquation: reference_height, reference_buoyancy, VerticalSort,
-                                                     ProfileLookup, SortedReferenceHeightField
-using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialToKineticEnergyConversion
-using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialToKineticEnergyConversion
+using Oceanostics.BackgroundPotentialEnergyEquation: SortedReferenceHeightField
 
 import Oceananigans.Fields: compute!
-import Oceananigans.AbstractOperations: operation_name
-
-#+++ Sub-filter APE → KE conversion
-# τ(w, b_r) = filter(w b_r) - w̄ b_rˡ. Both halves come from Oceanostics as of 0.20.0: the full-field
-# conversion is `AvailablePotentialToKineticEnergyConversion` and the filtered one is
-# `FilteredAvailablePotentialToKineticEnergyConversion`, so the two are formed with identical
-# co-location and the same unfiltered reference profile, and this is only their difference.
-@inline subfilter_conversion_ccc(i, j, k, grid, wb_rˢ) = @inbounds wb_rˢ[i, j, k]
-
-const SubFilterAvailablePotentialToKineticEnergyConversion = CustomKFO{<:typeof(subfilter_conversion_ccc)}
-
-"""
-    SubFilterAvailablePotentialToKineticEnergyConversion(model, filter; method = ProfileLookup(), geopotential_height)
-
-Return the sub-filter conversion of available potential energy into kinetic energy,
-
-```
-    τ(w, b_r) = filter(w b_r) - w̄ b_rˡ ,   b_r = b - b✶(z) ,   b_rˡ = b̄ - b✶(z)
-```
-
-the sub-filter half of the split whose filtered half is Oceanostics'
-`FilteredAvailablePotentialToKineticEnergyConversion` `w̄b_rˡ`. The two sum to `filter(w b_r)`, so the
-sub-filter APE and KE budgets exchange exactly what the full field converts. It carries the opposite
-sign in the two budgets, which is what makes it a reversible exchange rather than a source or a sink.
-
-The reference profile is **not** filtered in either term, following the upstream convention: `b_rˡ` is
-`b̄ - b✶(z)`, not `filter(b_r)`. That is what makes the two halves an exact decomposition, and it is
-the one place this differs from the offline `calculate_ape_to_ke_exchange_term`, which filters `b_r`.
-
-`method` has to be a `ProfileLookup` holding a profile, as for every filtered-state diagnostic: both
-halves must be measured against the same reference state, the sorted state of the *full* buoyancy.
-"""
-function SubFilterAvailablePotentialToKineticEnergyConversion(model, filter; method = ProfileLookup(),
-                                                              geopotential_height = Oceananigans.Models.model_geopotential_height(model))
-    isnothing(method.profile) &&
-        throw(ArgumentError("`SubFilterAvailablePotentialToKineticEnergyConversion` needs a `ProfileLookup` holding a \
-                             profile, so that the filtered and sub-filter halves share one reference state. Pass \
-                             `ProfileLookup(z✶_column)` with a column built by `reference_height(model, method=VerticalSort())`."))
-
-    # w b_r on the full field, and w̄ b_rˡ on the filtered one, both from upstream
-    z✶    = reference_height(model; method, geopotential_height)
-    wb_r  = AvailablePotentialToKineticEnergyConversion(model, z✶)
-    w̄b_rˡ = FilteredAvailablePotentialToKineticEnergyConversion(model, filter; method, geopotential_height)
-
-    wb_rˢ = Field(filter(Field(wb_r))) - Field(w̄b_rˡ)
-
-    return KernelFunctionOperation{Center, Center, Center}(subfilter_conversion_ccc, model.grid, wb_rˢ)
-end
-#---
 
 #+++ Reference-tendency correction R
 """
@@ -172,8 +113,4 @@ function ReferenceTendencyCorrection(model, ∂ₜb✶, z✶::SortedReferenceHei
 
     return Field{Center, Center, Center}(grid; operand, status = FieldStatus())
 end
-#---
-
-#+++ Display
-Oceanostics.@diagnostic_show SubFilterAvailablePotentialToKineticEnergyConversion "SubFilterAvailablePotentialToKineticEnergyConversion" "sub-filter APE to KE conversion  τ(w, b_r) = filter(w b_r) - w̄b_rˡ"
 #---
