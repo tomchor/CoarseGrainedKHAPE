@@ -14,13 +14,13 @@ too and both residuals are reported side by side, which is the comparison that m
 budget is worth having only if it closes at least as well as the offline one.
 
 Every term is evaluated at the output time except the tendencies, which Oceananigans' `TimeDerivative`
-centres at tⁿ - Δt/2 for one model timestep Δt. That is why the tendencies are registered on
-`IterationInterval(1)` rather than on the writer's schedule: over one step the offset is negligible
-against the output interval, while differencing on the writer's schedule would centre them half an
-output interval early and would not close.
+writes as the forward difference over the single timestep following the output, (aⁿ⁺¹ - aⁿ)/Δt labelled
+tⁿ: the writer opens the record, evaluates again one iteration later, and back-fills. Over one step the
+Δt/2 offset is negligible against the output interval. The same machinery covers Rˢ, whose ∂ₜb✶ is a
+TimeDerivative advanced whenever Rˢ is evaluated.
 
-The first output of a run is skipped: a `TimeDerivative` is zero until its operand has been evaluated
-twice, so the tendency there is not yet a derivative.
+The first output pair spans the initialisation transient and is skipped; the last record of a run holds
+NaN for every deferred output (its window never completes) and is dropped too.
 """
 #+++ Imports
 import logging
@@ -79,12 +79,12 @@ def relative_residual(residual, terms):
 ds = xr.open_dataset(filename, decode_times=False)
 ds = strip_grid_suffix(ds, model_grid_suffix(ds))
 
-# The writer runs on ConsecutiveIterations, so outputs come in pairs. The first pair is dropped: a
-# TimeDerivative is zero until its operand has been evaluated twice, so the derivative at the first
-# output is not yet a derivative at all, and the one at the second spans the initialisation transient
-# (∫Eₐˢ goes from zero to its working value within the first fraction of a time unit). Neither is a
-# statement about the budget, and both would dominate an rms over the run.
-ds = ds.isel(time=slice(args.skip, None))
+# The writer runs on ConsecutiveIterations, so outputs come in pairs. The first pair is dropped: its
+# derivatives span the initialisation transient (∫Eₐˢ goes from zero to its working value within the
+# first fraction of a time unit), which is not a statement about the budget and would dominate an rms
+# over the run. The final record is dropped too: deferred outputs (the tendencies and Rˢ) are NaN
+# there, their differencing window never having completed before the run ended.
+ds = ds.isel(time=slice(args.skip, -1))
 
 BUDGETS = {
     "KE": dict(

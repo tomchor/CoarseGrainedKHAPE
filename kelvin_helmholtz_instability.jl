@@ -11,7 +11,6 @@ using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePo
 using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
-using Oceananigans.Simulations: TimeDerivativeCallback
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
 using Oceanostics.ProgressMessengers
@@ -354,12 +353,13 @@ if save_sorted
     # The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides along: it is measured against the same
     # filtered reference state ε_Aˢ uses, so it shares the filter and the column and adds no sort. Both
     # are 2D x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K.
-    # The reference profile's own time derivative, shared by every R below. One callback keeps it up to
-    # date on IterationInterval(1), so ∂ₜb✶ spans a single model timestep like the other tendencies.
+    # The reference profile's own time derivative, shared by every R below. A TimeDerivative advances
+    # whenever it is evaluated, and R is evaluated only when the writer fetches it, so ∂ₜb✶ follows the
+    # writer's schedule with no callback: the R outputs are deferred (see online_diagnostics.jl), so the
+    # writer evaluates them when a record opens and once more on the following iteration, and the
+    # difference written spans that single timestep, like the other tendencies.
     lookup = ProfileLookup(z✶_1dsort)
-    _∂ₜb✶_cb = TimeDerivativeCallback(reference_buoyancy(z✶_1dsort), model)
-    simulation.callbacks[:∂ₜb✶] = _∂ₜb✶_cb
-    ∂ₜb✶ = _∂ₜb✶_cb.func
+    ∂ₜb✶ = TimeDerivative(reference_buoyancy(z✶_1dsort), model)
 
     # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
     z✶_lookup = reference_height(model, method=lookup)

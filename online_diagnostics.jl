@@ -20,6 +20,7 @@ using Oceananigans.Grids: Center, Face, znode
 using Oceanostics.BackgroundPotentialEnergyEquation: SortedReferenceHeightField
 
 import Oceananigans.Fields: compute!
+import Oceananigans.OutputWriters: deferred_output
 
 #+++ Reference-tendency correction R
 """
@@ -41,6 +42,12 @@ end
 
 const ReferenceTendencyField = Field{<:Any, <:Any, <:Any, <:ReferenceTendencyState}
 
+# R holds a TimeDerivative, so like a bare TimeDerivative it is only complete on the iteration after
+# the writer actuates. `deferred_output` recurses through fields and operations down to this operand,
+# so Rˢ = filter(R) - Rˡ and ∫Rˢ dV are deferred too: the writer evaluates them when a record opens
+# (opening the ∂ₜb✶ window) and again on the following iteration, writing the completed difference.
+deferred_output(::ReferenceTendencyState) = true
+
 "Ψ̇(ζ) = ∫_bottom^ζ ∂ₜb✶ dz̃, evaluated by locating ζ's slot in a uniformly spaced column."
 @inline function psi_dot(ζ, Ψface, ∂ₜb✶, z_bottom, Δz✶, N)
     k = clamp(floor(Int, (ζ - z_bottom) / Δz✶) + 1, 1, N)
@@ -50,8 +57,9 @@ end
 function compute!(R::ReferenceTendencyField, time=nothing)
     s = R.operand
     compute_at!(s.z✶, time)
+    compute_at!(s.∂ₜb✶, time)   # advances the TimeDerivative (a no-op when already at `time`)
 
-    ∂ₜb✶ = vec(interior(s.∂ₜb✶.result))
+    ∂ₜb✶ = vec(interior(s.∂ₜb✶))
     N = length(∂ₜb✶)
 
     # Ψ̇ at the slot faces: a cumulative integral up the column, closed off at the bottom by zero
