@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A UMCP0028
+#PBS -A UMCP0061
 #PBS -N sweep_transfer_Nz4096_Ri0.10
 #PBS -o logs/sweep_transfer_Nz4096_Ri0.10.log
 #PBS -e logs/sweep_transfer_Nz4096_Ri0.10.log
