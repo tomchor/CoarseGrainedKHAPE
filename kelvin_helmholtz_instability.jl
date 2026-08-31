@@ -195,7 +195,19 @@ walltime = Walltime()
 
 ε = KineticEnergyEquation.DissipationRate(model)
 ε̄ = Average(ε, dims=(1, 2)) |> Field
-η = (params.ν^3 / ε̄) ^ (1/4)
+
+#+++ Minimum Kolmogorov scale, following Kaminski & Smyth (2019, JFM 862, 639-658)
+# L_K is built from the horizontally averaged dissipation ε̄(z) evaluated at the height where it
+# peaks, i.e. the smallest Kolmogorov scale anywhere in the (x, y)-averaged profile — not the
+# pointwise minimum over the field, which no DNS resolution criterion refers to. Their criterion is
+# 2.5 L_K ≥ Δx, so the ratio reported below is ≥ 1 while the run is resolved.
+# ε̄ is only recomputed by the output writer, so compute! it here to read the current state.
+function kolmogorov_resolution(sim)
+    compute!(ε̄)
+    L_K = (params.ν^3 / maximum(ε̄))^(1/4)
+    return @sprintf("2.5L_K/Δx = %.2f", 2.5 * L_K / Δx)
+end
+#---
 
 
 progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=false)
@@ -205,7 +217,7 @@ progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=f
                               + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
                               + MaxWVelocity()
                               + "step dur = " * walltime_per_timestep
-                              + (sim -> @sprintf("Kolmogorov length/Δx = %.2f", minimum(η) / Δx))
+                              + kolmogorov_resolution
                               )(simulation)
 simulation.callbacks[:progress] = Callback(progress, IterationInterval(20))
 #---
