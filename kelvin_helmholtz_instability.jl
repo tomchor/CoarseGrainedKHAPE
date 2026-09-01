@@ -201,11 +201,16 @@ walltime = Walltime()
 # peaks, i.e. the smallest Kolmogorov scale anywhere in the (x, y)-averaged profile — not the
 # pointwise minimum over the field, which no DNS resolution criterion refers to. Their criterion is
 # 2.5 L_K ≥ Δx, so the ratio reported below is ≥ 1 while the run is resolved.
-# ε̄ is only recomputed by the output writer, so compute! it here to read the current state.
+# L_K goes in the output writer as a scalar time series, which is what their figure 8(d) plots.
+ε̄_max = Field(Reduction(maximum!, ε̄, dims=(1, 2, 3)))
+L_K = (params.ν^3 / ε̄_max)^(1/4) |> Field
+
+# compute! chains down through ε̄_max to ε̄, so this reads the current state rather than whatever the
+# output writer last left there. L_K is a (1, 1, 1) field, so `maximum` just reads its one value off
+# the device (avoiding scalar indexing on the GPU).
 function kolmogorov_resolution(sim)
-    compute!(ε̄)
-    L_K = (params.ν^3 / maximum(ε̄))^(1/4)
-    return @sprintf("2.5L_K/Δx = %.2f", 2.5 * L_K / Δx)
+    compute!(L_K)
+    return @sprintf("2.5L_K/Δx = %.2f", 2.5 * maximum(L_K) / Δx)
 end
 #---
 
@@ -373,7 +378,7 @@ if save_sorted
 end
 #---
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, L_K, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
