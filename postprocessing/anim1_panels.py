@@ -144,14 +144,14 @@ panel_specs = [
     (0, 2, ds_2d,      "b",                    r"Buoyancy ($b$)",                                  "RdBu_r",   -b_vmax,       b_vmax),
     (0, 3, ds_2d,      "b_r",                  r"Relative buoyancy ($b_r$)",                       "RdBu_r",   -b_r_vmax,     b_r_vmax),
     # Row 1: SFS KE, cross-scale KE flux, SFS KE dissipation, APE→KE exchange
-    (1, 0, ke_budget,  "KE_of_sfs_flow",       r"SFS KE",                                          "coolwarm", -KE_sfs_vmax,  KE_sfs_vmax),
+    (1, 0, ke_budget,  "KE_of_sfs_flow",       r"SFS KE",                                          "RdBu_r", -KE_sfs_vmax,  KE_sfs_vmax),
     (1, 1, ke_budget,  "Π_K",                  r"$\Pi_K$ (cross-scale KE flux)",                   "RdBu_r",   -Π_K_vmax,     Π_K_vmax),
-    (1, 2, ke_budget,  "ε_Kˢ",                 r"$\varepsilon_K^s$ (small-scale KE dissipation)",  "coolwarm", -ε_Kˢ_vmax,    ε_Kˢ_vmax),
+    (1, 2, ke_budget,  "ε_Kˢ",                 r"$\varepsilon_K^s$ (small-scale KE dissipation)",  "RdBu_r", -ε_Kˢ_vmax,    ε_Kˢ_vmax),
     (1, 3, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",                 "RdBu_r",   -Π_K_vmax,     Π_K_vmax),
     # Row 2: SFS APE, cross-scale APE flux, SFS APE dissipation, R^s
-    (2, 0, ape_budget, "Eaˢ(ρ, z)",            r"SFS APE",                                         "coolwarm", -APE_sfs_vmax, APE_sfs_vmax),
+    (2, 0, ape_budget, "Eaˢ(ρ, z)",            r"SFS APE",                                         "RdBu_r", -APE_sfs_vmax, APE_sfs_vmax),
     (2, 1, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",                  "RdBu_r",   -Π_A_vmax,     Π_A_vmax),
-    (2, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "coolwarm", -ε_Aˢ_vmax,    ε_Aˢ_vmax),
+    (2, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "RdBu_r", -ε_Aˢ_vmax,    ε_Aˢ_vmax),
     (2, 3, ape_budget, "Rˢ",                   r"$R^s$ (reference-tendency correction)",           "RdBu_r",   -Rˢ_vmax,      Rˢ_vmax),
 ]
 
