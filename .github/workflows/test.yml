@@ -160,10 +160,13 @@ jobs:
         if: always() && steps.pytest.outcome == 'success'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Generate animation
+      - name: Generate animations (filter scales 1 and 7)
         if: always() && steps.pytest.outcome == 'success'
         working-directory: postprocessing
-        run: python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale 1 --dpi 100 --fps 8
+        run: |
+          for l in 1 7; do
+            python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8
+          done
 
       - name: List output files
         if: always()
@@ -276,10 +279,13 @@ jobs:
         if: always() && steps.pytest.outcome == 'success'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Generate animation (fixed reference)
+      - name: Generate animations (fixed reference, filter scales 1 and 7)
         if: always() && steps.pytest.outcome == 'success'
         working-directory: postprocessing
-        run: python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale 1 --dpi 100 --fps 8 --fixed-reference
+        run: |
+          for l in 1 7; do
+            python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8 --fixed-reference
+          done
 
       - name: List output files
         if: always()

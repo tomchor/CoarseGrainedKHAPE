@@ -109,7 +109,7 @@ APE_sfs_vmax = global_clim_positive(ape_budget["Eaˢ(ρ, z)"].squeeze("y_aca"), 
 ε_Kˢ_vmax = global_clim_positive(ke_budget["ε_Kˢ"].squeeze("y_aca"), sample_idx, pct)
 
 print(f"  ω: ±{omega_vmax:.3e},  b: ±{b_vmax:.3e},  b_r: ±{b_r_vmax:.3e},  w: ±{w_vmax:.3e}")
-print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_Aˢ: 0–{ε_Aˢ_vmax:.3e},  Rˢ: ±{Rˢ_vmax:.3e}")
+print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_Aˢ: ±{ε_Aˢ_vmax:.3e},  Rˢ: ±{Rˢ_vmax:.3e}")
 #---
 
 #+++ Helper functions
@@ -139,20 +139,20 @@ ax_ape_budget = fig.add_subplot(gs[4, :])
 #+++ Snapshot panels (3 rows × 4 cols)
 panel_specs = [
     # Row 0: vorticity, w, b, b_r
-    (0, 0, ds_2d,      "ω",                    r"Vorticity ($\omega$)",                            "RdBu_r",  -omega_vmax, omega_vmax),
-    (0, 1, ds_2d,      "w",                    r"Vertical velocity ($w$)",                         "RdBu_r",  -w_vmax,     w_vmax),
-    (0, 2, ds_2d,      "b",                    r"Buoyancy ($b$)",                                  "RdBu_r",  -b_vmax,     b_vmax),
-    (0, 3, ds_2d,      "b_r",                  r"Relative buoyancy ($b_r$)",                       "RdBu_r",  -b_r_vmax,   b_r_vmax),
+    (0, 0, ds_2d,      "ω",                    r"Vorticity ($\omega$)",                            "RdBu_r",   -omega_vmax,   omega_vmax),
+    (0, 1, ds_2d,      "w",                    r"Vertical velocity ($w$)",                         "RdBu_r",   -w_vmax,       w_vmax),
+    (0, 2, ds_2d,      "b",                    r"Buoyancy ($b$)",                                  "RdBu_r",   -b_vmax,       b_vmax),
+    (0, 3, ds_2d,      "b_r",                  r"Relative buoyancy ($b_r$)",                       "RdBu_r",   -b_r_vmax,     b_r_vmax),
     # Row 1: SFS KE, cross-scale KE flux, SFS KE dissipation, APE→KE exchange
-    (1, 0, ke_budget,  "KE_of_sfs_flow",       r"SFS KE",                                          "inferno", 0,           KE_sfs_vmax),
-    (1, 1, ke_budget,  "Π_K",                  r"$\Pi_K$ (cross-scale KE flux)",                   "RdBu_r",  -Π_K_vmax,   Π_K_vmax),
-    (1, 2, ke_budget,  "ε_Kˢ",                 r"$\varepsilon_K^s$ (small-scale KE dissipation)",  "inferno", 0,           ε_Kˢ_vmax),
-    (1, 3, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",                 "RdBu_r",  -Π_K_vmax,   Π_K_vmax),
+    (1, 0, ke_budget,  "KE_of_sfs_flow",       r"SFS KE",                                          "RdBu_r", -KE_sfs_vmax,  KE_sfs_vmax),
+    (1, 1, ke_budget,  "Π_K",                  r"$\Pi_K$ (cross-scale KE flux)",                   "RdBu_r",   -Π_K_vmax,     Π_K_vmax),
+    (1, 2, ke_budget,  "ε_Kˢ",                 r"$\varepsilon_K^s$ (small-scale KE dissipation)",  "RdBu_r", -ε_Kˢ_vmax,    ε_Kˢ_vmax),
+    (1, 3, ke_budget,  "SFS APE->KE exchange", r"Small-scale APE$\to$KE exchange",                 "RdBu_r",   -Π_K_vmax,     Π_K_vmax),
     # Row 2: SFS APE, cross-scale APE flux, SFS APE dissipation, R^s
-    (2, 0, ape_budget, "Eaˢ(ρ, z)",            r"SFS APE",                                         "inferno", 0,           APE_sfs_vmax),
-    (2, 1, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",                  "RdBu_r",  -Π_A_vmax,   Π_A_vmax),
-    (2, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "inferno", 0,           ε_Aˢ_vmax),
-    (2, 3, ape_budget, "Rˢ",                   r"$R^s$ (reference-tendency correction)",           "RdBu_r",  -Rˢ_vmax,    Rˢ_vmax),
+    (2, 0, ape_budget, "Eaˢ(ρ, z)",            r"SFS APE",                                         "RdBu_r", -APE_sfs_vmax, APE_sfs_vmax),
+    (2, 1, ape_budget, "Π_A",                  r"$\Pi_A$ (cross-scale APE flux)",                  "RdBu_r",   -Π_A_vmax,     Π_A_vmax),
+    (2, 2, ape_budget, "ε_Aˢ",                 r"$\varepsilon_A^s$ (small-scale APE dissipation)", "RdBu_r", -ε_Aˢ_vmax,    ε_Aˢ_vmax),
+    (2, 3, ape_budget, "Rˢ",                   r"$R^s$ (reference-tendency correction)",           "RdBu_r",   -Rˢ_vmax,      Rˢ_vmax),
 ]
 
 last_snapshot_row = max(spec[0] for spec in panel_specs)
@@ -165,20 +165,14 @@ for row, col, ds, var, title, cmap, vmin, vmax in panel_specs:
     data0 = get_frame(ds, var, xdim, zdim, 0)
     im = ax.pcolormesh(xc, zc, data0, cmap=cmap, vmin=vmin, vmax=vmax, shading="nearest", rasterized=True)
 
-    is_inferno = (cmap == "inferno")
     cax = ax.inset_axes([0.2, 0.1, 0.6, 0.025])
     cb = fig.colorbar(im, cax=cax, orientation="horizontal", extend="both")
     cb.locator = MaxNLocator(nbins=4)
     cb.update_ticks()
-    tick_color = "white" if is_inferno else "black"
-    cax.tick_params(colors=tick_color, labelsize=8)
-    for spine in cax.spines.values():
-        spine.set_edgecolor(tick_color)
+    cax.tick_params(labelsize=8)
 
-    title_color = "white" if is_inferno else "black"
-    title_bg    = "black" if is_inferno else "white"
     ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=10, ha="center", va="top",
-            color=title_color, bbox=dict(facecolor=title_bg, edgecolor="none", pad=2, alpha=0.6))
+            bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.6))
     ax.set_ylim(-args.zlim, args.zlim)
     ax.set_aspect("equal")
     ax.set_ylabel("z" if col == 0 else "")
