@@ -195,7 +195,24 @@ walltime = Walltime()
 
 ε = KineticEnergyEquation.DissipationRate(model)
 ε̄ = Average(ε, dims=(1, 2)) |> Field
-η = (params.ν^3 / ε̄) ^ (1/4)
+
+#+++ Minimum Kolmogorov scale, following Kaminski & Smyth (2019, JFM 862, 639-658)
+# L_K is built from the horizontally averaged dissipation ε̄(z) evaluated at the height where it
+# peaks, i.e. the smallest Kolmogorov scale anywhere in the (x, y)-averaged profile — not the
+# pointwise minimum over the field, which no DNS resolution criterion refers to. Their criterion is
+# 2.5 L_K ≥ Δx, so the ratio reported below is ≥ 1 while the run is resolved.
+# L_K goes in the output writer as a scalar time series, which is what their figure 8(d) plots.
+ε̄_max = Field(Reduction(maximum!, ε̄, dims=(1, 2, 3)))
+L_K = (params.ν^3 / ε̄_max)^(1/4) |> Field
+
+# compute! chains down through ε̄_max to ε̄, so this reads the current state rather than whatever the
+# output writer last left there. L_K is a (1, 1, 1) field, so `maximum` just reads its one value off
+# the device (avoiding scalar indexing on the GPU).
+function kolmogorov_resolution(sim)
+    compute!(L_K)
+    return @sprintf("2.5L_K/Δx = %.2f", 2.5 * maximum(L_K) / Δx)
+end
+#---
 
 
 progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=false)
@@ -205,7 +222,7 @@ progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=f
                               + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
                               + MaxWVelocity()
                               + "step dur = " * walltime_per_timestep
-                              + (sim -> @sprintf("Kolmogorov length/Δx = %.2f", minimum(η) / Δx))
+                              + kolmogorov_resolution
                               )(simulation)
 simulation.callbacks[:progress] = Callback(progress, IterationInterval(20))
 #---
@@ -361,7 +378,7 @@ if save_sorted
 end
 #---
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, Ri=Ri_field, S=S_field)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, L_K, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
