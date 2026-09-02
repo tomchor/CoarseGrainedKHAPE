@@ -57,6 +57,18 @@ jobs:
           compression-level: 9
           retention-days: 2
 
+      # The panels animations drawn from the online 2D fields at the end of the simulation, the same
+      # figure the postprocessing jobs later build offline (animation-time-varying), so the two
+      # artifacts give an online-vs-offline side-by-side of one run.
+      - name: Upload online animations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: animation-online
+          path: animations/*.mp4
+          if-no-files-found: warn
+          retention-days: 14
+
   # ---------------------------------------------------------------------------
   # Standalone filter test — no simulation needed, runs in parallel.
   # ---------------------------------------------------------------------------
