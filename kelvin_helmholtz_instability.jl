@@ -12,7 +12,7 @@ using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
-using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
+using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
@@ -301,6 +301,7 @@ for ℓ in filter_ℓs
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")        => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
                      Symbol("ε_Ks_ℓ$(ℓ)")       => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks),
                      Symbol("K_s_ℓ$(ℓ)")        => K_s,  Symbol("K_s_ℓ$(ℓ)_int")  => Integral(K_s),
+                     Symbol("dKs_dt_ℓ$(ℓ)")     => TimeDerivative(K_s, model),
                      Symbol("dKs_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(K_s), model))
 
     # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
@@ -336,6 +337,7 @@ ke_transfer_fields = (; _ke_pairs...)
 # is the model's own `b`, which is already an output, so their profiles are recovered by pairing z✶ with b
 # and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
 sorted_fields = NamedTuple()
+twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
@@ -400,11 +402,17 @@ if save_sorted
                           Symbol("E_as_ℓ$(ℓ)")        => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
                           Symbol("wb_rs_ℓ$(ℓ)")       => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
                           Symbol("R_s_ℓ$(ℓ)")         => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
+                          Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
                           Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
     end
     sfs_ape_fields = (; _ape_pairs...)
 
     sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, sfs_ape_fields...)
+
+    # The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the
+    # panels animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl.
+    # All are model-grid, so the 2D file stays single-grid.
+    twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
 end
 #---
 
@@ -430,7 +438,7 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_f
                                                   overwrite_existing = true)
 
 output_filename_2d = "output/$(simulation_name)_2d.nc"
-simulation.output_writers[:twod_fields] = NetCDFWriter(model, outputs,
+simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
                                                        schedule = TimeInterval(2),
                                                        filename = output_filename_2d,
                                                        array_type = Array{Float32},
