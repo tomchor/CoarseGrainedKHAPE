@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A UMCP0028
+#PBS -A UMCP0061
 #PBS -N kelvin_helmholtz_1024
 #PBS -o logs/kelvin_helmholtz_1024.log
 #PBS -e logs/kelvin_helmholtz_1024.log

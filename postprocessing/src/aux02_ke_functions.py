@@ -293,9 +293,9 @@ def calculate_energy_transfer(ds, filter_scales,
     Returns
     -------
     xr.Dataset
-        Dataset with Π_A and the SFS APE->KE exchange term (plus their volume
-        integrals) indexed by filter_scale, and Π_K (with ∫Π_K dV) when
-        include_pi_k=True.
+        Dataset with Π_A, the SFS APE->KE exchange term and its resolved
+        counterpart w̄·b_rˡ (plus their volume integrals) indexed by
+        filter_scale, and Π_K (with ∫Π_K dV) when include_pi_k=True.
     """
     filtered_dimensions = ["x_caa", "z_aac"]
     tensor_dimensions   = ("x_caa", "z_aac")
@@ -357,6 +357,13 @@ def calculate_energy_transfer(ds, filter_scales,
                                                                filtered_w=w_bar,
                                                                filtered_b=b_r_l)
 
+        # Resolved conversion w̄·b_rˡ, the filtered-scale half of the same split. It uses b_r_l, the
+        # *unfiltered* reference profile, exactly as the sub-filter half above does, so the two sum to
+        # filter(w·b_r) and the decomposition is exact. Using w̄·filter(b_r) here instead would leave a
+        # residual of w̄·[filter(b✶(z)) - b✶(z)] between the halves. This matches Oceanostics'
+        # `FilteredAvailablePotentialToKineticEnergyConversion`, which the simulation computes online.
+        wbar_b_r_l = (w_bar * b_r_l).rename("w̄·b_rˡ")
+
         # --- APE cross-scale transfer ---
         # Read the online Π_A when the caller has it; that also skips the sort of the filtered density
         # that Υˡ would otherwise need, which is the expensive half of this loop. Otherwise recompute
@@ -377,12 +384,15 @@ def calculate_energy_transfer(ds, filter_scales,
 
         int_Π_A                = integrate(Π_A, dV)
         int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)
+        int_wbar_b_r_l         = integrate(wbar_b_r_l, dV)
 
         transfer_vars = {
             "Π_A":                  Π_A,
             "SFS APE->KE exchange": ape_to_ke_exchange,
+            "w̄·b_rˡ":               wbar_b_r_l,
             "∫Π_A dV":              int_Π_A,
             "∫(SFS APE->KE) dV":    int_ape_to_ke_exchange,
+            "∫w̄·b_rˡ dV":           int_wbar_b_r_l,
             **ke_vars,
         }
         transfer_list.append(xr.Dataset(transfer_vars))
