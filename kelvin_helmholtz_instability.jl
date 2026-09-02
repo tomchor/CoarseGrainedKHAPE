@@ -8,14 +8,18 @@ using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePotentialEnergyCrossScaleFlux
+using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
+using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
+using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
-using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy
+using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
 Random.seed!(546)
 
 include("utils.jl")
+include("online_diagnostics.jl")   # the one budget term Oceanostics does not provide
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()
@@ -293,8 +297,12 @@ for ℓ in filter_ℓs
 
     Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
     ε_Ks = SubFilterKineticEnergyEquation.SubFilterKineticEnergyDissipationRate(model, gf) # εˢ = filter(ε) - εˡ
-    push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")  => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
-                     Symbol("ε_Ks_ℓ$(ℓ)") => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks))
+    K_s  = SubFilterKineticEnergy(model, gf)   # Kˢ = filter(K) - Kˡ = ½τⁱⁱ, the energy the budget below is of
+    push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")        => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
+                     Symbol("ε_Ks_ℓ$(ℓ)")       => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks),
+                     Symbol("K_s_ℓ$(ℓ)")        => K_s,  Symbol("K_s_ℓ$(ℓ)_int")  => Integral(K_s),
+                     Symbol("dKs_dt_ℓ$(ℓ)")     => TimeDerivative(K_s, model),
+                     Symbol("dKs_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(K_s), model))
 
     # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
     # online-vs-offline validation in postprocessing/validation/. Full 3D fields → gated behind
@@ -329,6 +337,7 @@ ke_transfer_fields = (; _ke_pairs...)
 # is the model's own `b`, which is already an output, so their profiles are recovered by pairing z✶ with b
 # and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
 sorted_fields = NamedTuple()
+twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
@@ -363,18 +372,47 @@ if save_sorted
     # The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides along: it is measured against the same
     # filtered reference state ε_Aˢ uses, so it shares the filter and the column and adds no sort. Both
     # are 2D x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K.
+    # The reference profile's own time derivative, shared by every R below. A TimeDerivative advances
+    # whenever it is evaluated, and R is evaluated only when the writer fetches it, so ∂ₜb✶ follows the
+    # writer's schedule with no callback: the R outputs are deferred (see online_diagnostics.jl), so the
+    # writer evaluates them when a record opens and once more on the following iteration, and the
+    # difference written spans that single timestep, like the other tendencies.
+    lookup = ProfileLookup(z✶_1dsort)
+    ∂ₜb✶ = TimeDerivative(reference_buoyancy(z✶_1dsort), model)
+
+    # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
+    z✶_lookup = reference_height(model, method=lookup)
+    R_full = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
+
     _ape_pairs = Pair{Symbol, Any}[]
     for ℓ in filter_ℓs
         gf = matched_filter(ℓ)
-        lookup = ProfileLookup(z✶_1dsort)
         ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, gf; method=lookup)
         Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf; dims=(1, 3), method=lookup)
-        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)") => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
-                          Symbol("Π_A_ℓ$(ℓ)")  => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A))
+        E_as = SubFilterAvailablePotentialEnergy(model, gf; method=lookup)
+        wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
+
+        # Rˢ = filter(R) - Rˡ, both measured against the same shared profile
+        z✶ˡ = reference_height(Field(gf(b)); method=lookup)
+        R_l = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶ˡ)
+        R_s = Field(gf(R_full)) - R_l
+
+        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")        => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
+                          Symbol("Π_A_ℓ$(ℓ)")         => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
+                          Symbol("E_as_ℓ$(ℓ)")        => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
+                          Symbol("wb_rs_ℓ$(ℓ)")       => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
+                          Symbol("R_s_ℓ$(ℓ)")         => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
+                          Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
+                          Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
     end
     sfs_ape_fields = (; _ape_pairs...)
 
     sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, sfs_ape_fields...)
+
+    # The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the
+    # panels animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl.
+    # All are model-grid, so the 2D file stays single-grid.
+    twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
 end
 #---
 
@@ -400,7 +438,7 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_f
                                                   overwrite_existing = true)
 
 output_filename_2d = "output/$(simulation_name)_2d.nc"
-simulation.output_writers[:twod_fields] = NetCDFWriter(model, outputs,
+simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
                                                        schedule = TimeInterval(2),
                                                        filename = output_filename_2d,
                                                        array_type = Array{Float32},

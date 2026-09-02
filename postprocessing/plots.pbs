@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A UMCP0028
+#PBS -A UMCP0061
 #PBS -N plots_Nz2048_Ri0.10
 #PBS -o logs/plots_Nz2048_Ri0.10.log
 #PBS -e logs/plots_Nz2048_Ri0.10.log
