@@ -248,7 +248,7 @@ u_center = @at (Center, Center, Center) u
 v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
-Ri_field = FlowDiagnostics.RichardsonNumber(model)
+Ri_field = FlowDiagnostics.GradientRichardsonNumber(model)
 S_field  = FlowDiagnostics.StrainRateTensorModulus(model)
 
 ρ₀ = 1025 # kg/ m^3
