@@ -38,8 +38,9 @@ print("Done!")
 #+++ Save filtered fields
 print("\n" + "="*60)
 print("Saving filtered fields...")
-output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
-with ProgressBar(minimum=5, dt=5):
-    ds_filt.to_netcdf(output_filename)
+output_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
+ds_filt = ds_filt.chunk({d: (1 if d == "time" else -1) for d in ds_filt.dims})
+with ProgressBar():
+    ds_filt.to_zarr(output_filename, mode="w")
 print(f"Filtered fields saved to: {output_filename}")
 #---

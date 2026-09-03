@@ -5,4 +5,5 @@ matplotlib
 dask
 netcdf4
 gcm_filters
+zarr
 pytest

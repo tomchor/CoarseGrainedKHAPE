@@ -37,8 +37,8 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Loading pre-filtered fields...")
 
-filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
+ds_filt = xr.open_zarr(filtered_filename)
 filtered_dimensions = ["x_caa", "z_aac"]
 filter_scales = ds_filt.filter_scale.values
 tensor_dimensions = ("x_caa", "z_aac")
@@ -47,8 +47,8 @@ ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "uᵢ"]].copy()
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
-ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.zarr"))
+ds_sorted = xr.open_zarr(sorted_density_filename)
 
 print(f"Pre-filtered fields loaded from: {filtered_filename}")
 print(f"Sorted density loaded from: {sorted_density_filename}")
@@ -157,16 +157,17 @@ print("Saving results...")
 integrated_vars = [v for v in sfs_ke_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
 local_vars      = [v for v in sfs_ke_budget_terms.data_vars if v not in integrated_vars]
 
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
+sfs_ke_budget_terms = sfs_ke_budget_terms.chunk({d: (1 if d == "time" else -1) for d in sfs_ke_budget_terms.dims})
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.zarr"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.zarr"))
 
 print("  Saving local fields...")
-with ProgressBar(minimum=5, dt=5):
-    sfs_ke_budget_terms[local_vars].to_netcdf(fields_filename)
+with ProgressBar():
+    sfs_ke_budget_terms[local_vars].to_zarr(fields_filename, mode="w")
 print(f"  Fields saved to:     {fields_filename}")
 
 print("  Saving integrated timeseries...")
-with ProgressBar(minimum=5, dt=5):
-    sfs_ke_budget_terms[integrated_vars].to_netcdf(integrated_filename)
+with ProgressBar():
+    sfs_ke_budget_terms[integrated_vars].to_zarr(integrated_filename, mode="w")
 print(f"  Integrated saved to: {integrated_filename}")
 #---

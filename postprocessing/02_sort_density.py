@@ -43,8 +43,9 @@ sorted_density = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=n_
 sorted_density.attrs.update(ds.attrs)
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
-with ProgressBar(minimum=5, dt=5):
-    sorted_density.to_netcdf(sorted_density_filename)
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.zarr"))
+sorted_density = sorted_density.chunk({d: (1 if d == "time" else -1) for d in sorted_density.dims})
+with ProgressBar():
+    sorted_density.to_zarr(sorted_density_filename, mode="w")
 print(f"Sorted density saved to: {sorted_density_filename}")
 #---

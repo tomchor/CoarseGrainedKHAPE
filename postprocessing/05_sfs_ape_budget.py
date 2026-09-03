@@ -7,6 +7,7 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 import gc
 import logging
 import os
+import shutil
 from pathlib import Path
 import time
 import xarray as xr
@@ -53,9 +54,9 @@ print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 print("\n" + "="*60)
 print("Loading pre-filtered fields and sorted density...")
 
-filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.zarr"))
 t0 = time.time()
-ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
+ds_filt = xr.open_zarr(filtered_filename)
 filter_scales = ds_filt.filter_scale.values
 filtered_dimensions = ["x_caa", "z_aac"]
 
@@ -66,9 +67,9 @@ print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.zarr"))
 t0 = time.time()
-ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+ds_sorted = xr.open_zarr(sorted_density_filename)
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
@@ -80,11 +81,11 @@ t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
-full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + f"_full_local_pes_checkpoint{ref_suffix}.nc")
+full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + f"_full_local_pes_checkpoint{ref_suffix}.zarr")
 if full_local_pes_checkpoint.exists():
     print(f"  Loading full_local_pes from checkpoint: {full_local_pes_checkpoint.name}")
     t0 = time.time()
-    full_local_pes = xr.open_dataset(str(full_local_pes_checkpoint), decode_times=False).chunk({"time": 1})
+    full_local_pes = xr.open_zarr(str(full_local_pes_checkpoint))
     print(f"  full_local_pes loaded  ({time.time()-t0:.1f}s)")
 else:
     t0 = time.time()
@@ -93,12 +94,13 @@ else:
     print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
     print(f"  Saving full_local_pes checkpoint...")
     t0 = time.time()
-    with ProgressBar(minimum=5, dt=5):
-        full_local_pes.to_netcdf(str(full_local_pes_checkpoint))
+    full_local_pes = full_local_pes.chunk({d: (1 if d == "time" else -1) for d in full_local_pes.dims})
+    with ProgressBar():
+        full_local_pes.to_zarr(str(full_local_pes_checkpoint), mode="w")
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
     del full_local_pes
     gc.collect()
-    full_local_pes = xr.open_dataset(str(full_local_pes_checkpoint), decode_times=False).chunk({"time": 1})
+    full_local_pes = xr.open_zarr(str(full_local_pes_checkpoint))
     print(f"  full_local_pes reloaded lazily")
 #---
 
@@ -108,11 +110,11 @@ print("Calculating budget terms for each filter scale...")
 
 energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
 
-ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
-ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
+ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.zarr"))
+ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.zarr"))
 ke_budget = xr.merge([
-    xr.open_dataset(ke_fields_filename,     decode_times=False).chunk({"time": 1}),
-    xr.open_dataset(ke_integrated_filename, decode_times=False).chunk({"time": 1}),
+    xr.open_zarr(ke_fields_filename),
+    xr.open_zarr(ke_integrated_filename),
 ])
 print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}")
 
@@ -132,12 +134,12 @@ budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
 
 for ℓ in filter_scales:
-    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{ref_suffix}.zarr")
     checkpoint_files.append(checkpoint_path)
 
     if checkpoint_path.exists():
         print(f"\n--- filter_scale = {ℓ:.4f} (loading from checkpoint) ---")
-        budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
+        budget_list.append(xr.open_zarr(str(checkpoint_path)))
         continue
 
     print(f"\n--- filter_scale = {ℓ:.4f} ---")
@@ -231,8 +233,9 @@ for ℓ in filter_scales:
 
     print(f"  Saving checkpoint...")
     t0 = time.time()
-    with ProgressBar(minimum=5, dt=5):
-        budget_ℓ.to_netcdf(str(checkpoint_path))
+    budget_ℓ = budget_ℓ.chunk({d: (1 if d == "time" else -1) for d in budget_ℓ.dims})
+    with ProgressBar():
+        budget_ℓ.to_zarr(str(checkpoint_path), mode="w")
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
 
     # Free memory before the next iteration
@@ -243,7 +246,7 @@ for ℓ in filter_scales:
     del Π_A_ℓ, int_Π_A_ℓ, residual
     gc.collect()
 
-    budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
+    budget_list.append(xr.open_zarr(str(checkpoint_path)))
 
 sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
                                                                dims="filter_scale",
@@ -261,21 +264,22 @@ print("Saving results...")
 integrated_vars = [v for v in sfs_ape_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
 local_vars      = [v for v in sfs_ape_budget_terms.data_vars if v not in integrated_vars]
 
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_fields{ref_suffix}.nc"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
+sfs_ape_budget_terms = sfs_ape_budget_terms.chunk({d: (1 if d == "time" else -1) for d in sfs_ape_budget_terms.dims})
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_fields{ref_suffix}.zarr"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.zarr"))
 
 print("  Saving local fields...")
-with ProgressBar(minimum=5, dt=5):
-    sfs_ape_budget_terms[local_vars].to_netcdf(fields_filename)
+with ProgressBar():
+    sfs_ape_budget_terms[local_vars].to_zarr(fields_filename, mode="w")
 print(f"  Fields saved to:     {fields_filename}")
 
 print("  Saving integrated timeseries...")
-with ProgressBar(minimum=5, dt=5):
-    sfs_ape_budget_terms[integrated_vars].to_netcdf(integrated_filename)
+with ProgressBar():
+    sfs_ape_budget_terms[integrated_vars].to_zarr(integrated_filename, mode="w")
 print(f"  Integrated saved to: {integrated_filename}")
 
 print("\nDeleting intermediate checkpoint files...")
 for f in checkpoint_files:
-    f.unlink(missing_ok=True)
+    shutil.rmtree(f, ignore_errors=True)
     print(f"  Deleted: {f.name}")
 #---
