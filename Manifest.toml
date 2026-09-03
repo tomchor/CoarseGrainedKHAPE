@@ -1401,9 +1401,9 @@ version = "0.110.20"
 
 [[deps.Oceanostics]]
 deps = ["Crayons", "DocStringExtensions", "Oceananigans", "Printf", "SeawaterPolynomials"]
-git-tree-sha1 = "fccacb2d69ce14e739769d4564ebae7ee0b6fe82"
+git-tree-sha1 = "ed9ffb898d6a01d3afa8a55cfdd7050ed8120b96"
 uuid = "d0ccf422-c8fb-49b5-a76d-74acdde946ac"
-version = "0.20.1"
+version = "0.21.0"
 
 [[deps.OffsetArrays]]
 git-tree-sha1 = "117432e406b5c023f665fa73dc26e79ec3630151"
