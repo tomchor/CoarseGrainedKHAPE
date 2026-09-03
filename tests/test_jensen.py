@@ -23,7 +23,11 @@ of either sign. Both halves are checked here, on a stratification displaced by a
     nothing else, and it would fail if the filter were ever narrowed to the horizontal — which would
     change what the sub-filter budget means and should not pass quietly.
 
-Self-contained: no simulation or post-processing output needed.
+The synthetic tests need no simulation or post-processing output. The last test does: it applies the
+same bound to the simulation's own Eₐˢ (`E_as_ℓ<ℓ>`, written under --save_sorted with the x-z filter of
+`matched_filter`) and asserts that no cell is negative at any time. By the argument above it is
+expected to fail. It is kept so that CI reports how far below zero the online field goes and over what
+fraction of the domain, rather than leaving that to the eye. It skips when the output is absent.
 """
 
 import sys
@@ -101,12 +105,14 @@ def subfilter_ape(synthetic, ell, dims):
 
 
 def report(Eas, label):
-    """min(Eₐˢ)/rms(Eₐˢ), printed with the raw numbers behind it."""
-    values = Eas.values.ravel()
-    minimum, rms = float(values.min()), float(np.sqrt(np.mean(values**2)))
+    """min(Eₐˢ)/rms(Eₐˢ), printed with the raw numbers behind it. Reduced through xarray in one pass, so a
+    lazily opened simulation field is streamed rather than loaded whole."""
+    stats = xr.Dataset(dict(minimum=Eas.min(), maximum=Eas.max(), mean_square=(Eas**2).mean(),
+                            frac_neg=(Eas < 0).mean(), frac_pos=(Eas > 0).mean())).compute()
+    minimum, maximum, rms = float(stats.minimum), float(stats.maximum), float(np.sqrt(stats.mean_square))
     relative = minimum / rms
-    print(f"  {label:<22}  min={minimum:+.4e}  rms={rms:.4e}  min/rms={relative:+.3e}  "
-          f"frac(<0)={float((values < 0).mean()):.3e}")
+    print(f"  {label:<22}  min={minimum:+.4e}  max={maximum:+.4e}  rms={rms:.4e}  min/rms={relative:+.3e}  "
+          f"frac(<0)={float(stats.frac_neg):.3e}  frac(>0)={float(stats.frac_pos):.3e}")
     return relative
 #---
 
@@ -133,4 +139,33 @@ def test_vertical_filtering_breaks_the_jensen_bound(synthetic, cells):
                                         f"Either the filter no longer acts in z, in which case Eₐˢ has a sign and "
                                         f"the budget's interpretation changes, or the synthetic field lost its "
                                         f"vertical structure.")
+#---
+
+#+++ Online sub-filter APE (simulation output, --save_sorted)
+# The simulation's Eₐˢ at each online filter scale: `E_as_ℓ<ℓ>`, Oceanostics' SubFilterAvailablePotentialEnergy
+# built with `matched_filter`, which acts in x and z (dims=(1, 3)). By the argument in the module docstring the
+# field therefore has no fixed sign, and the assertion below is expected to fail. It is held to the same
+# roundoff tolerance as the horizontal-filter test because the claim under test is the strict one: not one
+# cell, at any time, sits below zero. `report` prints max and frac(>0) as well, so the log shows both sides.
+SIM_OUTPUT = Path(__file__).resolve().parent.parent / "output" / "khi_Nz512_Ri0.10.nc"
+ONLINE_FILTER_SCALES = [1, 7]   # the simulation's --filter_ls, which CI leaves at its default
+
+
+@pytest.fixture(scope="module")
+def sim_output():
+    if not SIM_OUTPUT.exists():
+        pytest.skip(f"Simulation output not found: {SIM_OUTPUT}")
+    return xr.open_dataset(SIM_OUTPUT, decode_times=False, chunks={"time": 1})
+
+
+@pytest.mark.parametrize("ell", ONLINE_FILTER_SCALES)
+def test_online_sfs_ape_has_no_negative_values(sim_output, ell):
+    """The simulation's own Eₐˢ is nowhere negative. Expected to fail: its filter also acts in z."""
+    var = f"E_as_ℓ{ell}"
+    if var not in sim_output:
+        pytest.skip(f"'{var}' not in simulation output: the run did not use --save_sorted, or ℓ={ell} is not among its --filter_ls")
+    print(f"\nJensen bound, online x-z filter  (l={ell})")
+    relative = report(sim_output[var], f"{var} (online)")
+    assert relative > -JENSEN_TOL, (f"The online Eₐˢ at ℓ={ell} has negative values: min = {relative:.3e} x rms, tolerance is "
+                                    f"{-JENSEN_TOL:.0e} x rms. The module docstring explains why this is expected.")
 #---
