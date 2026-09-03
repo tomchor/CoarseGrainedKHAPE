@@ -26,8 +26,9 @@ of either sign. Both halves are checked here, on a stratification displaced by a
 The synthetic tests need no simulation or post-processing output. The last test does: it applies the
 same bound to the simulation's own Eₐˢ (`E_as_ℓ<ℓ>`, written under --save_sorted with the x-z filter of
 `matched_filter`) and asserts that no cell is negative at any time. By the argument above it is
-expected to fail. It is kept so that CI reports how far below zero the online field goes and over what
-fraction of the domain, rather than leaving that to the eye. It skips when the output is absent.
+expected to fail, and it is marked xfail (strict) so that CI stays green while it does, still prints how
+far below zero the online field goes and over what fraction of the domain, and turns red if the test
+ever passes, at which point the mark should come off. It skips when the output is absent.
 """
 
 import sys
@@ -144,7 +145,7 @@ def test_vertical_filtering_breaks_the_jensen_bound(synthetic, cells):
 #+++ Online sub-filter APE (simulation output, --save_sorted)
 # The simulation's Eₐˢ at each online filter scale: `E_as_ℓ<ℓ>`, Oceanostics' SubFilterAvailablePotentialEnergy
 # built with `matched_filter`, which acts in x and z (dims=(1, 3)). By the argument in the module docstring the
-# field therefore has no fixed sign, and the assertion below is expected to fail. It is held to the same
+# field therefore has no fixed sign, and the assertion below is expected to fail, hence the xfail mark. It is held to the same
 # roundoff tolerance as the horizontal-filter test because the claim under test is the strict one: not one
 # cell, at any time, sits below zero. `report` prints max and frac(>0) as well, so the log shows both sides.
 SIM_OUTPUT = Path(__file__).resolve().parent.parent / "output" / "khi_Nz512_Ri0.10.nc"
@@ -158,6 +159,7 @@ def sim_output():
     return xr.open_dataset(SIM_OUTPUT, decode_times=False, chunks={"time": 1})
 
 
+@pytest.mark.xfail(strict=True, reason="Eₐˢ has no fixed sign under a filter that acts in z (module docstring); drop the mark once it does")
 @pytest.mark.parametrize("ell", ONLINE_FILTER_SCALES)
 def test_online_sfs_ape_has_no_negative_values(sim_output, ell):
     """The simulation's own Eₐˢ is nowhere negative. Expected to fail: its filter also acts in z."""
