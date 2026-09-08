@@ -73,7 +73,7 @@ let s = ArgParseSettings()
             default = 0.05
 
         "--filter_ls"
-            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields, Πₖ, ε_Kˢ, and Π_A/ε_Aˢ under --save_sorted). The offline budget pipeline's --filter-scales must be a subset of these (default: 1 7)"
+            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields and every sub-filter KE/APE budget term: Πₖ, ε_Kˢ, Π_A, ε_Aˢ, τ(w,b_r), Rˢ, and the tendencies). The offline budget pipeline's --filter-scales must be a subset of these (default: 1 7)"
             arg_type = Int
             nargs = '+'
             default = [1, 7]
@@ -83,7 +83,7 @@ let s = ArgParseSettings()
             action = :store_true
 
         "--save_sorted"
-            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), the local APE Eₐ, and the cross-scale APE flux Π_A with the sub-filter APE dissipation ε_Aˢ at each online filter scale. Adds a few 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
+            help = "Also output the Winters et al. (1995) sorted reference *state* (validation only): the reference height z✶ under each of the three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), and the local APE Eₐ. Adds a few 3D fields, the column's own grid, and a second full-domain sort per output, so off by default. NOTE: the sub-filter APE budget terms (Π_A, ε_Aˢ, τ(w,b_r), Rˢ, E_aˢ and their tendencies) are written by default and no longer require this flag."
             action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
@@ -319,100 +319,105 @@ end
 ke_transfer_fields = (; _ke_pairs...)
 #---
 
-#+++ Online Winters et al. (1995) sorted reference state  (Oceanostics)
-# Sorting the buoyancy field adiabatically into its minimum-PE state assigns every parcel a reference
-# height z✶. Offline this is done in Python by 02_sort_density.py (an argsort of the whole field per
-# timestep, held in host RAM and written out at 2× the raw field size); done here it is one GPU sort
-# per output. The three methods describe the same reference state and agree on every volume integral,
-# but differ in where they put cells of *equal* buoyancy and on what grid they answer:
+#+++ Online sub-filter APE budget terms  (Oceanostics)
+# The Winters et al. (1995) sort assigns every parcel a reference height z✶. Every sub-filter APE budget
+# term below is measured against one shared reference profile — the VerticalSort column — handed to a
+# `ProfileLookup` so every filter scale reuses that single GPU sort (offline this is 02_sort_density.py, an
+# argsort of the whole field per timestep held in host RAM; here it is one GPU sort per output). Together
+# with the KE terms above these are every term of both online sub-filter budgets, so inv10 can check closure
+# with no offline pipeline at all — which is why they are written **by default**. They are all model-grid, so
+# they go in the main (single-grid) 3D file; the pure-validation sorted reference *state* (z✶ under each
+# method, the column profile b✶, the local APE Eₐ) is heavier — it adds the column's own grid and a second
+# full-domain sort — and stays behind --save_sorted below.
+#
+# Sub-filter APE dissipation ε_Aˢ = filter(ε_A) - ε_Aˡ (the diffusive sink) is built from its two halves
+# against the shared profile — hence the ProfileLookup. The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides
+# along on the same filtered reference state, sharing the filter and column and adding no sort; both are 2D
+# x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K. E_as is the sub-filter APE density (the ½τⁱⁱ
+# analogue the APE budget is of), whose tendency dEas_dt closes against the rest. The reference profile's own
+# time derivative ∂ₜb✶ is shared by every Rˢ: a TimeDerivative advances whenever it is evaluated, and R is
+# fetched only when the writer actuates, so ∂ₜb✶ follows the writer's schedule with no callback (the R
+# outputs are deferred — see online_diagnostics.jl — so the writer evaluates them when a record opens and
+# once more on the next iteration, the written difference spanning that single timestep, like the other
+# tendencies).
+z✶_1dsort = reference_height(model, method=VerticalSort())   # the sorted column: the shared reference profile
+lookup    = ProfileLookup(z✶_1dsort)
+∂ₜb✶      = TimeDerivative(reference_buoyancy(z✶_1dsort), model)
+
+# R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
+z✶_lookup = reference_height(model, method=lookup)
+R_full    = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
+
+_ape_pairs = Pair{Symbol, Any}[]
+for ℓ in filter_ℓs
+    gf = matched_filter(ℓ)
+    ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, gf; method=lookup)
+    Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf; dims=(1, 3), method=lookup)
+    E_as = SubFilterAvailablePotentialEnergy(model, gf; method=lookup)
+    wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
+
+    # Rˢ = filter(R) - Rˡ, both measured against the same shared profile
+    z✶ˡ = reference_height(Field(gf(b)); method=lookup)
+    R_l = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶ˡ)
+    R_s = Field(gf(R_full)) - R_l
+
+    push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")        => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
+                      Symbol("Π_A_ℓ$(ℓ)")         => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
+                      Symbol("E_as_ℓ$(ℓ)")        => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
+                      Symbol("wb_rs_ℓ$(ℓ)")       => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
+                      Symbol("R_s_ℓ$(ℓ)")         => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
+                      Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
+                      Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
+end
+sfs_ape_fields = (; _ape_pairs...)
+
+# The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the panels
+# animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl. All are
+# model-grid, so the 2D file stays single-grid.
+twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
+#---
+
+#+++ Online Winters et al. (1995) sorted reference state  (Oceanostics; --save_sorted, validation only)
+# The reference *state* itself — z✶ under each of the three Oceanostics sorting methods, the sorted column
+# profile b✶(z✶), and the local APE Eₐ — is not a budget term; it is what inv06/inv07 compare online vs
+# offline. It adds a few 3D fields, the column's own grid, and a second full-domain sort, so it stays behind
+# --save_sorted. The three methods describe the same reference state and agree on every volume integral, but
+# differ in where they put cells of *equal* buoyancy and on what grid they answer:
 #   ThreeDimensionalSort  z✶ on the model grid; tied cells take consecutive slots (z✶ spreads over a cell)
 #   HeavisideIntegral     z✶ on the model grid; tied cells share their layer's mid-height (Winters eq. 11)
 #   VerticalSort          the sorted column itself, on a 1×1×N grid → the reference profile b✶(z✶)
-# All three are emitted so postprocessing/validation/inv06_compare_sorted_profiles.py can compare them
-# against each other and against the offline sort. Note the offline pipeline sorts the *z-padded* domain
-# (load_dataset_and_grid doubles the height with edge values), so the two do not sort the same field
-# near the top and bottom boundaries — quantifying that is part of what inv06 checks.
-#
-# Only the column is a reference *profile* as written. For the two model-grid methods `reference_buoyancy`
-# is the model's own `b`, which is already an output, so their profiles are recovered by pairing z✶ with b
-# and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
+# inv06_compare_sorted_profiles.py compares them against each other and the offline sort. Note the offline
+# pipeline sorts the *z-padded* domain (load_dataset_and_grid doubles the height with edge values), so the
+# two do not sort the same field near the boundaries — quantifying that is part of what inv06 checks. For the
+# two model-grid methods `reference_buoyancy` is the model's own `b` (already an output), so their profiles
+# are recovered by pairing z✶ with b and ordering by z✶, as the lock_release example upstream does.
 sorted_fields = NamedTuple()
-twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
 
-
-    # The column lives on its own 1×1×N grid (N = Nx·Ny·Nz), which a single NetCDFWriter handles
-    # alongside the model grid, as the lock_release example upstream does. Holding two grids does make
-    # the writer disambiguate: every dimension gets a suffix (z_aac → z_aac_grid1 for the model grid,
-    # _grid2 for the column) and the grid metadata groups get a matching prefix. The offline pipeline
-    # is written against the plain names, so `load_dataset_and_grid` strips the model grid's suffix at
-    # load time (`strip_grid_suffix` in postprocessing/src/aux00_utils.py) and everything downstream
-    # is unaffected; the column's variables keep their own suffix and are read by inv06.
-    z✶_1dsort = reference_height(model, method=VerticalSort())
+    # The column lives on its own 1×1×N grid (N = Nx·Ny·Nz), which a single NetCDFWriter handles alongside
+    # the model grid, as the lock_release example upstream does. Holding two grids makes the writer
+    # disambiguate: every dimension gets a suffix (z_aac → z_aac_grid1 for the model grid, _grid2 for the
+    # column) and the grid metadata groups get a matching prefix. The offline pipeline is written against the
+    # plain names, so `load_dataset_and_grid` strips the model grid's suffix at load time (`strip_grid_suffix`
+    # in postprocessing/src/aux00_utils.py) and everything downstream is unaffected; the column's variables
+    # keep their own suffix and are read by inv06. (z✶_1dsort is computed above for the budget lookup; here it
+    # is additionally written out.)
     b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
 
-    # Online local available potential energy (Oceanostics PR #274). AvailablePotentialEnergy now
-    # computes the Holliday & McIntyre (1981) local APE density Eₐ = ∫_{z✶}^{z}[b✶(z̃) - b] dz̃, the same
-    # positive-definite integral the offline pipeline builds in local_potential_energies_timeseries
-    # (its `ape` field): with b = g(ρ₀-ρ)/ρ₀ the two are identical, per unit mass (m² s⁻²), no ρ₀/sign
-    # conversion. Reuse the ThreeDimensionalSort z✶ above so the sort is shared, not repeated. Eₐ (the
-    # local field) is validated against the offline `ape` by inv07; ∫Eₐ and ∫E_b give the online
-    # TPE = BPE + APE split, which ∫pe (already written) closes. E_b's local field is the trivial -bz✶,
-    # so only its integral is emitted.
+    # Online local available potential energy (Oceanostics PR #274). AvailablePotentialEnergy computes the
+    # Holliday & McIntyre (1981) local APE density Eₐ = ∫_{z✶}^{z}[b✶(z̃) - b] dz̃, the same positive-definite
+    # integral the offline pipeline builds in local_potential_energies_timeseries (its `ape` field): with
+    # b = g(ρ₀-ρ)/ρ₀ the two are identical, per unit mass (m² s⁻²), no ρ₀/sign conversion. Reuse the
+    # ThreeDimensionalSort z✶ so the sort is shared. Eₐ is validated against the offline `ape` by inv07; ∫Eₐ
+    # and ∫E_b give the online TPE = BPE + APE split, which ∫pe (already written) closes. E_b's local field is
+    # the trivial -bz✶, so only its integral is emitted.
     E_a = AvailablePotentialEnergy(model, z✶_3dsort)
     ∫E_a = Integral(E_a)
     ∫E_b = Integral(BackgroundPotentialEnergy(model, z✶_3dsort))
 
-    # Sub-filter APE dissipation ε_Aˢ = filter(ε_A) - ε_Aˡ, the diffusive sink of the sub-filter APE
-    # budget, at each online filter scale. Its two halves are built internally against one shared
-    # reference profile — hence the `ProfileLookup`, handed the VerticalSort column above so every
-    # scale shares that one sort.
-    # The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides along: it is measured against the same
-    # filtered reference state ε_Aˢ uses, so it shares the filter and the column and adds no sort. Both
-    # are 2D x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K.
-    # The reference profile's own time derivative, shared by every R below. A TimeDerivative advances
-    # whenever it is evaluated, and R is evaluated only when the writer fetches it, so ∂ₜb✶ follows the
-    # writer's schedule with no callback: the R outputs are deferred (see online_diagnostics.jl), so the
-    # writer evaluates them when a record opens and once more on the following iteration, and the
-    # difference written spans that single timestep, like the other tendencies.
-    lookup = ProfileLookup(z✶_1dsort)
-    ∂ₜb✶ = TimeDerivative(reference_buoyancy(z✶_1dsort), model)
-
-    # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
-    z✶_lookup = reference_height(model, method=lookup)
-    R_full = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
-
-    _ape_pairs = Pair{Symbol, Any}[]
-    for ℓ in filter_ℓs
-        gf = matched_filter(ℓ)
-        ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, gf; method=lookup)
-        Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf; dims=(1, 3), method=lookup)
-        E_as = SubFilterAvailablePotentialEnergy(model, gf; method=lookup)
-        wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
-
-        # Rˢ = filter(R) - Rˡ, both measured against the same shared profile
-        z✶ˡ = reference_height(Field(gf(b)); method=lookup)
-        R_l = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶ˡ)
-        R_s = Field(gf(R_full)) - R_l
-
-        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")        => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
-                          Symbol("Π_A_ℓ$(ℓ)")         => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
-                          Symbol("E_as_ℓ$(ℓ)")        => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
-                          Symbol("wb_rs_ℓ$(ℓ)")       => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
-                          Symbol("R_s_ℓ$(ℓ)")         => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
-                          Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
-                          Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
-    end
-    sfs_ape_fields = (; _ape_pairs...)
-
-    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, sfs_ape_fields...)
-
-    # The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the
-    # panels animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl.
-    # All are model-grid, so the 2D file stays single-grid.
-    twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b)
 end
 #---
 
@@ -428,9 +433,10 @@ if !(model.closure isa ScalarDiffusivity)
     outputs = (; outputs..., ν, κ)
 end
 
-# The model-grid z✶ fields go in the 3D file only; the 2D writer below slices with `indices` for a
-# lightweight x–z animation and has no use for them.
-simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_fields...),
+# The sub-filter APE budget fields (always) and the validation sorted-state z✶ fields (--save_sorted) go in
+# the 3D file only; the 2D writer below slices with `indices` for a lightweight x–z animation and gets the
+# budget fields via `twod_extra` instead.
+simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sfs_ape_fields..., sorted_fields...),
                                                   schedule = ConsecutiveIterations(TimeInterval(2)),
                                                   filename = output_filename,
                                                   array_type = Array{Float64},
