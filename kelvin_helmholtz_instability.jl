@@ -248,7 +248,7 @@ u_center = @at (Center, Center, Center) u
 v_center = @at (Center, Center, Center) v
 w_center = @at (Center, Center, Center) w
 
-Ri_field = FlowDiagnostics.RichardsonNumber(model)
+Ri_field = FlowDiagnostics.GradientRichardsonNumber(model)
 S_field  = FlowDiagnostics.StrainRateTensorModulus(model)
 
 ρ₀ = 1025 # kg/ m^3
@@ -392,6 +392,7 @@ twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fiel
 # two model-grid methods `reference_buoyancy` is the model's own `b` (already an output), so their profiles
 # are recovered by pairing z✶ with b and ordering by z✶, as the lock_release example upstream does.
 sorted_fields = NamedTuple()
+twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
