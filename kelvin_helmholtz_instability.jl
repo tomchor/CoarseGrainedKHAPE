@@ -12,6 +12,9 @@ using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
+using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
+using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
+      FilteredAvailablePotentialEnergyDisplacementPotential, FilteredAvailablePotentialEnergyDissipationRate
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
@@ -291,6 +294,28 @@ function matched_filter(ℓ)
     return GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))
 end
 
+# The vertical marginal of that same Gaussian, for filtering the sorted column into ⟨b✶⟩ (see the
+# filtered-reference block under --save_sorted). The column is a 1×1×N grid spanning Lz uniformly, so a
+# filter carrying the *physical* σ convolves in true height — true only because this model grid is
+# uniform in z. On a stretched grid the column's slot heights vary (slot k is ΔV_k/(Lx·Ly)) while its
+# grid stays uniform, so the convolution would silently run in index space; ⟨b✶⟩ would then have to be
+# built on the model grid instead. Same restriction the offline `filtered_reference_profile` carries.
+# Oceanostics wraps every composed sub-filter expression in a KernelFunctionOperation carrying a trivial
+# passthrough kernel (see `subfilter_ape_ccc` and friends upstream). That is not cosmetic: a writer is
+# specialised on the type of its whole output NamedTuple, and an unwrapped `Field(gf(Field(a))) - b` is a
+# deep BinaryOperation nest. Handing a writer several of those sent LLVM's instruction selector quadratic
+# (DAGCombiner::CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation for >45 min
+# at Nz=32. Wrapping collapses each term to one flat KernelFunctionOperation, as the built-in ones already are.
+@inline _passthrough_ccc(i, j, k, grid, a) = @inbounds a[i, j, k]
+flatten(op) = KernelFunctionOperation{Center, Center, Center}(_passthrough_ccc, grid, op)
+
+_column_Δz() = grid.Lz / (grid.Nx * grid.Ny * grid.Nz)
+function column_filter(ℓ)
+    σ = _FWHM_to_σ(ℓ)
+    N = 2 * max(1, floor(Int, 4σ / _column_Δz() + 0.5)) + 1   # truncate at 4σ, matching scipy
+    return GaussianFilter(; dims=(3,), σ, boundary=:edge, N)
+end
+
 _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
     gf = matched_filter(ℓ)
@@ -384,7 +409,8 @@ if save_sorted
     z✶_lookup = reference_height(model, method=lookup)
     R_full = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
 
-    _ape_pairs = Pair{Symbol, Any}[]
+    _ape_pairs  = Pair{Symbol, Any}[]
+    _fref_pairs = Pair{Symbol, Any}[]   # the filtered-reference set, kept out of the 2D writer
     for ℓ in filter_ℓs
         gf = matched_filter(ℓ)
         ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, gf; method=lookup)
@@ -397,6 +423,40 @@ if save_sorted
         R_l = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶ˡ)
         R_s = Field(gf(R_full)) - R_l
 
+        # Filtered-reference scale decomposition (Wenegrat, Chor & Barkan Eqs. 2.3-2.5, 2.19-2.22). The
+        # terms above measure the resolved reservoir against the unfiltered b✶, which is the g_z = δ(z)
+        # horizontal-filter limit: with a kernel that has vertical extent a fluid at rest still carries APE
+        # against b✶, so the resolved reservoir does not vanish at rest and the remainder E_as goes negative
+        # (that is what test_jensen.py records). Measured instead against ⟨b✶⟩ — the rest state as the filter
+        # sees it — both reservoirs are non-negative and both vanish at rest, for any kernel.
+        #
+        # Nothing here needs a new Oceanostics diagnostic: ProfileLookup takes an external (b✶, z✶) pair,
+        # refreshes it on every compute! when it is a Field, and skips the O(N log N) sort; and the
+        # two-argument constructors let the two halves of each sub-filter quantity carry *different*
+        # reference profiles, composed here exactly as R_s already is.
+        b✶_fref  = Field(column_filter(ℓ)(reference_buoyancy(z✶_1dsort)))    # ⟨b✶⟩, recomputed per compute!
+        lookup_f = ProfileLookup(b✶_fref, z✶_1dsort)                          # heights unchanged; only b✶ filtered
+        z✶ˡ_fref = reference_height(Field(gf(b)); method=lookup_f)            # z̃✶(b̄), the inverse of ⟨b✶⟩
+
+        L_fref    = FilteredAvailablePotentialEnergy(model, z✶ˡ_fref)                        # L̃ = Ẽ_A(b̄, z)
+        E_as_fref = flatten(Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup)))) - L_fref)  # S̃ = Ē_A - L̃
+        Υ_fref    = FilteredAvailablePotentialEnergyDisplacementPotential(model, z✶ˡ_fref)    # Υ̃ = z̃✶(b̄) - z
+        Π_A_fref  = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_fref; dims=(1, 3))  # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
+        ε_As_fref = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
+                            FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_fref))   # ε̃ˢ
+        # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
+        R_l_fref  = ReferenceTendencyCorrection(model, TimeDerivative(b✶_fref, model), z✶ˡ_fref)
+        R_s_fref  = flatten(Field(gf(R_full)) - R_l_fref)
+
+        push!(_fref_pairs, Symbol("L_fref_ℓ$(ℓ)")      => L_fref,    Symbol("L_fref_ℓ$(ℓ)_int")    => Integral(L_fref),
+                           Symbol("E_as_fref_ℓ$(ℓ)")   => E_as_fref, Symbol("E_as_fref_ℓ$(ℓ)_int") => Integral(E_as_fref),
+                           Symbol("Υ_fref_ℓ$(ℓ)")      => Υ_fref,
+                           Symbol("Π_A_fref_ℓ$(ℓ)")    => Π_A_fref,  Symbol("Π_A_fref_ℓ$(ℓ)_int")  => Integral(Π_A_fref),
+                           Symbol("ε_As_fref_ℓ$(ℓ)")   => ε_As_fref, Symbol("ε_As_fref_ℓ$(ℓ)_int") => Integral(ε_As_fref),
+                           Symbol("R_s_fref_ℓ$(ℓ)")    => R_s_fref,  Symbol("R_s_fref_ℓ$(ℓ)_int")  => Integral(R_s_fref),
+                           Symbol("dEas_fref_dt_ℓ$(ℓ)")     => TimeDerivative(E_as_fref, model),
+                           Symbol("dEas_fref_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as_fref), model))
+
         push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")        => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
                           Symbol("Π_A_ℓ$(ℓ)")         => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
                           Symbol("E_as_ℓ$(ℓ)")        => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
@@ -405,13 +465,22 @@ if save_sorted
                           Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
                           Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
     end
-    sfs_ape_fields = (; _ape_pairs...)
+    sfs_ape_fields      = (; _ape_pairs...)
+    sfs_ape_fref_fields = (; _fref_pairs...)
 
-    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, sfs_ape_fields...)
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b,
+                       sfs_ape_fields..., sfs_ape_fref_fields...)   # flat types now; see `flatten` above
 
     # The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the
     # panels animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl.
     # All are model-grid, so the 2D file stays single-grid.
+    #
+    # The filtered-reference set is deliberately NOT spliced in here. A writer is specialised on the type
+    # of its whole output NamedTuple, and each of these is a distinct, deeply nested KernelFunctionOperation
+    # /BinaryOperation type; adding them took this tuple from ~50 to ~76 heterogeneous entries and LLVM's
+    # instruction selector went quadratic on the resulting basic block (CombineToPostIndexedLoadStore ->
+    # hasPredecessorHelper), stalling compilation of this writer for >45 min at Nz=32. The panels animation
+    # has no use for them, so they ride in the 3D file only.
     twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
 end
 #---
