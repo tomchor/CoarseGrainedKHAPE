@@ -5,7 +5,8 @@ from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter
-from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple, calculate_ape_to_ke_exchange_term
+from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple,
+                                   calculate_ape_to_ke_exchange_term, filtered_reference_profile)
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
     calculate_sfs_ke_tendency,
@@ -17,12 +18,17 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Reference state the resolved scale is measured against, in the APE->KE conversion term. "
+                         "Must match what 03 and 05 are run with: 05 reads this script's exchange term, so a mismatch "
+                         "puts the conversion on a different reference from the rest of the APE budget.")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
+filtered_reference = args.reference == "filtered"
 #---
 
 #+++ Load data and grid
@@ -94,9 +100,14 @@ for ℓ in filter_scales:
     sfs_ke_density = sfs_stress_tensor_trace / 2
 
     print("  APE->KE exchange term...")
-    # b_r_l = -(g/ρ₀)(ρ̄ - ρ_ref): filtered density minus the unfiltered reference profile
-    # (cf. filter(b_r) = -(g/ρ₀)(ρ̄ - filter(ρ_ref)), which filters the reference too)
-    b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), ds_sorted.rho_sorted)
+    # b_r_l = -(g/ρ₀)(ρ̄ - ρ_ref), the filtered density against the resolved scale's own reference. Against
+    # ⟨ρ_*⟩ this is exactly filter(b_r) — ρ_*(z) depends on z alone, so the separable kernel reduces to its
+    # vertical marginal there — which makes the sub-filter half τ(w, b_r) of Eq. (2.21) and the resolved
+    # half w̄b̄_r of Eq. (2.19). Against the unfiltered ρ_* it is not, which is the horizontal-limit split.
+    # This term is read back by 05, so the two must be run with the same --reference.
+    ref_rho_sorted = (filtered_reference_profile(ds_sorted.rho_sorted, ds_sorted.dz_sorted, ℓ)
+                      if filtered_reference else ds_sorted.rho_sorted)
+    b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), ref_rho_sorted)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
         ds_full["uᵢ"].sel(i=3), # full w
         b_r,                    # relative buoyancy
