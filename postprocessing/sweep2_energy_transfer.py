@@ -15,6 +15,11 @@ parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE t
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
+                         "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
+                         "unfiltered ρ_*, the horizontal-filter limit. The sweep spans filter scales, so ⟨ρ_*⟩ is "
+                         "rebuilt at each one.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -22,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
+filtered_reference = args.reference == "filtered"
 n_workers = args.n_workers
 chunks = dict(time=1)
 ref_suffix = "_fixed_ref" if fixed_reference else ""
@@ -68,7 +74,8 @@ energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
                                             rho_sorted=rho_sorted,
                                             dz_sorted=dz_sorted,
-                                            n_workers=n_workers)
+                                            n_workers=n_workers,
+                                            filtered_reference=filtered_reference)
 print("\nDone!")
 #---
 

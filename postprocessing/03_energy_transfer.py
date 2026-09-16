@@ -15,6 +15,10 @@ parser = argparse.ArgumentParser(description="Calculate cross-scale APE transfer
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
+                         "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
+                         "unfiltered ρ_*, the horizontal-filter limit the pipeline used before.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -22,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
+filtered_reference = args.reference == "filtered"
 n_workers = args.n_workers
 #---
 
@@ -68,8 +73,13 @@ def online_name(var, ℓ):
 # The online field is an optimisation, not a requirement: --save_sorted is off by default, so a
 # production run may simply not have it, and the offline path has to keep working. Fall back rather
 # than fail, and say which path was taken so a silent switch is visible in the log.
+# The filtered reference is a third reason the online field cannot be used: Υˡ there inverts ⟨ρ_*⟩, while
+# the online Π_A is built against the unfiltered sort, so reading it would put the cross-scale flux on a
+# different reference state from every other term in the budget.
 online_pi_a = None
-if fixed_reference:
+if filtered_reference:
+    print("  Π_A: recomputing offline (filtered reference ⟨ρ_*⟩; the online field uses the unfiltered ρ_*)")
+elif fixed_reference:
     print("  Π_A: recomputing offline (fixed reference)")
 else:
     missing = [ℓ for ℓ in filter_scales if online_name("Π_A", ℓ) not in ds]
@@ -86,7 +96,8 @@ energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             dz_sorted=ds_sorted.dz_sorted,
                                             n_workers=n_workers,
                                             include_pi_k=False,
-                                            online_pi_a=online_pi_a)
+                                            online_pi_a=online_pi_a,
+                                            filtered_reference=filtered_reference)
 print("\nDone!")
 #---
 

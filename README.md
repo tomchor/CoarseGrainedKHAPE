@@ -28,6 +28,24 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 
 All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--filter-scales`, and `--n-workers`. Run any script with `--help` for its full argument list.
 
+### Scale decomposition (`--reference`)
+
+`03_energy_transfer.py`, `05_sfs_ape_budget.py` and `sweep2_energy_transfer.py` take `--reference {filtered,true}`, selecting the reference state the **resolved** reservoir is measured against:
+
+| Value | Reference | Valid for |
+|-------|-----------|-----------|
+| `filtered` (default) | the vertically filtered profile ⟨ρ_*⟩ | any kernel, including one with vertical extent |
+| `true` | the unfiltered ρ_* | horizontal kernels only (the `g_z = δ(z)` limit) |
+
+The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` reproduces the earlier behaviour and is kept for comparison. Note that `--reference filtered` forces the offline recompute of Π_A and ε_Aˢ, since the simulation's online versions are built against the unfiltered reference. See CLAUDE.md for the full account.
+
+`00_get_budgets.sh` forwards the flag:
+
+```bash
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference filtered
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference true
+```
+
 ## Setup
 
 Create the conda environment for Python post-processing:
