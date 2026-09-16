@@ -73,22 +73,22 @@ def online_name(var, ℓ):
 # The online field is an optimisation, not a requirement: --save_sorted is off by default, so a
 # production run may simply not have it, and the offline path has to keep working. Fall back rather
 # than fail, and say which path was taken so a silent switch is visible in the log.
-# The filtered reference is a third reason the online field cannot be used: Υˡ there inverts ⟨ρ_*⟩, while
-# the online Π_A is built against the unfiltered sort, so reading it would put the cross-scale flux on a
-# different reference state from every other term in the budget.
+# Each scale decomposition has its own online Π_A: `Π_A_ℓ<ℓ>` is built against the unfiltered ρ_*,
+# `Π_A_fref_ℓ<ℓ>` against ⟨ρ_*⟩ (its Υ̃ inverts the filtered profile), so read whichever matches
+# --reference. Falls back to the offline recompute when the simulation did not write it.
+_pi_a_var = "Π_A_fref" if filtered_reference else "Π_A"
 online_pi_a = None
-if filtered_reference:
-    print("  Π_A: recomputing offline (filtered reference ⟨ρ_*⟩; the online field uses the unfiltered ρ_*)")
-elif fixed_reference:
+if fixed_reference:
     print("  Π_A: recomputing offline (fixed reference)")
 else:
-    missing = [ℓ for ℓ in filter_scales if online_name("Π_A", ℓ) not in ds]
+    missing = [ℓ for ℓ in filter_scales if online_name(_pi_a_var, ℓ) not in ds]
     if missing:
-        print(f"  Π_A: recomputing offline (no online field for ℓ={missing}; the simulation was run "
-              f"without --save_sorted, or with a different --filter_ls)")
+        print(f"  Π_A: recomputing offline (no online {_pi_a_var} for ℓ={missing}; the simulation was run "
+              f"without --save_sorted, with a different --filter_ls, or before the online filtered-reference "
+              f"terms existed)")
     else:
-        online_pi_a = {ℓ: ds[online_name("Π_A", ℓ)] for ℓ in filter_scales}
-        print("  Π_A: reading the online fields (time-varying reference)")
+        online_pi_a = {ℓ: ds[online_name(_pi_a_var, ℓ)] for ℓ in filter_scales}
+        print(f"  Π_A: reading the online {_pi_a_var} fields (time-varying reference)")
 
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,

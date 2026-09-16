@@ -188,9 +188,14 @@ for ℓ in filter_scales:
     # profile makes it inconsistent with the other terms, and --save_sorted is off by default so a
     # production run may not have it at all. Fall back to the offline expression in either case, naming
     # the reason so a silent switch is visible in the log.
-    reason = ("filtered reference" if filtered_reference else
-              "fixed reference" if fixed_reference else
-              "no online field" if online_name("ε_As", ℓ) not in ds else None)
+    # Each scale decomposition has its own online ε_Aˢ: `ε_As_ℓ<ℓ>` is built against the unfiltered b✶,
+    # `ε_As_fref_ℓ<ℓ>` against ⟨b✶⟩, so the one to read is whichever matches --reference. Reading it is
+    # what makes the budget close: the offline `calculate_ape_dissipation` takes centred differences of a
+    # quantity quadratic in gradients, and measured against the online field that discretisation error
+    # accounts for essentially the whole offline residual (corr 0.995, ratio ~1 pointwise in time).
+    online_eps = online_name("ε_As_fref" if filtered_reference else "ε_As", ℓ)
+    reason = ("fixed reference" if fixed_reference else
+              "no online field" if online_eps not in ds else None)
     if reason is not None:
         t0 = time.time()
         sfs_ape_dissipation = calculate_sfs_ape_dissipation(
@@ -199,7 +204,8 @@ for ℓ in filter_scales:
             filtered_density=ds_filt_ℓ.ρ̄,)
         print(f"  sfs_ape_dissipation (offline, {reason})  ({time.time()-t0:.1f}s)")
     else:
-        sfs_ape_dissipation = ds[online_name("ε_As", ℓ)]
+        sfs_ape_dissipation = ds[online_eps]
+        print(f"  sfs_ape_dissipation: reading the online {online_eps}")
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
     ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
