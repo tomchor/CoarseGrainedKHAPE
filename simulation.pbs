@@ -26,7 +26,7 @@ echo $CUDA_VISIBLE_DEVICES
 NZ=${NZ:-1024}
 SAVE_TENSORS=${SAVE_TENSORS:-0}
 [ "$SAVE_TENSORS" = "1" ] && TENSOR_FLAG="--save_tensors" || TENSOR_FLAG=""
-SAVE_SORTED=${SAVE_SORTED:-0}
+SAVE_SORTED=${SAVE_SORTED:-1}   # on by default: 03/05 read the online Pi_A and eps_As from it
 [ "$SAVE_SORTED" = "1" ] && SORTED_FLAG="--save_sorted" || SORTED_FLAG=""
 
 export JULIA_DEPOT_PATH="$WORK/.julia"
