@@ -32,10 +32,6 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-export JULIA_DEPOT_PATH="$WORK/.julia"
-export JULIA_CPU_TARGET="generic"
-juliaup default 1.12
-
 time $PYTHON -u sweep1_filter_fields.py --filename output/${SIM}.nc --n-time-skip $N_TIME_SKIP 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

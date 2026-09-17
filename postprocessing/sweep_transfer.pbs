@@ -33,10 +33,6 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-export JULIA_DEPOT_PATH="$WORK/.julia"
-export JULIA_CPU_TARGET="generic"
-juliaup default 1.12
-
 time $PYTHON -u sweep2_energy_transfer.py --filename output/${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
 time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
