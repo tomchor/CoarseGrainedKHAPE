@@ -359,12 +359,35 @@ function coarse_column(ℓ)
     return coarse, n, M
 end
 
+# The column filter is Oceanostics' Gaussian in every respect except how the weights are carried, and it
+# is spelled out here rather than reused because that difference is fatal at this width. `GaussianFilterKernel`
+# stores its weights as an `NTuple` inside the kernel's *type* and fully unrolls the stencil loop, which is
+# the right design at the widths the x-z filter uses (tens) and pathological at ~8K: the tuple is passed
+# **by value** into CUDA's 32 KiB kernel parameter space, so a 8017-wide stencil is 62.6 KiB and the launch
+# fails outright ("Kernel invocation uses too much parameter memory", sm_80), and asking LLVM to unroll 8017
+# iterations is its own cost. Weights in a device array and a plain loop: the array costs 72 bytes as a
+# kernel parameter no matter how long it is, so the width ceiling goes away and K is an accuracy choice again.
+@inline function _gauss_column_ccc(i, j, k, coarse_grid, ψ, w, hw)
+    FT = eltype(coarse_grid)
+    s = zero(FT); w_sum = zero(FT)
+    Nz = size(coarse_grid, 3)
+    @inbounds for m = -hw:hw
+        kk = min(max(k + m, 1), Nz)    # edge extension, matching Oceanostics' boundary=:edge and scipy's :nearest
+        ω  = w[m + hw + 1]
+        s     += ω * ψ[1, 1, kk]
+        w_sum += ω
+    end
+    return s / w_sum
+end
+
 """The vertical marginal of the same Gaussian, on a coarse column of M levels (stencil ≈ 8K, not 8σN/Lz)."""
 function coarse_filter(ℓ, coarse)
-    σ = _FWHM_to_σ(ℓ)
-    Δ = grid.Lz / size(coarse, 3)
-    N = 2 * max(1, floor(Int, 4σ / Δ + 0.5)) + 1   # truncate at 4σ, matching scipy
-    return GaussianFilter(; dims=(3,), σ, boundary=:edge, N)
+    σ  = _FWHM_to_σ(ℓ)
+    Δ  = grid.Lz / size(coarse, 3)
+    hw = max(1, floor(Int, 4σ / Δ + 0.5))          # truncate at 4σ, matching scipy
+    FT = eltype(grid)
+    w  = on_architecture(architecture(grid), FT[exp(-(m * Δ)^2 / (2σ^2)) for m = -hw:hw])
+    return ψ -> KernelFunctionOperation{Center, Center, Center}(_gauss_column_ccc, coarse, ψ, w, hw)
 end
 
 _ke_pairs = Pair{Symbol, Any}[]
