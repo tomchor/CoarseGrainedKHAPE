@@ -64,7 +64,7 @@ function compute!(R::ReferenceTendencyField, time=nothing)
 
     # Ψ̇ at the slot faces: a cumulative integral up the column, closed off at the bottom by zero
     Ψface = s.workspace
-    @inbounds Ψface[1] = zero(eltype(Ψface))
+    fill!(view(Ψface, 1:1), zero(eltype(Ψface)))   # not Ψface[1] = 0: scalar setindex! is disallowed on a GPU array
     cumsum!(view(Ψface, 2:N+1), ∂ₜb✶ .* s.Δz✶)
 
     z✶ = vec(interior(s.z✶))
