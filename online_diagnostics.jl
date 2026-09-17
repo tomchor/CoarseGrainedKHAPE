@@ -17,10 +17,11 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.BuoyancyFormulations: Zᶜᶜᶜ
 using Oceananigans.Fields: Field, FieldStatus, compute_at!, interior, set_status!
 using Oceananigans.Grids: Center, Face, znode
+using Oceananigans.Utils: ConsecutiveIterations
 using Oceanostics.BackgroundPotentialEnergyEquation: SortedReferenceHeightField
 
 import Oceananigans.Fields: compute!
-import Oceananigans.OutputWriters: deferred_output
+import Oceananigans.Utils: actuates_next_iteration
 
 #+++ Reference-tendency correction R
 """
@@ -42,11 +43,12 @@ end
 
 const ReferenceTendencyField = Field{<:Any, <:Any, <:Any, <:ReferenceTendencyState}
 
-# R holds a TimeDerivative, so like a bare TimeDerivative it is only complete on the iteration after
-# the writer actuates. `deferred_output` recurses through fields and operations down to this operand,
-# so Rˢ = filter(R) - Rˡ and ∫Rˢ dV are deferred too: the writer evaluates them when a record opens
-# (opening the ∂ₜb✶ window) and again on the following iteration, writing the completed difference.
-deferred_output(::ReferenceTendencyState) = true
+# R holds a TimeDerivative, which advances only when it is *called*: reading it, `compute!` included,
+# leaves it at whatever its callback last computed. An output writer registers that callback itself for
+# each bare TimeDerivative among its outputs, but ∂ₜb✶ is not one — it sits inside this operand — so the
+# simulation registers it (see kelvin_helmholtz_instability.jl). Callbacks run before the writers within
+# a time step, so by the time Rˢ = filter(R) - Rˡ and ∫Rˢ dV are fetched, ∂ₜb✶ holds the difference
+# across the step just taken.
 
 "Ψ̇(ζ) = ∫_bottom^ζ ∂ₜb✶ dz̃, evaluated by locating ζ's slot in a uniformly spaced column."
 @inline function psi_dot(ζ, Ψface, ∂ₜb✶, z_bottom, Δz✶, N)
@@ -56,8 +58,7 @@ end
 
 function compute!(R::ReferenceTendencyField, time=nothing)
     s = R.operand
-    compute_at!(s.z✶, time)
-    compute_at!(s.∂ₜb✶, time)   # advances the TimeDerivative (a no-op when already at `time`)
+    compute_at!(s.z✶, time)   # ∂ₜb✶ is advanced by its own callback; computing it here would not
 
     ∂ₜb✶ = vec(interior(s.∂ₜb✶))
     N = length(∂ₜb✶)
@@ -120,5 +121,21 @@ function ReferenceTendencyCorrection(model, ∂ₜb✶, z✶::SortedReferenceHei
                                      z_bottom, Δz✶)
 
     return Field{Center, Center, Center}(grid; operand, status = FieldStatus())
+end
+#---
+
+#+++ Anticipating a ConsecutiveIterations actuation
+# Each `TimeDerivative` a writer holds is updated by a `Callback` on `PrecedingIterations(writer.schedule)`,
+# which actuates at the writer's actuation and at the iteration before it, so the written difference spans
+# one time step and no more. Anticipating that next actuation is `actuates_next_iteration`, which upstream
+# defines for `IterationInterval`, `TimeInterval` and `SpecifiedTimes`; every other schedule falls back to
+# actuating every iteration, which is never wrong but costs an evaluation per step. The 3D writer here is on
+# `ConsecutiveIterations(TimeInterval(2))` — the output pairs the offline pipeline differences — so without
+# this method every tendency, and with it the sorted column ∂ₜEₐˢ and R are built on, would be recomputed at
+# every time step rather than three times per output. `ConsecutiveIterations` actuates when its parent does
+# and for the `consecutive_iterations` iterations after, so both halves of its own test shift one ahead.
+function actuates_next_iteration(schedule::ConsecutiveIterations, clock, expected_max_time_step_growth)
+    actuates_next_iteration(schedule.parent, clock, expected_max_time_step_growth) && return true
+    return clock.iteration + 1 - schedule.consecutive_iterations <= schedule.previous_parent_actuation_iteration
 end
 #---

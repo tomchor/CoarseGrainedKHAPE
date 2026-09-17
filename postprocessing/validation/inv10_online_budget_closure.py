@@ -14,13 +14,12 @@ too and both residuals are reported side by side, which is the comparison that m
 budget is worth having only if it closes at least as well as the offline one.
 
 Every term is evaluated at the output time except the tendencies, which Oceananigans' `TimeDerivative`
-writes as the forward difference over the single timestep following the output, (aⁿ⁺¹ - aⁿ)/Δt labelled
-tⁿ: the writer opens the record, evaluates again one iteration later, and back-fills. Over one step the
-Δt/2 offset is negligible against the output interval. The same machinery covers Rˢ, whose ∂ₜb✶ is a
-TimeDerivative advanced whenever Rˢ is evaluated.
+writes as the backward difference over the single timestep preceding the output, (aⁿ - aⁿ⁻¹)/Δt labelled
+tⁿ: a callback updates the derivative at the iteration before the writer actuates and again at the
+actuation. Over one step the Δt/2 offset is negligible against the output interval. The same machinery
+covers Rˢ, whose ∂ₜb✶ the simulation gives a callback of its own.
 
-The first output pair spans the initialisation transient and is skipped; the last record of a run holds
-NaN for every deferred output (its window never completes) and is dropped too.
+The first output pair spans the initialisation transient and is skipped.
 """
 #+++ Imports
 import logging
@@ -82,9 +81,9 @@ ds = strip_grid_suffix(ds, model_grid_suffix(ds))
 # The writer runs on ConsecutiveIterations, so outputs come in pairs. The first pair is dropped: its
 # derivatives span the initialisation transient (∫Eₐˢ goes from zero to its working value within the
 # first fraction of a time unit), which is not a statement about the budget and would dominate an rms
-# over the run. The final record is dropped too: deferred outputs (the tendencies and Rˢ) are NaN
-# there, their differencing window never having completed before the run ended.
-ds = ds.isel(time=slice(args.skip, -1))
+# over the run. Every later record is a complete budget statement, the last one included: each tendency
+# is differenced backwards over the step before its own output, so nothing is left pending at the end.
+ds = ds.isel(time=slice(args.skip, None))
 
 BUDGETS = {
     "KE": dict(

@@ -335,11 +335,9 @@ ke_transfer_fields = (; _ke_pairs...)
 # along on the same filtered reference state, sharing the filter and column and adding no sort; both are 2D
 # x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K. E_as is the sub-filter APE density (the ½τⁱⁱ
 # analogue the APE budget is of), whose tendency dEas_dt closes against the rest. The reference profile's own
-# time derivative ∂ₜb✶ is shared by every Rˢ: a TimeDerivative advances whenever it is evaluated, and R is
-# fetched only when the writer actuates, so ∂ₜb✶ follows the writer's schedule with no callback (the R
-# outputs are deferred — see online_diagnostics.jl — so the writer evaluates them when a record opens and
-# once more on the next iteration, the written difference spanning that single timestep, like the other
-# tendencies).
+# time derivative ∂ₜb✶ is shared by every Rˢ. A TimeDerivative advances only when it is called, and a writer
+# calls only the ones it holds directly, so ∂ₜb✶ — buried in R's operand — gets its own callback where the
+# writers are built below, on the same schedule the writer would have given it.
 z✶_1dsort = reference_height(model, method=VerticalSort())   # the sorted column: the shared reference profile
 lookup    = ProfileLookup(z✶_1dsort)
 ∂ₜb✶      = TimeDerivative(reference_buoyancy(z✶_1dsort), model)
@@ -392,7 +390,6 @@ twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fiel
 # two model-grid methods `reference_buoyancy` is the model's own `b` (already an output), so their profiles
 # are recovered by pairing z✶ with b and ordering by z✶, as the lock_release example upstream does.
 sorted_fields = NamedTuple()
-twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
@@ -452,6 +449,13 @@ simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., two
                                                        indices = (:, 1, :),
                                                        global_attributes = params,
                                                        overwrite_files = true)
+
+# Every bare TimeDerivative among a writer's outputs gets a callback registered for it, on
+# `PrecedingIterations(writer.schedule)`: the derivative is updated at the writer's actuation and at the
+# iteration before, so the difference it writes spans one time step. ∂ₜb✶ is not among the outputs — it is
+# reached only through R's operand — so register the same callback for it here. Callbacks run before the
+# writers within a time step, so every Rˢ is fetched with ∂ₜb✶ already advanced.
+simulation.callbacks[:∂ₜb✶] = Callback(∂ₜb✶, PrecedingIterations(simulation.output_writers[:fields].schedule))
 
 @info "Output will be saved to: $(output_filename).nc"
 #---
