@@ -958,6 +958,21 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
 
     σ_slots = ℓ * _FWHM_TO_SIGMA / Δz0
 
+    # A frozen reference is the same profile at every output: `sorted_timeseries(fixed_reference=True)`
+    # sorts t=0 once and repeats that row. Filtering all of them would redo one convolution n_times over,
+    # and this convolution is the expensive part — its stencil grows with the column, so the cost goes as
+    # N². Filter the one distinct row and broadcast it back.
+    if rho_sorted.sizes.get("time", 1) > 1:
+        first = rho_sorted.isel(time=0)
+        if bool((rho_sorted == first).all()):
+            one = gaussian_filter1d(first.values, sigma=σ_slots, mode="nearest")
+            filtered = xr.zeros_like(rho_sorted) + xr.DataArray(one, dims=[z_sorted_name],
+                                                                coords={z_sorted_name: first[z_sorted_name]})
+            filtered.name = "⟨ρ_*⟩"
+            filtered.attrs.update(long_name="vertically filtered reference density profile",
+                                  filter_scale=float(ℓ), time_invariant=1)
+            return filtered
+
     filtered = xr.apply_ufunc(
         gaussian_filter1d, rho_sorted,
         input_core_dims=[[z_sorted_name]],
