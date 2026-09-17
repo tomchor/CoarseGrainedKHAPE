@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid
+from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
 
@@ -37,7 +37,9 @@ ref_suffix = "_fixed_ref" if fixed_reference else ""
 print("\n" + "="*60)
 print("Loading data and grid...")
 t0 = time.time()
-ds = load_dataset_and_grid(filename)
+# Pad exactly as 01 did, so the sort and the budgets see the grid the fields were filtered on.
+_filtered_fn = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn))
 ds = ds.chunk(chunks)
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
