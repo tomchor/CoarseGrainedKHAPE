@@ -89,13 +89,13 @@ end
 
 #+++ SFS budget panels animation (per filter scale), from the online 2D fields
 # Mirrors postprocessing/anim1_panels.py: 3×4 snapshot panels over the two integrated budgets, but
-# drawn entirely from the simulation's own outputs — no offline pipeline. Runs only when the run was
-# made with --save_sorted, which is what puts the sub-filter APE fields and b_r in the 2D file.
+# drawn entirely from the simulation's own outputs — no offline pipeline. The sub-filter APE fields and
+# b_r it needs are written to the 2D file by default (see the budget-terms block in the main script).
 ds_nc = NCDataset(plot_filepath, "r")
 panel_ℓs = sort([parse(Int, split(name, "_ℓ")[end]) for name in keys(ds_nc) if startswith(name, "wb_rs_ℓ") && !endswith(name, "_int")])
 
 if isempty(panel_ℓs)
-    @info "No sub-filter APE fields in $plot_filepath (run without --save_sorted); skipping the panels animation."
+    @info "No sub-filter APE fields in $plot_filepath; skipping the panels animation."
 else
     zlim = 3.8
     x  = ds_nc["x_caa"][:]
