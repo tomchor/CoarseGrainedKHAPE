@@ -6,6 +6,7 @@ using Random
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
+using Oceananigans.Grids: topology, znode
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
@@ -306,13 +307,63 @@ end
 # deep BinaryOperation nest. Handing a writer several of those sent LLVM's instruction selector quadratic
 # (DAGCombiner::CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation for >45 min
 # at Nz=32. Wrapping collapses each term to one flat KernelFunctionOperation, as the built-in ones already are.
+# Levels per σ on the grid ⟨b✶⟩ is filtered on; see `coarse_column`. Matches the offline
+# REFERENCE_FILTER_K in src/aux01_pe_functions.py.
+const REFERENCE_FILTER_K = 1000
+
 @inline _passthrough_ccc(i, j, k, grid, a) = @inbounds a[i, j, k]
 flatten(op) = KernelFunctionOperation{Center, Center, Center}(_passthrough_ccc, grid, op)
 
-_column_Δz() = grid.Lz / (grid.Nx * grid.Ny * grid.Nz)
-function column_filter(ℓ)
+# ⟨b✶⟩ is a Gaussian convolution of width σ, so it carries no structure below σ and filtering it at the
+# column's own resolution is wasted work: the column has one slot per grid cell, which oversamples the
+# result by ~400x at ℓ=1 and ~3000x at ℓ=7. Worse, the cost is quadratic -- N slots against a stencil
+# that itself grows with N, since σ in slot units is σN/Lz -- so at Nz=512 the two scales together cost
+# ~6e9 operations per output. Oceanostics' filter is a KernelAbstractions kernel written for GPUs, and on
+# CI's two CPU threads that measured ~3 hours of a 4h23m run.
+#
+# Instead, block-average the column onto REFERENCE_FILTER_K levels per σ, filter there, and hand that pair
+# straight to `ProfileLookup`, which takes a (b✶, z✶) of any length. Both grids are uniform, so a block
+# average is an exact area average -- the right resampling, since the column carries structure below the
+# coarse spacing (its tie runs among it) that point-sampling would alias.
+#
+# The lookup then runs at M-level rather than N-level resolution: at Nz=512, ℓ=7 that is δz̃✶ = 1.5e-3
+# against the column's 1.7e-4. Acceptable here -- ℓ=7 positivity sits at -1.2e-06 with room to spare, and
+# removing lookup quantisation entirely was measured to change the budget residual by 1.00x. If that ever
+# binds, the alternative is to interpolate ⟨b✶⟩ back onto the column's N heights, which keeps the full
+# lookup resolution at the price of a custom operand type with its own `compute!`.
+_column_N() = grid.Nx * grid.Ny * grid.Nz
+
+# One coarse cell is the mean of `n` consecutive column slots. The kernel is launched over the coarse
+# grid and reads the column field directly; both are 1×1×· so only k varies.
+@inline function _block_mean_ccc(i, j, k, coarse_grid, fine, n)
+    acc = zero(eltype(fine))
+    @inbounds for m in 1:n
+        acc += fine[1, 1, (k - 1) * n + m]
+    end
+    return acc / n
+end
+
+"""Coarse 1×1×M column and the block size that maps the sorted column onto it, for filter scale ℓ."""
+function coarse_column(ℓ)
+    N = _column_N()
     σ = _FWHM_to_σ(ℓ)
-    N = 2 * max(1, floor(Int, 4σ / _column_Δz() + 0.5)) + 1   # truncate at 4σ, matching scipy
+    M_target = ceil(Int, REFERENCE_FILTER_K * grid.Lz / σ)
+    n = max(1, fld(N, min(M_target, N)))          # slots per coarse cell
+    M = fld(N, n)                                  # drops at most n-1 slots at the top
+    tx, ty, tz = topology(grid)
+    z_bottom = znode(1, 1, 1, grid, Center(), Center(), Face())
+    coarse = RectilinearGrid(architecture(grid), eltype(grid);
+                             size = (1, 1, M), topology = (tx, ty, tz),
+                             x = (0, grid.Lx), y = (0, grid.Ly),
+                             z = (z_bottom, z_bottom + grid.Lz))
+    return coarse, n, M
+end
+
+"""The vertical marginal of the same Gaussian, on a coarse column of M levels (stencil ≈ 8K, not 8σN/Lz)."""
+function coarse_filter(ℓ, coarse)
+    σ = _FWHM_to_σ(ℓ)
+    Δ = grid.Lz / size(coarse, 3)
+    N = 2 * max(1, floor(Int, 4σ / Δ + 0.5)) + 1   # truncate at 4σ, matching scipy
     return GaussianFilter(; dims=(3,), σ, boundary=:edge, N)
 end
 
@@ -409,78 +460,64 @@ if save_sorted
     z✶_lookup = reference_height(model, method=lookup)
     R_full = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
 
-    _ape_pairs  = Pair{Symbol, Any}[]
-    _fref_pairs = Pair{Symbol, Any}[]   # the filtered-reference set, kept out of the 2D writer
+    # The sub-filter APE terms use the filtered-reference scale decomposition (Wenegrat, Chor & Barkan
+    # Eqs. 2.3-2.5, 2.19-2.22). Measuring the resolved reservoir against the unfiltered b✶ instead is the
+    # g_z = δ(z) horizontal-filter limit: with a kernel that has vertical extent a fluid at rest still
+    # carries APE against b✶, so that reservoir does not vanish at rest and the remainder goes negative.
+    # This filter acts in x *and* z, so only ⟨b✶⟩ gives a decomposition into two non-negative reservoirs,
+    # and the unfiltered form is not written at all. The offline pipeline keeps `--reference true` for
+    # reproducing earlier results; it recomputes those terms itself.
+    #
+    # Nothing here needs a new Oceanostics diagnostic: ProfileLookup takes an external (b✶, z✶) pair,
+    # refreshes it on every compute! when it is a Field, and skips the O(N log N) sort; and the
+    # two-argument constructors let the two halves of each sub-filter quantity carry *different*
+    # reference profiles, composed here exactly as R_s already is.
+    _ape_pairs = Pair{Symbol, Any}[]
     for ℓ in filter_ℓs
         gf = matched_filter(ℓ)
-        ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, gf; method=lookup)
-        Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf; dims=(1, 3), method=lookup)
-        E_as = SubFilterAvailablePotentialEnergy(model, gf; method=lookup)
+        # τ(w, b_r) is reference-independent: b̄_r = b̄ - ⟨b✶⟩(z) is exactly filter(b_r), since b✶(z)
+        # depends on z alone, so the sub-filter half is the same either way.
         wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
 
-        # Rˢ = filter(R) - Rˡ, both measured against the same shared profile
-        z✶ˡ = reference_height(Field(gf(b)); method=lookup)
-        R_l = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶ˡ)
-        R_s = Field(gf(R_full)) - R_l
+        coarse_ℓ, n_ℓ, M_ℓ = coarse_column(ℓ)
+        _blk(f) = Field(KernelFunctionOperation{Center, Center, Center}(_block_mean_ccc, coarse_ℓ, f, n_ℓ))
+        b✶_flt  = Field(coarse_filter(ℓ, coarse_ℓ)(_blk(reference_buoyancy(z✶_1dsort))))  # ⟨b✶⟩ on M levels
+        z✶_flt  = _blk(z✶_1dsort)                                            # the heights those levels sit at
+        lookup_flt = ProfileLookup(b✶_flt, z✶_flt)                            # a profile of any length is fine
+        z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
 
-        # Filtered-reference scale decomposition (Wenegrat, Chor & Barkan Eqs. 2.3-2.5, 2.19-2.22). The
-        # terms above measure the resolved reservoir against the unfiltered b✶, which is the g_z = δ(z)
-        # horizontal-filter limit: with a kernel that has vertical extent a fluid at rest still carries APE
-        # against b✶, so the resolved reservoir does not vanish at rest and the remainder E_as goes negative
-        # (that is what test_jensen.py records). Measured instead against ⟨b✶⟩ — the rest state as the filter
-        # sees it — both reservoirs are non-negative and both vanish at rest, for any kernel.
-        #
-        # Nothing here needs a new Oceanostics diagnostic: ProfileLookup takes an external (b✶, z✶) pair,
-        # refreshes it on every compute! when it is a Field, and skips the O(N log N) sort; and the
-        # two-argument constructors let the two halves of each sub-filter quantity carry *different*
-        # reference profiles, composed here exactly as R_s already is.
-        b✶_fref  = Field(column_filter(ℓ)(reference_buoyancy(z✶_1dsort)))    # ⟨b✶⟩, recomputed per compute!
-        lookup_f = ProfileLookup(b✶_fref, z✶_1dsort)                          # heights unchanged; only b✶ filtered
-        z✶ˡ_fref = reference_height(Field(gf(b)); method=lookup_f)            # z̃✶(b̄), the inverse of ⟨b✶⟩
-
-        L_fref    = FilteredAvailablePotentialEnergy(model, z✶ˡ_fref)                        # L̃ = Ẽ_A(b̄, z)
-        E_as_fref = flatten(Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup)))) - L_fref)  # S̃ = Ē_A - L̃
-        Υ_fref    = FilteredAvailablePotentialEnergyDisplacementPotential(model, z✶ˡ_fref)    # Υ̃ = z̃✶(b̄) - z
-        Π_A_fref  = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_fref; dims=(1, 3))  # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
-        ε_As_fref = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
-                            FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_fref))   # ε̃ˢ
+        L    = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)                          # L̃ = Ẽ_A(b̄, z)
+        E_as = flatten(Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup)))) - L)   # S̃ = Ē_A - L̃
+        Υ    = FilteredAvailablePotentialEnergyDisplacementPotential(model, z✶ˡ_flt)      # Υ̃ = z̃✶(b̄) - z
+        Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
+        ε_As = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
+                       FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
         # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
-        R_l_fref  = ReferenceTendencyCorrection(model, TimeDerivative(b✶_fref, model), z✶ˡ_fref)
-        R_s_fref  = flatten(Field(gf(R_full)) - R_l_fref)
+        R_l  = ReferenceTendencyCorrection(model, TimeDerivative(b✶_flt, model), z✶ˡ_flt)
+        R_s  = flatten(Field(gf(R_full)) - R_l)
 
-        push!(_fref_pairs, Symbol("L_fref_ℓ$(ℓ)")      => L_fref,    Symbol("L_fref_ℓ$(ℓ)_int")    => Integral(L_fref),
-                           Symbol("E_as_fref_ℓ$(ℓ)")   => E_as_fref, Symbol("E_as_fref_ℓ$(ℓ)_int") => Integral(E_as_fref),
-                           Symbol("Υ_fref_ℓ$(ℓ)")      => Υ_fref,
-                           Symbol("Π_A_fref_ℓ$(ℓ)")    => Π_A_fref,  Symbol("Π_A_fref_ℓ$(ℓ)_int")  => Integral(Π_A_fref),
-                           Symbol("ε_As_fref_ℓ$(ℓ)")   => ε_As_fref, Symbol("ε_As_fref_ℓ$(ℓ)_int") => Integral(ε_As_fref),
-                           Symbol("R_s_fref_ℓ$(ℓ)")    => R_s_fref,  Symbol("R_s_fref_ℓ$(ℓ)_int")  => Integral(R_s_fref),
-                           Symbol("dEas_fref_dt_ℓ$(ℓ)")     => TimeDerivative(E_as_fref, model),
-                           Symbol("dEas_fref_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as_fref), model))
-
-        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")        => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
-                          Symbol("Π_A_ℓ$(ℓ)")         => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
-                          Symbol("E_as_ℓ$(ℓ)")        => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
-                          Symbol("wb_rs_ℓ$(ℓ)")       => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
-                          Symbol("R_s_ℓ$(ℓ)")         => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
+        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
+                          Symbol("Π_A_ℓ$(ℓ)")   => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
+                          Symbol("E_as_ℓ$(ℓ)")  => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
+                          Symbol("L_ℓ$(ℓ)")     => L,    Symbol("L_ℓ$(ℓ)_int")    => Integral(L),
+                          Symbol("Υ_ℓ$(ℓ)")     => Υ,
+                          Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
+                          Symbol("R_s_ℓ$(ℓ)")   => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
                           Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
                           Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
     end
-    sfs_ape_fields      = (; _ape_pairs...)
-    sfs_ape_fref_fields = (; _fref_pairs...)
+    sfs_ape_fields = (; _ape_pairs...)
 
-    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b,
-                       sfs_ape_fields..., sfs_ape_fref_fields...)   # flat types now; see `flatten` above
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, sfs_ape_fields...)
 
     # The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the
     # panels animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl.
     # All are model-grid, so the 2D file stays single-grid.
     #
-    # The filtered-reference set is deliberately NOT spliced in here. A writer is specialised on the type
-    # of its whole output NamedTuple, and each of these is a distinct, deeply nested KernelFunctionOperation
-    # /BinaryOperation type; adding them took this tuple from ~50 to ~76 heterogeneous entries and LLVM's
-    # instruction selector went quadratic on the resulting basic block (CombineToPostIndexedLoadStore ->
-    # hasPredecessorHelper), stalling compilation of this writer for >45 min at Nz=32. The panels animation
-    # has no use for them, so they ride in the 3D file only.
+    # Keep this tuple small. A writer is specialised on the type of its whole output NamedTuple, and
+    # growing it from ~50 to ~76 heterogeneous entries once sent LLVM's instruction selector quadratic
+    # (CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation of this writer for
+    # >45 min at Nz=32. `flatten` above is what keeps each term one flat type; do not remove it.
     twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
 end
 #---
