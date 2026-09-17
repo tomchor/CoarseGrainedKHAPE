@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A UMCP0061
+#PBS -A UMCP0023
 #PBS -N budgeting_Nz2048_Ri0.10
 #PBS -o logs/budgeting_Nz2048_Ri0.10.log
 #PBS -e logs/budgeting_Nz2048_Ri0.10.log
@@ -7,7 +7,7 @@
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
 #PBS -l walltime=23:59:00
 #PBS -q casper
-#PBS -M tchor@umd.edu
+#PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
 #PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
@@ -17,7 +17,7 @@ set -eo pipefail
 
 NZ=${NZ:-2048}
 SIM=Nz${NZ}_Ri0.10
-PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
+PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
 FIXED_REF=${FIXED_REF:-0}
 [ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
 JOB_NAME="budgeting_Nz${NZ}_Ri0.10${REF_SUFFIX}"

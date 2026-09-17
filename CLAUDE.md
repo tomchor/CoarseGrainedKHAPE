@@ -23,7 +23,7 @@ Jobs are chained via PBS `afterok` dependencies. Always use `submit_*.sh` wrappe
 ```bash
 bash submit_simulation.sh NZ=2048
 ```
-Account: `UMCP0028`, queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
+Account: `UMCP0023`, queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
 
 The Julia simulation accepts CLI args: `--Nz`, `--Ri`, `--stop_time`, `--Re0`, `--Pr`, `--U`, `--h`, `--perturbation_amplitude`, `--filter_ls` (one or more online filter length scales ℓ; default `1 7`), `--save_tensors` (flag; also writes the per-scale strain/stress tensor components for online-vs-offline validation), and `--save_sorted` (flag; also writes the Winters (1995) sorted reference state under all three Oceanostics sorting methods). For local CPU development:
 ```bash

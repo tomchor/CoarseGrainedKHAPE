@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A UMCP0028
+#PBS -A UMCP0023
 #PBS -N validation_Nz2048_Ri0.10
 #PBS -o logs/validation_Nz2048_Ri0.10.log
 #PBS -e logs/validation_Nz2048_Ri0.10.log
@@ -7,7 +7,7 @@
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
 #PBS -l walltime=08:00:00
 #PBS -q casper
-#PBS -M tchor@umd.edu
+#PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
 #PBS -l select=1:ncpus=18:mem=256GB:ngpus=0
@@ -18,7 +18,7 @@ set -eo pipefail
 NZ=${NZ:-2048}
 SIM=Nz${NZ}_Ri0.10
 FILE=output/khi_${SIM}.nc
-PYTHON=/glade/u/home/tomasc/miniconda3/envs/py313/bin/python
+PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
 JOB_NAME="validation_Nz${NZ}_Ri0.10"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
