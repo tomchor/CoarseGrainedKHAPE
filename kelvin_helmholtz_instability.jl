@@ -526,7 +526,11 @@ outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filter
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
-output_filename = "output/$(simulation_name).nc"
+# Output lands in $KHAPE_OUTPUT_DIR when set, so an HPC run can write to scratch without symlinking the
+# repo directory (which does not work: `output/.gitkeep` is tracked, so git reports it deleted).
+output_dir = get(ENV, "KHAPE_OUTPUT_DIR", "output")
+mkpath(output_dir)
+output_filename = joinpath(output_dir, "$(simulation_name).nc")
 
 if !(model.closure isa ScalarDiffusivity)
     ν = viscosity(model)
@@ -543,7 +547,7 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_f
                                                   global_attributes = params,
                                                   overwrite_existing = true)
 
-output_filename_2d = "output/$(simulation_name)_2d.nc"
+output_filename_2d = joinpath(output_dir, "$(simulation_name)_2d.nc")
 simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
                                                        schedule = TimeInterval(2),
                                                        filename = output_filename_2d,
@@ -552,7 +556,7 @@ simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., two
                                                        global_attributes = params,
                                                        overwrite_existing = true)
 
-@info "Output will be saved to: $(output_filename).nc"
+@info "Output will be saved to: $(output_filename)"
 #---
 
 #+++ Run simulation

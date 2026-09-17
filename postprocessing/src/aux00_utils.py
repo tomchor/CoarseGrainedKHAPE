@@ -4,7 +4,8 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
+# $KHAPE_PP_OUTPUT redirects the derived budget files, as $KHAPE_OUTPUT_DIR does the simulation output.
+PP_OUTPUT = Path(os.environ.get("KHAPE_PP_OUTPUT") or Path(__file__).resolve().parent.parent / "output")
 
 #+++ Multi-grid output files
 # A NetCDFWriter holding outputs on more than one grid disambiguates by suffixing every dimension name
