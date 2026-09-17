@@ -326,11 +326,12 @@ flatten(op) = KernelFunctionOperation{Center, Center, Center}(_passthrough_ccc, 
 # average is an exact area average -- the right resampling, since the column carries structure below the
 # coarse spacing (its tie runs among it) that point-sampling would alias.
 #
-# The lookup then runs at M-level rather than N-level resolution: at Nz=512, ℓ=7 that is δz̃✶ = 1.5e-3
-# against the column's 1.7e-4. Acceptable here -- ℓ=7 positivity sits at -1.2e-06 with room to spare, and
-# removing lookup quantisation entirely was measured to change the budget residual by 1.00x. If that ever
-# binds, the alternative is to interpolate ⟨b✶⟩ back onto the column's N heights, which keeps the full
-# lookup resolution at the price of a custom operand type with its own `compute!`.
+# The filter runs on those M levels, and ⟨b✶⟩ is then interpolated back onto the column's N heights before
+# the lookup, so only the *convolution* is coarse: Υ̃ = z̃✶(b̄) - z keeps the column's own resolution. Reading
+# the coarse cells whole instead quantises Υ̃ to Lz/M, and Π̃_A = -τ(uᵢ,b) ∂ᵢΥ̃ differentiates it with nothing
+# downstream to smooth the steps -- at Nz=1024, ℓ=7 that is δz̃✶ = dz/8.2, a ~12% staircase in ∂Υ̃/∂z, plainly
+# visible in the Π_A panel while every term that *integrates* Υ̃ stayed smooth. The interpolation costs one
+# O(N) kernel and nothing in the lookup, which is a binary search (`searchsortedfirst`), so O(log N).
 _column_N() = grid.Nx * grid.Ny * grid.Nz
 
 # One coarse cell is the mean of `n` consecutive column slots. The kernel is launched over the coarse
@@ -341,6 +342,21 @@ _column_N() = grid.Nx * grid.Ny * grid.Nz
         acc += fine[1, 1, (k - 1) * n + m]
     end
     return acc / n
+end
+
+# ...and back: coarse cell κ is the mean of column slots (κ-1)n+1 … κn, so it stands at fractional column
+# index (κ-0.5)n + 0.5, and column slot k sits at fractional coarse index (k-0.5)/n + 0.5. Interpolating
+# there rather than reading the coarse cell whole is what keeps the z̃✶ lookup at the column's own
+# resolution: the filter still runs on M levels (that is the expensive part), but Υ̃ = z̃✶(b̄) - z is no
+# longer quantised to Lz/M. Mapping in index space rather than in z avoids depending on M*n == N, which
+# `fld` does not guarantee. Outside the range this clamps, matching the edge extension either side and
+# numpy's interp, which the offline `filtered_reference_profile` ends with.
+@inline function _interp_from_coarse_ccc(i, j, k, column_grid, coarse, n, M)
+    FT = eltype(column_grid)
+    t  = (k - FT(0.5)) / n + FT(0.5)
+    κ  = clamp(floor(Int, t), 1, M - 1)
+    w  = clamp(t - κ, zero(FT), one(FT))
+    @inbounds return (one(FT) - w) * coarse[1, 1, κ] + w * coarse[1, 1, κ + 1]
 end
 
 """Coarse 1×1×M column and the block size that maps the sorted column onto it, for filter scale ℓ."""
@@ -504,9 +520,10 @@ if save_sorted
 
         coarse_ℓ, n_ℓ, M_ℓ = coarse_column(ℓ)
         _blk(f) = Field(KernelFunctionOperation{Center, Center, Center}(_block_mean_ccc, coarse_ℓ, f, n_ℓ))
-        b✶_flt  = Field(coarse_filter(ℓ, coarse_ℓ)(_blk(reference_buoyancy(z✶_1dsort))))  # ⟨b✶⟩ on M levels
-        z✶_flt  = _blk(z✶_1dsort)                                            # the heights those levels sit at
-        lookup_flt = ProfileLookup(b✶_flt, z✶_flt)                            # a profile of any length is fine
+        b✶_crs  = Field(coarse_filter(ℓ, coarse_ℓ)(_blk(reference_buoyancy(z✶_1dsort))))  # ⟨b✶⟩ on M levels
+        b✶_flt  = Field(KernelFunctionOperation{Center, Center, Center}(_interp_from_coarse_ccc,
+                                                z✶_1dsort.grid, b✶_crs, n_ℓ, M_ℓ))        # ...back onto the N slots
+        lookup_flt = ProfileLookup(b✶_flt, z✶_1dsort)                         # heights unchanged; only b✶ filtered
         z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
 
         L    = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)                          # L̃ = Ẽ_A(b̄, z)
