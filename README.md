@@ -37,7 +37,7 @@ All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--
 | `filtered` (default) | the vertically filtered profile ⟨ρ_*⟩ | any kernel, including one with vertical extent |
 | `true` | the unfiltered ρ_* | horizontal kernels only (the `g_z = δ(z)` limit) |
 
-The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` reproduces the earlier behaviour and is kept for comparison. Each decomposition has its own online Π_A and ε_Aˢ (`Π_A_fref_ℓ<ℓ>` / `ε_As_fref_ℓ<ℓ>` under `--save_sorted`), and the pipeline reads whichever matches — which is what makes the budget close. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
+The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` reproduces the earlier behaviour and is kept for comparison. The simulation's online APE terms (`Π_A_ℓ<ℓ>`, `ε_As_ℓ<ℓ>` and the rest, under `--save_sorted`) are built against ⟨ρ_*⟩, and reading them is what makes the budget close; `true` therefore always recomputes offline. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
 
 `00_get_budgets.sh` forwards the flag:
 

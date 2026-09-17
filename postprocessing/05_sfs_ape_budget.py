@@ -190,13 +190,14 @@ for ℓ in filter_scales:
     # profile makes it inconsistent with the other terms, and --save_sorted is off by default so a
     # production run may not have it at all. Fall back to the offline expression in either case, naming
     # the reason so a silent switch is visible in the log.
-    # Each scale decomposition has its own online ε_Aˢ: `ε_As_ℓ<ℓ>` is built against the unfiltered b✶,
-    # `ε_As_fref_ℓ<ℓ>` against ⟨b✶⟩, so the one to read is whichever matches --reference. Reading it is
-    # what makes the budget close: the offline `calculate_ape_dissipation` takes centred differences of a
+    # The online `ε_As_ℓ<ℓ>` is built against ⟨b✶⟩. Reading it is what makes the budget close: the offline `calculate_ape_dissipation` takes centred differences of a
     # quantity quadratic in gradients, and measured against the online field that discretisation error
     # accounts for essentially the whole offline residual (corr 0.995, ratio ~1 pointwise in time).
-    online_eps = online_name("ε_As_fref" if filtered_reference else "ε_As", ℓ)
+    # The simulation writes only the filtered-reference terms, so `--reference true` -- kept for
+    # reproducing earlier results -- has no online counterpart and always recomputes offline.
+    online_eps = online_name("ε_As", ℓ)
     reason = ("fixed reference" if fixed_reference else
+              "reference=true (the simulation writes only the filtered-reference terms)" if not filtered_reference else
               "no online field" if online_eps not in ds else None)
     if reason is not None:
         t0 = time.time()

@@ -75,12 +75,14 @@ def online_name(var, ℓ):
 # The online field is an optimisation, not a requirement: --save_sorted is off by default, so a
 # production run may simply not have it, and the offline path has to keep working. Fall back rather
 # than fail, and say which path was taken so a silent switch is visible in the log.
-# Each scale decomposition has its own online Π_A: `Π_A_ℓ<ℓ>` is built against the unfiltered ρ_*,
-# `Π_A_fref_ℓ<ℓ>` against ⟨ρ_*⟩ (its Υ̃ inverts the filtered profile), so read whichever matches
-# --reference. Falls back to the offline recompute when the simulation did not write it.
-_pi_a_var = "Π_A_fref" if filtered_reference else "Π_A"
+# The simulation writes Π_A against ⟨ρ_*⟩ only, so it is read for the filtered reference and recomputed
+# offline for `--reference true`, which is kept for reproducing earlier results. Also falls back when the
+# run predates these outputs or was made without --save_sorted.
+_pi_a_var = "Π_A"
 online_pi_a = None
-if fixed_reference:
+if not filtered_reference:
+    print("  Π_A: recomputing offline (--reference true; the simulation writes only the filtered-reference terms)")
+elif fixed_reference:
     print("  Π_A: recomputing offline (fixed reference)")
 else:
     missing = [ℓ for ℓ in filter_scales if online_name(_pi_a_var, ℓ) not in ds]
