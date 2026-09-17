@@ -908,6 +908,19 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_ca
 # is raised rather than silently smoothed with the wrong width.
 SLOT_SPACING_RTOL = 1e-10
 
+# Levels per σ on the grid ⟨ρ_*⟩ is filtered on. The sorted column carries one slot per grid cell, which
+# is far finer than a Gaussian-filtered profile can resolve: a convolution of width σ is smooth on scale
+# σ, so sampling it below that stores information it cannot contain. Filtering on the column therefore
+# costs O(N²) -- N slots against a stencil that itself grows with N -- which at Nz=2048 is ~400 hours
+# over the sweep's 30 scales. Resampling to K levels per σ, filtering there, and interpolating back onto
+# the column keeps the full z̃_* lookup resolution while making the filter cost independent of N.
+#
+# K trades accuracy against cost as δz̃_* ≈ σ/(8K²) and cost ≈ K², so the *wide* filters bind, not the
+# narrow ones. Matching the column's own lookup granularity (Lz/2N) needs K ≈ 79 at Nz=512 and ≈ 317 at
+# Nz=2048; K=1000 is deliberately generous, costing ~1.6 h at Nz=2048 against 402 h for the column. Lower
+# it if that becomes the bottleneck -- K=300 is ~6x cheaper and still meets the granularity criterion.
+REFERENCE_FILTER_K = 1000
+
 
 def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted"):
     """
@@ -973,15 +986,48 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
                                   filter_scale=float(ℓ), time_invariant=1)
             return filtered
 
-    filtered = xr.apply_ufunc(
-        gaussian_filter1d, rho_sorted,
-        input_core_dims=[[z_sorted_name]],
-        output_core_dims=[[z_sorted_name]],
-        kwargs={"sigma": σ_slots, "axis": -1, "mode": "nearest"},
-        dask="parallelized",
-        output_dtypes=[rho_sorted.dtype],
-        dask_gufunc_kwargs={"allow_rechunk": True},
-    )
+    zs = rho_sorted[z_sorted_name].values
+    N  = len(zs)
+    σ  = ℓ * _FWHM_TO_SIGMA
+    M  = min(int(np.ceil(REFERENCE_FILTER_K * (zs[-1] - zs[0] + Δz0) / σ)), N)
+
+    if M >= N:
+        # The resampled grid would be no coarser than the column, so filter it directly.
+        filtered = xr.apply_ufunc(
+            gaussian_filter1d, rho_sorted,
+            input_core_dims=[[z_sorted_name]],
+            output_core_dims=[[z_sorted_name]],
+            kwargs={"sigma": σ_slots, "axis": -1, "mode": "nearest"},
+            dask="parallelized",
+            output_dtypes=[rho_sorted.dtype],
+            dask_gufunc_kwargs={"allow_rechunk": True},
+        )
+    else:
+        edges = np.linspace(zs[0] - Δz0/2, zs[-1] + Δz0/2, M + 1)
+        zc    = 0.5 * (edges[:-1] + edges[1:])
+        w     = np.full(N, Δz0)
+        den, _ = np.histogram(zs, bins=edges, weights=w)
+
+        def _resample_filter(row):
+            # Area-average onto the M bins rather than point-sampling: the column carries structure
+            # below the bin width (tie runs among it), and sampling would fold it into the result.
+            num, _ = np.histogram(zs, bins=edges, weights=row * w)
+            coarse = np.divide(num, den, out=np.full(M, np.nan), where=den > 0)
+            if np.isnan(coarse).any():                    # bins no slot landed in
+                good = ~np.isnan(coarse)
+                coarse = np.interp(zc, zc[good], coarse[good])
+            smoothed = gaussian_filter1d(coarse, sigma=σ * M / (edges[-1] - edges[0]), mode="nearest")
+            return np.interp(zs, zc, smoothed)             # back onto the column, monotonicity preserved
+
+        filtered = xr.apply_ufunc(
+            _resample_filter, rho_sorted,
+            input_core_dims=[[z_sorted_name]],
+            output_core_dims=[[z_sorted_name]],
+            vectorize=True,
+            dask="parallelized",
+            output_dtypes=[rho_sorted.dtype],
+            dask_gufunc_kwargs={"allow_rechunk": True},
+        )
     filtered.name = "⟨ρ_*⟩"
     filtered.attrs.update(long_name="vertically filtered reference density profile", filter_scale=float(ℓ))
     return filtered
