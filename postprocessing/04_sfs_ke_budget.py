@@ -52,7 +52,7 @@ filter_scales = ds_filt.filter_scale.values
 tensor_dimensions = ("x_caa", "z_aac")
 
 ds = condense_uw_velocities(ds, indices=[1, 3])
-ds_full = ds[["b", "dV", "uᵢ"]].copy()
+ds_full = ds[["b", "dV", "dV_physical", "uᵢ"]].copy()
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
@@ -82,7 +82,7 @@ print("Calculating budget terms for each filter scale...")
 def online_name(var, ℓ):
     return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
 
-dV = ds_full.dV
+dV = ds_full.dV_physical   # padding carries no volume; see _pad_domain_in_z
 budget_list = []
 
 for ℓ in filter_scales:

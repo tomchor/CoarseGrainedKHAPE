@@ -69,7 +69,7 @@ filter_scales = ds_filt.filter_scale.values
 filtered_dimensions = ["x_caa", "z_aac"]
 
 ds = condense_uw_velocities(ds, indices=[1, 3])
-ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+ds_full = ds[["b", "dV", "dV_physical", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
@@ -136,7 +136,7 @@ print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}
 def online_name(var, ℓ):
     return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
 
-dV = ds_full.dV
+dV = ds_full.dV_physical   # padding carries no volume; see _pad_domain_in_z
 budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
 

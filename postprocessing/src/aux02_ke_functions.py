@@ -305,7 +305,7 @@ def calculate_energy_transfer(ds, filter_scales,
         ds_filt = filter_fields(ds, filter_scales)
 
     ds = condense_uw_velocities(ds, indices=(1, 3))
-    ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+    ds_full = ds[["b", "dV", "dV_physical", "LxLy", "uᵢ"]].copy()
 
     ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 
@@ -324,7 +324,7 @@ def calculate_energy_transfer(ds, filter_scales,
     b_r = calculate_b_r(ds_full.ρ, rho_sorted)
     w_full = ds_full["uᵢ"].sel(i=3)
 
-    dV = ds_full.dV
+    dV = ds_full.dV_physical   # padding carries no volume; see _pad_domain_in_z
     transfer_list = []
 
     for ℓ in filter_scales:

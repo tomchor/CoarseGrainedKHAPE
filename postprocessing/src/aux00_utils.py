@@ -160,8 +160,12 @@ def _pad_domain_in_z(ds, min_margin=None):
     # fields that were bit-identical across the interface and fully decorrelated in the padding
     # (rms(diff) ≈ rms(Π_A)), moving ∫Π_A dV by 76% at ℓ=1. Fields keep the padding, since the budget
     # needs filter(z) = z a stencil deep and `drop_padding` in the tests cuts it there.
+    # dV stays the true cell volume: `sorted_timeseries` builds the sorted column's slot heights from
+    # dV/(Lx·Ly), so zeroing it there collapses those slots to zero height and the z_1d_sorted coordinate
+    # repeats. `dV_physical` is the integration weight instead — the same volumes with the padding set to
+    # zero — and every `integrate(·, ·)` in the budget uses it.
     physical = (ds_new.z_aac >= z_orig[0] - dz/2) & (ds_new.z_aac <= z_orig[-1] + dz/2)
-    ds_new["dV"] = ds_new["dV"].where(physical, 0.0)
+    ds_new["dV_physical"] = ds_new["dV"].where(physical, 0.0)
 
     ds_new.attrs["n_pad_z"]        = int(Nz_pad)
     ds_new.attrs["z_min_physical"] = float(z_orig[0])  - dz / 2
