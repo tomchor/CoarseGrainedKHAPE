@@ -133,9 +133,6 @@ print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}
 # one term on a different reference state from the rest and the budget would not close. That variant
 # therefore falls back to the offline expression, which is also what validation/inv08 checks the online
 # field against. Map a filter scale to its sim-output name, matching the Julia Symbol("<var>_ℓ$(ℓ)").
-def online_name(var, ℓ):
-    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
-
 dV = ds_full.dV_physical   # padding carries no volume; see _pad_domain_in_z
 budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
@@ -187,28 +184,17 @@ for ℓ in filter_scales:
     # ε_Aˢ: read the online field when it is there and the reference is time-varying, integrated on the
     # budget's padded grid (the padding repeats each edge value, so every gradient there vanishes and
     # ε_Aˢ ≈ 0, exactly as for Π_K and ε_Kˢ in 04). It is an optimisation, not a requirement: the frozen
-    # profile makes it inconsistent with the other terms, and --save_sorted is off by default so a
-    # production run may not have it at all. Fall back to the offline expression in either case, naming
-    # the reason so a silent switch is visible in the log.
-    # The online `ε_As_ℓ<ℓ>` is built against ⟨b✶⟩. Reading it is what makes the budget close: the offline `calculate_ape_dissipation` takes centred differences of a
-    # quantity quadratic in gradients, and measured against the online field that discretisation error
-    # accounts for essentially the whole offline residual (corr 0.995, ratio ~1 pointwise in time).
-    # The simulation writes only the filtered-reference terms, so `--reference true` -- kept for
-    # reproducing earlier results -- has no online counterpart and always recomputes offline.
-    online_eps = online_name("ε_As", ℓ)
-    reason = ("fixed reference" if fixed_reference else
-              "reference=true (the simulation writes only the filtered-reference terms)" if not filtered_reference else
-              "no online field" if online_eps not in ds else None)
-    if reason is not None:
-        t0 = time.time()
-        sfs_ape_dissipation = calculate_sfs_ape_dissipation(
-            ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
-            filter_dims=filtered_dimensions,
-            filtered_density=ds_filt_ℓ.ρ̄,)
-        print(f"  sfs_ape_dissipation (offline, {reason})  ({time.time()-t0:.1f}s)")
-    else:
-        sfs_ape_dissipation = ds[online_eps]
-        print(f"  sfs_ape_dissipation: reading the online {online_eps}")
+    # ε_Aˢ is built on the filtered reference profile, which is exact only offline (the simulation
+    # coarsens it), so it is computed here rather than read -- see 03 and filtered_reference_decisions.md.
+    # The offline gradients are centred rather than face-paired, which cost 18.1% vs 2.0% of the dominant
+    # term at Nz=128; measured at Nz=1024 the two agree to 0.99 and the residual moves 0.287% -> 0.320%,
+    # so at production resolution consistency is worth more than the discretisation.
+    t0 = time.time()
+    sfs_ape_dissipation = calculate_sfs_ape_dissipation(
+        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
+        filter_dims=filtered_dimensions,
+        filtered_density=ds_filt_ℓ.ρ̄,)
+    print(f"  sfs_ape_dissipation: offline, against the exact (FFT) reference profile  ({time.time()-t0:.1f}s)")
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
     ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)

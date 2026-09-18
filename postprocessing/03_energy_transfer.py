@@ -62,37 +62,14 @@ print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
-# Π_K (cross-scale KE transfer) is computed online by the simulation, so it is skipped here
-# (include_pi_k=False). Π_A is computed online too, but only usable for the time-varying reference:
-# it is measured against the reference state, and the online one is always the sort of the *current*
-# buoyancy, while --fixed-reference measures every other term against the frozen t=0 profile. So the
-# online field is read there, and recomputed offline here otherwise — the same split
-# `05_sfs_ape_budget.py` makes for ε_Aˢ. Reading it also skips the sort of the filtered density that
-# Υˡ needs, which is the expensive half of this step.
-def online_name(var, ℓ):
-    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
-
-# The online field is an optimisation, not a requirement: --save_sorted is off by default, so a
-# production run may simply not have it, and the offline path has to keep working. Fall back rather
-# than fail, and say which path was taken so a silent switch is visible in the log.
-# The simulation writes Π_A against ⟨ρ_*⟩ only, so it is read for the filtered reference and recomputed
-# offline for `--reference true`, which is kept for reproducing earlier results. Also falls back when the
-# run predates these outputs or was made without --save_sorted.
-_pi_a_var = "Π_A"
+# Π_A is built on the filtered reference profile ⟨ρ_*⟩, and that profile is exact only here: the
+# simulation still coarsens it onto a block-averaged column (see filtered_reference_decisions.md §3-§6).
+# Two different constructions cannot both feed one budget, so every reference-dependent term -- Π_A, ε_Aˢ,
+# Υ̃, L̃, S̃, Rˢ -- is computed offline against the one exact profile, and the simulation's versions are the
+# independent cross-check that inv08/inv09/inv10 exist to make. Π_K and ε_Kˢ are unaffected: they are built
+# from velocities alone and never touch the reference state, so 04 still reads them online.
 online_pi_a = None
-if not filtered_reference:
-    print("  Π_A: recomputing offline (--reference true; the simulation writes only the filtered-reference terms)")
-elif fixed_reference:
-    print("  Π_A: recomputing offline (fixed reference)")
-else:
-    missing = [ℓ for ℓ in filter_scales if online_name(_pi_a_var, ℓ) not in ds]
-    if missing:
-        print(f"  Π_A: recomputing offline (no online {_pi_a_var} for ℓ={missing}; the simulation was run "
-              f"without --save_sorted, with a different --filter_ls, or before the online filtered-reference "
-              f"terms existed)")
-    else:
-        online_pi_a = {ℓ: ds[online_name(_pi_a_var, ℓ)] for ℓ in filter_scales}
-        print(f"  Π_A: reading the online {_pi_a_var} fields (time-varying reference)")
+print("  Π_A: computing offline, against the exact (FFT) reference profile")
 
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
