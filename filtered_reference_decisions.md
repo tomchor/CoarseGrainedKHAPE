@@ -93,21 +93,31 @@ operation. The same convolution by FFT is `O(N log N)`: **0.04 / 0.07 / 0.16 s**
 same column — flat in σ — agreeing with the direct result to **2.5e-12 on a field of rms 1025** (2.4e-15
 relative). See §6.
 
-### What the coarsening cost, measured
+### What the coarsening actually cost: nothing measurable
 
-A K ladder at Nz=256 (K ∈ 3000, 1000, 300, 100, 30, 10; K=3000 gives `M = N` and is therefore the exact
-answer) showed:
+**Direct measurement at Nz=1024, and the one to trust.** Running the budget three ways on one dataset —
+online terms; offline with the coarse profile and padded integrals; offline with the exact profile and
+physical integrals — the second and third agree to **0.007% on `∫Π_A dV`** at ℓ=7, where the offline path
+coarsens substantially, and are identical to five figures at ℓ=1. Coarse versus exact does not move the
+budget at production resolution.
 
-- `Π_A` and `ε_Aˢ` are the K-sensitive terms, as expected — they differentiate `Υ̃`. Terms that *integrate*
-  `Υ̃` (`L̃`, `S̃`, `Rˢ`) are ~100× less sensitive.
-- **There is no plateau.** Restricted to |z| < 3 where `Π_A` lives, the ℓ=7 deviation from exact is
-  0.205 at K=1000, 0.271 at 300, 0.311 at 100, 0.604 at 30, 0.647 at 10. The production value was already
-  costing ~20% on the field and 5.5% on the volume integral.
-- The ℓ=1 column of that ladder is **not signal** — see §7. Its `Π_A` is 3× smaller and the metric was
-  dominated by the padded region.
+So the FFT is justified by **cost and by deleting a free parameter**, not by accuracy. That is also what
+was wanted: exactness that no longer has to be paid for. A null difference is the confirmation.
 
-**Do not look for a good K.** There isn't one; the error grows monotonically as K falls and the only exact
-setting is "no coarsening". Both the constant and the `--reference-K` flag added to sweep it are gone.
+**An earlier K ladder said otherwise, and was confounded.** At Nz=256, with K ∈ 3000…10 against a K=3000
+reference (`M = N`, exact), the ℓ=7 `Π_A` field deviation restricted to |z| < 3 read 0.205 at K=1000 rising
+to 0.647 at K=10, with no plateau, and 5.5% on the volume integral. Those numbers cannot be reconciled with
+the 0.007% above. The likeliest reason is §7: that ladder's integrals ran over the **padding**, where the
+lookup is degenerate and `Π_A` is noise that re-randomises under any perturbation — so it was largely
+measuring padding noise rather than coarsening error. It also predates `f8db983`.
+
+What survives from the ladder is the *ordering*, which is mechanistically sound: `Π_A` and `ε_Aˢ`
+differentiate `Υ̃` and are the sensitive terms, while `L̃`, `S̃` and `Rˢ` integrate it and were ~100× less
+sensitive.
+
+**Do not reintroduce K.** Not because a good value cannot be found, but because with an FFT there is
+nothing to trade: the exact profile costs about the same as the approximate one. The constant and the
+`--reference-K` flag added to sweep it are both gone.
 
 ### Two GPU constraints found along the way
 
@@ -190,7 +200,13 @@ bit-identical across the interface and **fully decorrelated in the padding** (rm
 moving `∫Π_A dV` by **76%** at ℓ=1. The integral was not merely including unphysical fluid; it was not
 reproducible.
 
-Zeroing `dV` outside the physical domain removed **32.7% of `∫Π_A dV` at ℓ=1** and 9.7% at ℓ=7.
+Zeroing `dV` outside the physical domain removed **32.7% of `∫Π_A dV` at ℓ=1** and 9.7% at ℓ=7 — measured
+at Nz=256 against the pre-Phase-1 simulation output and the ladder's K=3000 run.
+
+**That magnitude does not reproduce.** The same comparison at Nz=1024, on a single dataset with only the
+code changing, moved `∫Π_A dV` by 0.007%. The reproducibility failure is real and was demonstrated
+directly; the *size* of the padding's contribution to the integral evidently depends on the configuration,
+and the 32.7% figure should not be taken as general. This has not been chased down.
 
 **This contaminates earlier numbers.** Any offline integral computed before `f8db983` — including the K
 ladder's integral column and the residuals quoted above — carries this. The interface-restricted *field*
