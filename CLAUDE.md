@@ -108,6 +108,12 @@ The cross-scale KE transfer **Π_K and the SFS KE dissipation ε_Kˢ are compute
 
 ### Filtered-reference scale decomposition (`--reference`)
 
+> **Why it is this way:** `filtered_reference_decisions.md` is the decision record for this work — what was
+> tried, what was measured, and what was rejected. Read it before changing how ⟨ρ_*⟩ is built, how the
+> sub-filter flux and dissipation are computed, or how the integrals treat the z padding. Several of those
+> choices look arbitrary and are not, and one of them (the coarse column parameterised by levels-per-σ) was
+> a wrong turn that cost real time to diagnose and undo.
+
 `03_energy_transfer.py`, `05_sfs_ape_budget.py` and `sweep2_energy_transfer.py` take `--reference {filtered,true}`, which selects the reference state the **resolved** reservoir is measured against. Default `filtered`.
 
 The pipeline filters in x **and** z (`filtered_dimensions = ["x_caa", "z_aac"]`). For a kernel with vertical extent the two reservoirs cannot both be measured against the unfiltered ρ_*: a fluid at rest filters to a profile that still carries APE against ρ_*, so the resolved reservoir does not vanish at rest and the remainder Eₐˢ = filter(eₐ) − eₐ(ρ̄) goes negative. That is the whole content of `test_jensen.py`.
