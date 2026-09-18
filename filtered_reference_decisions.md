@@ -219,9 +219,31 @@ deviations, the padding contribution, the CI timings (277 → 66 min after `f447
 26 min), `inv10`'s fully-online closure at Nz=1024 (0.03–0.20% of the dominant term across both budgets and
 both scales).
 
-**Unresolved:** the `S̃ ≥ 0` failure at ℓ=1 sits at −1.4e-03 of rms at Nz=512 against a 1e-03 tolerance, and
-neither ties, clamping, the transport term nor `Υ̃` quantisation explains it. It improves with resolution
-(p ≈ 2.2). §7 may bear on it and has not been rechecked since.
+**The `S̃ ≥ 0` failure at ℓ=1 is a resolution effect, and is gone at production scale.** Measured on the
+physical domain alone (the fields still carry padding — only `dV` is masked):
+
+| Nz | `S̃` min/rms at ℓ=1 |
+|---|---|
+| 128 | −2.43e-02 |
+| 512 | −1.435e-03 |
+| **1024** | **−4.78e-05** |
+
+At Nz=1024 that is **21× inside** the 1e-03 tolerance that `test_positivity` and `test_jensen` fail at
+Nz=512, and ℓ=7 sits at −3.1e-08. So the tests fail at CI's resolution and the quantity is clean where the
+science is done.
+
+Three things follow. The convergence is **faster than the p ≈ 2.2 previously recorded**: these points give
+p = −2.04 from 128→512 and **−4.91** from 512→1024, i.e. it accelerates. That is two intervals and no
+explanation, so treat the acceleration as observed rather than understood. It is **not** about the
+reference construction — exact versus coarse profile gives −4.784e-05 against −4.782e-05, identical to
+three figures, consistent with `∫Π_A` moving only 0.007% (§3). And `frac(<0)` is 0.218, so a fifth of the
+domain is nominally negative — but at 5e-05 of rms, which is lookup granularity, not structure; it rose
+slightly with the exact profile (0.195 → 0.218) while the minimum held, the signature of more cells sitting
+marginally on the wrong side of zero rather than of anything worsening.
+
+Still unexplained **mechanistically** — ties, clamping, the transport term and `Υ̃` quantisation were each
+ruled out, and none of them predicts a p ≈ 5 tail. What is established is that it is resolution-limited and
+irrelevant at Nz=1024.
 
 **A methodological note, earned the hard way.** Operation counts repeatedly misled here — by 800× (direct
 vs FFT), by 17× (the sweep's per-unit-ℓ cost), and in the opposite direction when "infeasible" turned out
