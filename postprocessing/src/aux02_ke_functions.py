@@ -256,7 +256,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18,
-                              include_pi_k=True, online_pi_a=None, filtered_reference=False, reference_K=None):
+                              include_pi_k=True, online_pi_a=None, filtered_reference=False):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -337,7 +337,7 @@ def calculate_energy_transfer(ds, filter_scales,
 
         # The reference the resolved scale is measured against: ⟨ρ_*⟩ for a kernel with vertical extent,
         # the unfiltered ρ_* in the horizontal-filter limit. Scale-dependent, hence rebuilt here.
-        ref_rho_sorted = filtered_reference_profile(rho_sorted, dz_sorted, ℓ, K=reference_K) if filtered_reference else rho_sorted
+        ref_rho_sorted = filtered_reference_profile(rho_sorted, dz_sorted, ℓ) if filtered_reference else rho_sorted
 
         # --- KE cross-scale transfer (Π_K) ---
         # Computed online by the simulation; skipped here when include_pi_k=False so the offline

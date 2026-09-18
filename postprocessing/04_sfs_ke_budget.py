@@ -18,8 +18,6 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
-parser.add_argument("--reference-K", type=int, default=None,
-                    help="Levels per sigma for the filtered reference profile (default: REFERENCE_FILTER_K). For sweeping the choice; not a production knob.")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against, in the APE->KE conversion term. "
                          "Must match what 03 and 05 are run with: 05 reads this script's exchange term, so a mismatch "
@@ -109,7 +107,7 @@ for ℓ in filter_scales:
     # vertical marginal there — which makes the sub-filter half τ(w, b_r) of Eq. (2.21) and the resolved
     # half w̄b̄_r of Eq. (2.19). Against the unfiltered ρ_* it is not, which is the horizontal-limit split.
     # This term is read back by 05, so the two must be run with the same --reference.
-    ref_rho_sorted = (filtered_reference_profile(ds_sorted.rho_sorted, ds_sorted.dz_sorted, ℓ, K=args.reference_K)
+    ref_rho_sorted = (filtered_reference_profile(ds_sorted.rho_sorted, ds_sorted.dz_sorted, ℓ)
                       if filtered_reference else ds_sorted.rho_sorted)
     b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), ref_rho_sorted)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(

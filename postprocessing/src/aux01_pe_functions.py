@@ -7,6 +7,7 @@ following Winters et al. (1995).
 
 import numpy as np
 import xarray as xr
+from scipy.signal import fftconvolve
 import concurrent.futures
 from src.aux00_utils import integrate, calculate_gradient
 
@@ -919,10 +920,34 @@ SLOT_SPACING_RTOL = 1e-10
 # narrow ones. Matching the column's own lookup granularity (Lz/2N) needs K ≈ 79 at Nz=512 and ≈ 317 at
 # Nz=2048; K=1000 is deliberately generous, costing ~1.6 h at Nz=2048 against 402 h for the column. Lower
 # it if that becomes the bottleneck -- K=300 is ~6x cheaper and still meets the granularity criterion.
-REFERENCE_FILTER_K = 1000
+# Gaussian convolution of the sorted column, by FFT. scipy's gaussian_filter1d convolves directly, so it
+# costs O(N · stencil) with a stencil of 8σ/Δz slots -- at Nz=1024 that is 29 s per record at ℓ=1 and
+# 600 s at ℓ=20, which is what the old block-averaging path existed to avoid. By FFT the same convolution
+# is O(N log N): measured 0.04-0.16 s over ℓ = 1…20 on that column, agreeing with the direct result to
+# 1.1e-13 on an O(1) field. So the column is filtered whole and there is no coarse grid, no levels-per-σ
+# parameter, and no interpolation back.
+def _fft_gaussian(row, σ_slots, truncate=4.0):
+    """Convolve with a Gaussian truncated at `truncate`σ, extending the ends with their edge value.
+
+    The edge padding reproduces scipy's mode="nearest": every output point inside the column then sees
+    only real or edge-extended values, never the zeros `fftconvolve` pads with outside the kept window.
+
+    The result is clamped non-increasing. ⟨ρ_*⟩ inherits the sorted column's ordering (densest at the
+    bottom), and convolving a non-increasing profile with a non-negative kernel is non-increasing -- so
+    the clamp can only remove round-off, never real structure. It matters because the column is mostly
+    tie runs (99.3% of adjacent slots are exactly equal at Nz=256), so nearly every point sits on a flat
+    stretch where ~1e-14 of FFT round-off would otherwise alternate sign, and `ProfileLookup`'s
+    `searchsorted` on a non-monotonic profile returns whatever slot it likes, silently.
+    """
+    hw = max(int(truncate * σ_slots + 0.5), 1)
+    k  = np.exp(-0.5 * (np.arange(-hw, hw + 1) / σ_slots) ** 2)
+    k /= k.sum()
+    padded = np.concatenate([np.full(hw, row[0]), row, np.full(hw, row[-1])])
+    out = fftconvolve(padded, k, mode="same")[hw:hw + row.size]
+    return np.minimum.accumulate(out)
 
 
-def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted", K=None):
+def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted"):
     """
     Vertically filter the reference density profile:  ⟨ρ_*⟩(z) = ∫ g_z(s) ρ_*(z + s) ds.
 
@@ -958,7 +983,6 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
     xr.DataArray
         ⟨ρ_*⟩ with the same shape and coordinates as rho_sorted.
     """
-    from scipy.ndimage import gaussian_filter1d
     from src.aux00_utils import _FWHM_TO_SIGMA
 
     Δz = dz_sorted.values
@@ -972,13 +996,11 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
     σ_slots = ℓ * _FWHM_TO_SIGMA / Δz0
 
     # A frozen reference is the same profile at every output: `sorted_timeseries(fixed_reference=True)`
-    # sorts t=0 once and repeats that row. Filtering all of them would redo one convolution n_times over,
-    # and this convolution is the expensive part — its stencil grows with the column, so the cost goes as
-    # N². Filter the one distinct row and broadcast it back.
+    # sorts t=0 once and repeats that row, so filter the one distinct row and broadcast it back.
     if rho_sorted.sizes.get("time", 1) > 1:
         first = rho_sorted.isel(time=0)
         if bool((rho_sorted == first).all()):
-            one = gaussian_filter1d(first.values, sigma=σ_slots, mode="nearest")
+            one = _fft_gaussian(first.values, σ_slots)
             filtered = xr.zeros_like(rho_sorted) + xr.DataArray(one, dims=[z_sorted_name],
                                                                 coords={z_sorted_name: first[z_sorted_name]})
             filtered.name = "⟨ρ_*⟩"
@@ -986,49 +1008,15 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
                                   filter_scale=float(ℓ), time_invariant=1)
             return filtered
 
-    zs = rho_sorted[z_sorted_name].values
-    N  = len(zs)
-    σ  = ℓ * _FWHM_TO_SIGMA
-    K  = REFERENCE_FILTER_K if K is None else K   # levels per σ; overridable so the choice can be swept
-    M  = min(int(np.ceil(K * (zs[-1] - zs[0] + Δz0) / σ)), N)
-
-    if M >= N:
-        # The resampled grid would be no coarser than the column, so filter it directly.
-        filtered = xr.apply_ufunc(
-            gaussian_filter1d, rho_sorted,
-            input_core_dims=[[z_sorted_name]],
-            output_core_dims=[[z_sorted_name]],
-            kwargs={"sigma": σ_slots, "axis": -1, "mode": "nearest"},
-            dask="parallelized",
-            output_dtypes=[rho_sorted.dtype],
-            dask_gufunc_kwargs={"allow_rechunk": True},
-        )
-    else:
-        edges = np.linspace(zs[0] - Δz0/2, zs[-1] + Δz0/2, M + 1)
-        zc    = 0.5 * (edges[:-1] + edges[1:])
-        w     = np.full(N, Δz0)
-        den, _ = np.histogram(zs, bins=edges, weights=w)
-
-        def _resample_filter(row):
-            # Area-average onto the M bins rather than point-sampling: the column carries structure
-            # below the bin width (tie runs among it), and sampling would fold it into the result.
-            num, _ = np.histogram(zs, bins=edges, weights=row * w)
-            coarse = np.divide(num, den, out=np.full(M, np.nan), where=den > 0)
-            if np.isnan(coarse).any():                    # bins no slot landed in
-                good = ~np.isnan(coarse)
-                coarse = np.interp(zc, zc[good], coarse[good])
-            smoothed = gaussian_filter1d(coarse, sigma=σ * M / (edges[-1] - edges[0]), mode="nearest")
-            return np.interp(zs, zc, smoothed)             # back onto the column, monotonicity preserved
-
-        filtered = xr.apply_ufunc(
-            _resample_filter, rho_sorted,
-            input_core_dims=[[z_sorted_name]],
-            output_core_dims=[[z_sorted_name]],
-            vectorize=True,
-            dask="parallelized",
-            output_dtypes=[rho_sorted.dtype],
-            dask_gufunc_kwargs={"allow_rechunk": True},
-        )
+    filtered = xr.apply_ufunc(
+        _fft_gaussian, rho_sorted, σ_slots,
+        input_core_dims=[[z_sorted_name], []],
+        output_core_dims=[[z_sorted_name]],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[rho_sorted.dtype],
+        dask_gufunc_kwargs={"allow_rechunk": True},
+    )
     filtered.name = "⟨ρ_*⟩"
     filtered.attrs.update(long_name="vertically filtered reference density profile", filter_scale=float(ℓ))
     return filtered
