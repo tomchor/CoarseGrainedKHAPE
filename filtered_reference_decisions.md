@@ -14,10 +14,20 @@ That last point is the rule to hold onto, and it splits the budget terms:
 | | terms | where |
 |---|---|---|
 | depend on ⟨b✶⟩ | `Υ̃`, `L̃`, `S̃`, `Π̃_A`, `ε̃ˢ`, `R̃ˢ` | **offline** |
-| reference-independent | `Π_K`, `ε_Kˢ` (velocities only), `τ(w, b_r)` | either; currently online |
+| depend on the sort, but not on ⟨b✶⟩ | `τ(w, b_r)` | **offline**, with the rest |
+| depend on neither | `Π_K`, `ε_Kˢ` — velocities alone | either; currently online |
 
-`τ(w, b_r)` belongs in the second row because `b̄_r = b̄ − ⟨b✶⟩(z)` is exactly `filter(b_r)`: `b✶` depends on
-z alone, so the sub-filter half is the same against either reference.
+`τ(w, b_r) = filter(w·b_r) − w̄·filter(b_r)` with `b_r = b − b✶(z)` uses the **unfiltered** sorted profile, so
+it is untouched by how ⟨b✶⟩ is built and needs no change on that account. But it is **not** interchangeable
+between online and offline: the offline pipeline sorts the *z-padded* domain and the simulation sorts only
+the true domain, so `b✶` differs. Measured at Nz=128, ℓ=1, restricted to the physical domain and aligned in
+time: the online and offline conversion fields have **rms(diff)/rms = 0.68 and correlate at only +0.73**,
+while their volume integrals agree to four figures. Agreement in the integral, not pointwise.
+
+Whether the sort or the differing filter implementations dominates that is unresolved; `inv06` runs the
+offline sort both padded and unpadded and is the tool for separating them. Until then the safe default is
+to compute it offline with everything else rather than mixing a field from one path into a budget built on
+the other.
 
 This was not the original design — §2 — and the reason it changed is §6.
 
@@ -59,8 +69,10 @@ the reference profile has to be computed in one place, and that place is where t
 independent cross-check that `inv08`/`inv09`/`inv10` were written to be. The ~0.4% the gradient scheme
 costs is the price of that consistency, and it is small because the resolution is high.
 
-`Π_K`, `ε_Kˢ` and `τ(w, b_r)` never touch the reference profile, so they can continue to be read online
-without breaking anything — which also avoids recomputing the parts the simulation does better.
+`Π_K` and `ε_Kˢ` never touch the reference state at all, so they can continue to be read online without
+breaking anything — which also avoids recomputing the parts the simulation does better. `τ(w, b_r)` is a
+middle case: independent of ⟨b✶⟩ but not of the sort, and measurably different online versus offline
+pointwise (see the table above), so it goes offline with the terms it appears alongside.
 
 Note the setup runs `Re = Re₀·Nz²`, so refining the grid also raises Re and holds the resolution of the
 dissipative scale roughly fixed. It was *predicted* on that basis that the discretisation error would not
@@ -155,8 +167,9 @@ is exact, and there is no parameter to choose.
 **The online path still coarsens, and that is what forces every reference-dependent term offline.** The
 simulation builds ⟨b✶⟩ on a coarse column (§3, §4); offline it is exact. Two different constructions cannot
 both feed one budget, so `Π_A`, `ε_Aˢ`, `Υ̃`, `L̃`, `S̃` and `Rˢ` are computed where the exact profile is —
-offline — and the online set becomes the cross-check. `Π_K`, `ε_Kˢ` and `τ(w, b_r)` are unaffected: they
-never touch the reference profile.
+offline — and the online set becomes the cross-check. `Π_K` and `ε_Kˢ` are unaffected: they never touch the
+reference state. `τ(w, b_r)` does not depend on ⟨b✶⟩ either, but it does depend on the sort, which differs
+between the padded offline domain and the simulation's — so it is computed offline too.
 
 Porting the FFT online would remove that split. It needs a custom `compute!` with CUFFT — buildable
 (`ReferenceTendencyCorrection` is the precedent, and Oceananigans already depends on `CUDA.CUFFT`), but it
