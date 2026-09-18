@@ -15,6 +15,8 @@ parser = argparse.ArgumentParser(description="Calculate cross-scale APE transfer
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--reference-K", type=int, default=None,
+                    help="Levels per sigma for the filtered reference profile (default: REFERENCE_FILTER_K). For sweeping the choice; not a production knob.")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
@@ -82,6 +84,11 @@ _pi_a_var = "Π_A"
 online_pi_a = None
 if not filtered_reference:
     print("  Π_A: recomputing offline (--reference true; the simulation writes only the filtered-reference terms)")
+elif args.reference_K is not None:
+    # The online Π_A was built at the simulation's own REFERENCE_FILTER_K. Reading it while asking for a
+    # different K would silently mix the two, and Π_A is the term most sensitive to the choice, so a
+    # requested K forces the offline recompute.
+    print(f"  Π_A: recomputing offline (--reference-K {args.reference_K} differs from the online build)")
 elif fixed_reference:
     print("  Π_A: recomputing offline (fixed reference)")
 else:
@@ -101,6 +108,7 @@ energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             n_workers=n_workers,
                                             include_pi_k=False,
                                             online_pi_a=online_pi_a,
+                                            reference_K=args.reference_K,
                                             filtered_reference=filtered_reference)
 print("\nDone!")
 #---

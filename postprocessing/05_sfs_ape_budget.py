@@ -31,6 +31,8 @@ parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelv
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--reference-K", type=int, default=None,
+                    help="Levels per sigma for the filtered reference profile (default: REFERENCE_FILTER_K). For sweeping the choice; not a production knob.")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved reservoir is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, the scale decomposition valid for a kernel with vertical "
@@ -168,7 +170,7 @@ for ℓ in filter_scales:
     # scale-dependent, hence built inside this loop. `--reference true` restores the horizontal-limit path.
     if filtered_reference:
         t0 = time.time()
-        ref_rho_sorted = filtered_reference_profile(full_local_pes.rho_sorted, full_local_pes.dz_sorted, ℓ)
+        ref_rho_sorted = filtered_reference_profile(full_local_pes.rho_sorted, full_local_pes.dz_sorted, ℓ, K=args.reference_K)
         print(f"  ⟨ρ_*⟩ built (filtered reference)  ({time.time()-t0:.1f}s)")
     else:
         ref_rho_sorted = full_local_pes.rho_sorted
@@ -198,6 +200,7 @@ for ℓ in filter_scales:
     online_eps = online_name("ε_As", ℓ)
     reason = ("fixed reference" if fixed_reference else
               "reference=true (the simulation writes only the filtered-reference terms)" if not filtered_reference else
+              f"--reference-K {args.reference_K} differs from the online build" if args.reference_K is not None else
               "no online field" if online_eps not in ds else None)
     if reason is not None:
         t0 = time.time()

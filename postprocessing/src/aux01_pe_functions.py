@@ -922,7 +922,7 @@ SLOT_SPACING_RTOL = 1e-10
 REFERENCE_FILTER_K = 1000
 
 
-def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted"):
+def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted", K=None):
     """
     Vertically filter the reference density profile:  ⟨ρ_*⟩(z) = ∫ g_z(s) ρ_*(z + s) ds.
 
@@ -989,7 +989,8 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
     zs = rho_sorted[z_sorted_name].values
     N  = len(zs)
     σ  = ℓ * _FWHM_TO_SIGMA
-    M  = min(int(np.ceil(REFERENCE_FILTER_K * (zs[-1] - zs[0] + Δz0) / σ)), N)
+    K  = REFERENCE_FILTER_K if K is None else K   # levels per σ; overridable so the choice can be swept
+    M  = min(int(np.ceil(K * (zs[-1] - zs[0] + Δz0) / σ)), N)
 
     if M >= N:
         # The resampled grid would be no coarser than the column, so filter it directly.

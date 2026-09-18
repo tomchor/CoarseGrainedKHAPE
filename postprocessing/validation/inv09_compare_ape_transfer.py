@@ -58,6 +58,8 @@ print = logging.info
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Compare online vs offline cross-scale APE flux Π_A")
+parser.add_argument("--reference-K", type=int, default=None,
+                    help="Levels per sigma for the filtered reference profile (default: REFERENCE_FILTER_K). For sweeping the choice; not a production knob.")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file (run with --save_sorted)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
 parser.add_argument("--time", type=float, default=None, help="Target time for the snapshot maps (default: midpoint of simulation)")
@@ -152,7 +154,7 @@ for row, ℓ in enumerate(args.filter_scales):
     ds_filt = xr.Dataset({"b̄": gf.apply(ds_rho["b"], dims=FILTER_DIMS)})
     ds_filt.attrs.update(ds_raw.attrs)
     ds_filt = calculate_density_fields_from_buoyancy(ds_filt, buoyancy_name="b̄", density_name="ρ̄")
-    ref_rho_sorted = filtered_reference_profile(sorted_state.rho_sorted, sorted_state.dz_sorted, ℓ)
+    ref_rho_sorted = filtered_reference_profile(sorted_state.rho_sorted, sorted_state.dz_sorted, ℓ, K=args.reference_K)
     filt_local_pes = local_potential_energies_timeseries(ds_filt, ref_rho_sorted, sorted_state.dz_sorted,
                                                          density_name="ρ̄", n_workers=args.n_workers, verbose_level=0)
 
