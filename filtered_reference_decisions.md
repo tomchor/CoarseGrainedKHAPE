@@ -14,20 +14,32 @@ That last point is the rule to hold onto, and it splits the budget terms:
 | | terms | where |
 |---|---|---|
 | depend on ⟨b✶⟩ | `Υ̃`, `L̃`, `S̃`, `Π̃_A`, `ε̃ˢ`, `R̃ˢ` | **offline** |
-| depend on the sort, but not on ⟨b✶⟩ | `τ(w, b_r)` | **offline**, with the rest |
+| split depends on ⟨b✶⟩, though `b_r` itself does not | `τ(w, b_r)` | **offline**, with the rest |
 | depend on neither | `Π_K`, `ε_Kˢ` — velocities alone | either; currently online |
 
-`τ(w, b_r) = filter(w·b_r) − w̄·filter(b_r)` with `b_r = b − b✶(z)` uses the **unfiltered** sorted profile, so
-it is untouched by how ⟨b✶⟩ is built and needs no change on that account. But it is **not** interchangeable
-between online and offline: the offline pipeline sorts the *z-padded* domain and the simulation sorts only
-the true domain, so `b✶` differs. Measured at Nz=128, ℓ=1, restricted to the physical domain and aligned in
-time: the online and offline conversion fields have **rms(diff)/rms = 0.68 and correlate at only +0.73**,
-while their volume integrals agree to four figures. Agreement in the integral, not pointwise.
+**The online conversion is the wrong split for this decomposition, and must not appear in a pointwise
+plot.** Both paths write `filter(w·b_r) − w̄·b_rˡ` with `b_r = b − b✶(z)`, but they disagree on `b_rˡ`:
 
-Whether the sort or the differing filter implementations dominates that is unresolved; `inv06` runs the
-offline sort both padded and unpadded and is the tool for separating them. Until then the safe default is
-to compute it offline with everything else rather than mixing a field from one path into a budget built on
-the other.
+| | resolved half `b_rˡ` | reference |
+|---|---|---|
+| online (`SubFilterAvailablePotentialToKineticEnergyConversion`) | `b̄ − b✶` | unfiltered |
+| offline (`04`, via `calculate_b_r(ρ̄, ref_rho_sorted)`) | `b̄ − ⟨b✶⟩` | **filtered** |
+
+Oceanostics shares one `b✶(z)` across both halves deliberately, so that `filter(wbᵣ) = w̄b_rˡ + τˡ` is a
+decomposition of one discretisation rather than a difference of two. That is the right instinct and the
+wrong reference here: `L̃` is measured against ⟨b✶⟩, so the resolved conversion must use the same anomaly.
+The online version implements the `g_z = δ(z)` horizontal-limit split — §1's error, in the conversion term.
+
+The two differ by `w̄·(⟨b✶⟩ − b✶)`: the filtered velocity times a function of **z alone**. With periodic x
+and `w = 0` at the walls, continuity gives `∂/∂z ∫w dx = 0`, so `∫w dx = 0` at every height and filtering
+preserves it — hence `∫ w̄·f(z) dV = 0` for any `f(z)`. **The difference integrates to zero and is nonzero
+pointwise.** Measured at Nz=128, ℓ=1 on the physical domain: the two fields have rms(diff)/rms = 0.68 and
+correlate at only **+0.73**, while their volume integrals agree to four figures.
+
+So the integrated budget is indifferent, and any *field* plot is not. `04` computes the exchange itself
+against `ref_rho_sorted` and no Python script reads the online `wb_rs` except `inv10`, which is the
+fully-online cross-check by design — so `plot4_panels` and `anim1_panels` are correct as they stand. Keep
+it that way: the online `wb_rs` is a validation output, not a plottable field.
 
 This was not the original design — §2 — and the reason it changed is §6.
 
