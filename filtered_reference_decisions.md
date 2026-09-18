@@ -231,6 +231,38 @@ and the 32.7% figure should not be taken as general. This has not been chased do
 ladder's integral column and the residuals quoted above — carries this. The interface-restricted *field*
 comparisons do not.
 
+### The padding is applied in the wrong place — extend `b✶`, not `b`
+
+**This is a known defect, not a design choice.** Today the *3-D* field is edge-padded and then sorted, so
+the reference state is the sort of a padded field. The right construction is to **sort the physical domain
+and then extend the resulting `b✶(z)` profile** with its end values over the padded range — the same edge
+extension `b` itself receives.
+
+The padding exists so the filter's stencil stays inside the array. It is a numerical device for the
+*filter*, and `b✶(z)` is a function of z that the filter acts on, so it should be extended the way any
+other such function is. Padding `b` and sorting instead **manufactures a different reference state**: it
+adds `Nx · Nz_pad` cells of artificial fluid at each extreme, which changes the volume-to-height mapping
+and therefore `z✶`, and hence `Υ`, for *every* parcel — not just near the boundaries.
+
+Three consequences of the current order, all observed:
+
+- The sorted column is ~50% exact tie runs, and they are the padding (§5). `⟨ρ_*⟩` is exactly constant
+  across them, so `z̃_*` has no unique answer — the degenerate lookup that makes `Π_A` in the padding
+  round-off noise, and the reason `dV_physical` was needed at all.
+- **A parcel's `z✶` can land outside the physical domain.** The padding carries the *boundary* values, so
+  any physical fluid more extreme than those sorts beyond it. For `b = B₀tanh(z/h)` that cannot happen —
+  the profile is monotonic with its extremes at the walls, and neither adiabatic rearrangement nor
+  diffusion widens the range — so the current runs are safe *by property of the setup, not of the method*.
+  A blob of light fluid in the interior, or any profile with an interior extremum, would put `z✶` in the
+  padding, inflate `Υ` toward the padded height, and have `E_A` count the work of rising through fluid that
+  does not exist. Silently: nothing asserts that `z✶` stays physical.
+- It is also why the offline and online sorted states differ at all — the simulation sorts the true domain,
+  so its `z✶` is always physical. Extending `b✶` instead would remove that discrepancy and make `inv06`'s
+  comparison exact rather than approximate.
+
+Not yet implemented. The change is contained — sort before padding, then extend the profile — but it moves
+every `z✶`, so it changes all APE diagnostics and wants its own verification.
+
 ## 8. Things that are measured, and things that are not
 
 Measured and reliable: everything with a number above. The FFT/direct agreement, the K ladder's field
