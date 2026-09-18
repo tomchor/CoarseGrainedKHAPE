@@ -935,7 +935,8 @@ def _fft_gaussian(row, σ_slots, truncate=4.0):
     The result is clamped non-increasing. ⟨ρ_*⟩ inherits the sorted column's ordering (densest at the
     bottom), and convolving a non-increasing profile with a non-negative kernel is non-increasing -- so
     the clamp can only remove round-off, never real structure. It matters because the column is mostly
-    tie runs (99.3% of adjacent slots are exactly equal at Nz=256), so nearly every point sits on a flat
+    tie runs -- ~50% of adjacent slots are exactly equal at developed times, rising to 99% at t=0 when the
+    field is still horizontally uniform -- so a large fraction of the column sits on a flat
     stretch where ~1e-14 of FFT round-off would otherwise alternate sign, and `ProfileLookup`'s
     `searchsorted` on a non-monotonic profile returns whatever slot it likes, silently.
     """

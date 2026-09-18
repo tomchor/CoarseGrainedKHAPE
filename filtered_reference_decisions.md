@@ -163,8 +163,15 @@ This is still how the **online** path works. Offline, §6 made it moot.
 
 `ProfileLookup` resolves heights with `searchsortedfirst`/`searchsortedlast`, and on a non-monotonic
 profile those "return whatever slot it likes, silently" (Oceanostics' own warning). This is not a
-theoretical concern: the sorted column is **99.31% tie runs** at Nz=256, so nearly every point sits on a
-flat stretch. Direct convolution of a non-increasing profile with a non-negative kernel comes out exactly
+theoretical concern: **~50% of the sorted column is exact tie runs**, and they are the **padding**.
+
+`_pad_domain_in_z` extends the *3-D* field with edge values before `sorted_timeseries` sorts it, so `b✶` is
+the sort of a padded field rather than a padded profile: `N = Nx · Nz_padded`, half of it padding by
+construction, each column contributing `Nz_pad` exact duplicates of its boundary value at either end.
+Measured at Nz=256: 51.5% ties at developed times against 50% padding, rising to 99.31% at t=0 where
+`b = B₀tanh(z/h)` is horizontally uniform and every value repeats `Nx` times. So a large fraction of the
+column sits on a flat stretch, and that is also precisely why the lookup is degenerate in the padding (§7):
+`⟨ρ_*⟩` is exactly constant across those runs, so `z̃_*` has no unique answer there. Direct convolution of a non-increasing profile with a non-negative kernel comes out exactly
 monotonic (zero violations measured); FFT round-off does not. Hence the `np.minimum.accumulate` clamp in
 `_fft_gaussian` — it can only remove round-off, never real structure, but it is **not optional**.
 
