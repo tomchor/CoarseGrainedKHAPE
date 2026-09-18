@@ -34,8 +34,8 @@ evaluating `Ψ̇` at a height needs a cumulative integral over the whole column,
 struct ReferenceTendencyState{D, Z, S, W, FT}
     ∂ₜb✶ :: D            # TimeDerivative of the column's reference buoyancy
     z✶ :: Z              # model-grid reference height the correction is measured from
-    source_height :: S   # each cell's own height, flattened
-    workspace :: W       # cumulative ∫∂ₜb✶ dz̃ at the slot faces
+    source_height :: S   # each cell's own height, flattened (host array; R is evaluated on the CPU)
+    workspace :: W       # cumulative ∫∂ₜb✶ dz̃ at the slot faces (host array)
     z_bottom :: FT
     Δz✶ :: FT            # the column's slot thickness (VerticalSort gives equal-volume slots)
 end
@@ -59,7 +59,12 @@ function compute!(R::ReferenceTendencyField, time=nothing)
     compute_at!(s.z✶, time)
     compute_at!(s.∂ₜb✶, time)   # advances the TimeDerivative (a no-op when already at `time`)
 
-    ∂ₜb✶ = vec(interior(s.∂ₜb✶))
+    # Ψ̇ is a cumulative integral up the sorted column and R is a per-cell clamped lookup into it — both
+    # sequential over the column, not stencil operations — so the correction is evaluated on the host and
+    # the result copied back to R (which may live on the GPU). `s.source_height` and the Ψ̇ workspace are
+    # already host arrays; ∂ₜb✶ and z✶ are pulled to the host here. This runs only when the writer actuates
+    # a deferred output, not every timestep, so the round-trip is cheap.
+    ∂ₜb✶ = Array(vec(interior(s.∂ₜb✶)))
     N = length(∂ₜb✶)
 
     # Ψ̇ at the slot faces: a cumulative integral up the column, closed off at the bottom by zero
@@ -67,11 +72,11 @@ function compute!(R::ReferenceTendencyField, time=nothing)
     @inbounds Ψface[1] = zero(eltype(Ψface))
     cumsum!(view(Ψface, 2:N+1), ∂ₜb✶ .* s.Δz✶)
 
-    z✶ = vec(interior(s.z✶))
+    z✶ = Array(vec(interior(s.z✶)))
     R_flat = psi_dot.(s.source_height, Ref(Ψface), Ref(∂ₜb✶), s.z_bottom, s.Δz✶, N) .-
              psi_dot.(z✶,              Ref(Ψface), Ref(∂ₜb✶), s.z_bottom, s.Δz✶, N)
 
-    interior(R) .= reshape(R_flat, size(R))
+    interior(R) .= on_architecture(architecture(R.grid), reshape(R_flat, size(R)))
     fill_halo_regions!(R)
     set_status!(R.status, time)
 
@@ -112,12 +117,11 @@ function ReferenceTendencyCorrection(model, ∂ₜb✶, z✶::SortedReferenceHei
     z_bottom = convert(FT, znode(1, 1, 1, on_architecture(CPU(), grid), Center(), Center(), Face()))
     Δz✶ = convert(FT, grid.Lz / N)
 
-    source_height = on_architecture(architecture(grid), zeros(FT, prod(size(grid))))
-    reshape(source_height, size(grid)) .= interior(Field(KernelFunctionOperation{Center, Center, Center}(Zᶜᶜᶜ, grid)))
+    # source_height and the Ψ̇ workspace stay on the host: `compute!` evaluates R there (the cumulative
+    # integral and clamped lookup are sequential over the column) and copies the result back to R.
+    source_height = Array(vec(interior(Field(KernelFunctionOperation{Center, Center, Center}(Zᶜᶜᶜ, grid)))))
 
-    operand = ReferenceTendencyState(∂ₜb✶, z✶, source_height,
-                                     on_architecture(architecture(grid), zeros(FT, N + 1)),
-                                     z_bottom, Δz✶)
+    operand = ReferenceTendencyState(∂ₜb✶, z✶, source_height, zeros(FT, N + 1), z_bottom, Δz✶)
 
     return Field{Center, Center, Center}(grid; operand, status = FieldStatus())
 end
