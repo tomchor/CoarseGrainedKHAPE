@@ -152,6 +152,21 @@ def _pad_domain_in_z(ds, min_margin=None):
     ds_new = xr.Dataset(new_vars, coords={**other_coords, "z_aac": z_new}, attrs=ds.attrs)
     ds_new["dV"] = ds_new.Δx_caa * ds_new.Δy_aca * ds_new.Δz_aac
 
+    # The padding carries no volume, so every `integrate(·, dV)` covers the physical domain alone and
+    # no call site has to know the padding exists. It is not merely that padded cells are unphysical:
+    # they are edge-valued, so ⟨ρ_*⟩ is exactly constant there and inverting it for z̃_* is degenerate.
+    # Π_A = -τ(uᵢ,b) ∂ᵢΥ̃ is then pure noise rather than ~0, and re-randomises under perturbations as
+    # small as round-off -- measured at Nz=256, two computations of ⟨ρ_*⟩ agreeing to 2.4e-15 gave Π_A
+    # fields that were bit-identical across the interface and fully decorrelated in the padding
+    # (rms(diff) ≈ rms(Π_A)), moving ∫Π_A dV by 76% at ℓ=1. Fields keep the padding, since the budget
+    # needs filter(z) = z a stencil deep and `drop_padding` in the tests cuts it there.
+    physical = (ds_new.z_aac >= z_orig[0] - dz/2) & (ds_new.z_aac <= z_orig[-1] + dz/2)
+    ds_new["dV"] = ds_new["dV"].where(physical, 0.0)
+
+    ds_new.attrs["n_pad_z"]        = int(Nz_pad)
+    ds_new.attrs["z_min_physical"] = float(z_orig[0])  - dz / 2
+    ds_new.attrs["z_max_physical"] = float(z_orig[-1]) + dz / 2
+
     ds_new.attrs["z_min"] = float(z_new[0])  - dz / 2
     ds_new.attrs["z_max"] = float(z_new[-1]) + dz / 2
     ds_new.attrs["Lz"]    = ds_new.attrs["z_max"] - ds_new.attrs["z_min"]
