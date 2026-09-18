@@ -4,10 +4,22 @@ This is a decision record for the `jw/vertical-filter-ape` work, written so that
 repeat the measurements. `CLAUDE.md` says what the code *does*; this says **why**, what was tried and
 rejected, and what the numbers were. Where something is an inference rather than a measurement, it says so.
 
-The short version: the resolved reservoir is measured against ⟨ρ_*⟩ rather than ρ_*; the sub-filter flux
-and dissipation are computed online because the offline gradients were the accuracy bottleneck; and ⟨ρ_*⟩
-is filtered by FFT at full column resolution because every scheme for avoiding that cost was solving a
-problem that did not exist.
+The short version: the resolved reservoir is measured against ⟨ρ_*⟩ rather than ρ_*; ⟨ρ_*⟩ is filtered by
+FFT at full column resolution, because every scheme for avoiding that cost was solving a problem that did
+not exist; and **the reference profile is therefore built in exactly one place — offline — so every term
+that depends on it is computed there too.**
+
+That last point is the rule to hold onto, and it splits the budget terms:
+
+| | terms | where |
+|---|---|---|
+| depend on ⟨b✶⟩ | `Υ̃`, `L̃`, `S̃`, `Π̃_A`, `ε̃ˢ`, `R̃ˢ` | **offline** |
+| reference-independent | `Π_K`, `ε_Kˢ` (velocities only), `τ(w, b_r)` | either; currently online |
+
+`τ(w, b_r)` belongs in the second row because `b̄_r = b̄ − ⟨b✶⟩(z)` is exactly `filter(b_r)`: `b✶` depends on
+z alone, so the sub-filter half is the same against either reference.
+
+This was not the original design — §2 — and the reason it changed is §6.
 
 ---
 
@@ -24,7 +36,7 @@ rms; against ⟨ρ_*⟩ (Eq. 2.3) the same field is non-negative to +2.0e-03.
 needs no simulation output. The `--reference true` path still exists to reproduce earlier results; nothing
 in CI or production uses it.
 
-## 2. Why Π_A and ε_Aˢ are computed online
+## 2. Why Π_A and ε_Aˢ *were* computed online, and why they no longer are
 
 `ε_A = κ ∂ᵢb ∂ᵢΥ` is quadratic in gradients, and the offline `calculate_gradient` takes centred
 differences, whose `sin(kΔ)/Δ` response kills the 2Δ mode. The online form pairs its two factors on the
@@ -37,9 +49,18 @@ the interface reaches the grid scale, and the residual matches the discretisatio
 
 **But the case weakens with resolution.** Measured at **Nz=1024** (2026-09-17), the offline and online
 `∫ε_Aˢ dV` agree to **0.9927** (ℓ=1) and **0.9909** (ℓ=7), and the residual goes 0.185% → 0.477% (ℓ=1) and
-0.287% → 0.320% (ℓ=7) when everything is computed offline. So at production resolution the gradient scheme
-costs well under a percent, and an all-offline pipeline is defensible — which matters, because online and
-offline cannot both be the reference construction without keeping them bit-identical.
+0.287% → 0.320% (ℓ=7) when everything is computed offline. At production resolution the gradient scheme
+costs well under a percent.
+
+**That is what made the all-offline pipeline affordable, and §6 is what made it necessary.** Once ⟨ρ_*⟩ is
+exact offline and still coarse online, the two are no longer the same construction — so any term built on
+the reference profile has to be computed in one place, and that place is where the exact profile lives.
+`Π_A`, `ε_Aˢ`, `Υ̃`, `L̃`, `S̃` and `Rˢ` are therefore offline, and the online versions become the
+independent cross-check that `inv08`/`inv09`/`inv10` were written to be. The ~0.4% the gradient scheme
+costs is the price of that consistency, and it is small because the resolution is high.
+
+`Π_K`, `ε_Kˢ` and `τ(w, b_r)` never touch the reference profile, so they can continue to be read online
+without breaking anything — which also avoids recomputing the parts the simulation does better.
 
 Note the setup runs `Re = Re₀·Nz²`, so refining the grid also raises Re and holds the resolution of the
 dissipative scale roughly fixed. It was *predicted* on that basis that the discretisation error would not
@@ -131,10 +152,16 @@ exact direct-convolution result throughout the interface.
 So the coarse grid, `K`, the histogram binning and the interpolation back are all gone offline. The profile
 is exact, and there is no parameter to choose.
 
-**The online path still coarsens.** Porting the FFT there needs a custom `compute!` with CUFFT — buildable
+**The online path still coarsens, and that is what forces every reference-dependent term offline.** The
+simulation builds ⟨b✶⟩ on a coarse column (§3, §4); offline it is exact. Two different constructions cannot
+both feed one budget, so `Π_A`, `ε_Aˢ`, `Υ̃`, `L̃`, `S̃` and `Rˢ` are computed where the exact profile is —
+offline — and the online set becomes the cross-check. `Π_K`, `ε_Kˢ` and `τ(w, b_r)` are unaffected: they
+never touch the reference profile.
+
+Porting the FFT online would remove that split. It needs a custom `compute!` with CUFFT — buildable
 (`ReferenceTendencyCorrection` is the precedent, and Oceananigans already depends on `CUDA.CUFFT`), but it
-is GPU code, and see §3 for how that has gone. It is only worth doing if the online diagnostics are the
-scientific product rather than the cross-check.
+is GPU code, and see §3 for how that has gone. It is only worth doing if the online diagnostics are meant
+to be the scientific product rather than the cross-check.
 
 ## 7. The padding was in the integrals
 
