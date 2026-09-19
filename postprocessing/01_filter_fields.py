@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, filter_fields
+from src.aux00_utils import required_pad_margin, load_dataset_and_grid, filter_fields
 #---
 
 #+++ Configuration
@@ -23,7 +23,7 @@ filter_scales = args.filter_scales
 #+++ Load data and grid
 print("\n" + "="*60)
 print("Loading data and grid...")
-ds = load_dataset_and_grid(filename)
+ds = load_dataset_and_grid(filename, min_margin=required_pad_margin(filter_scales))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
@@ -32,6 +32,7 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Filtering velocity and buoyancy fields in x and z...")
 ds_filt = filter_fields(ds, filter_scales)
+ds_filt.attrs["pad_margin"] = required_pad_margin(filter_scales)
 print("Done!")
 #---
 

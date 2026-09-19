@@ -48,7 +48,7 @@ from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import (load_dataset_and_grid, integrate, make_gaussian_filter, open_grid_group,
                              model_grid_suffix, strip_grid_suffix, condense_uw_velocities)
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, sorted_timeseries,
-                                    local_potential_energies_timeseries, calculate_cross_scale_ape_flux)
+                                    local_potential_energies_timeseries, filtered_reference_profile, calculate_cross_scale_ape_flux)
 from src.aux03_plotting import run_label
 #---
 
@@ -145,12 +145,15 @@ for row, ℓ in enumerate(args.filter_scales):
 
     gf = make_gaussian_filter(ℓ, ds_raw)
 
-    # ρ̄ from the filtered buoyancy, exactly as the budget pipeline builds it (01 filters b, then 05
-    # converts), and Υˡ from looking that filtered density up in the *full* field's sorted profile.
+    # ρ̄ from the filtered buoyancy, exactly as the budget pipeline builds it (01 filters b, then 05 converts).
+    # Υ̃ comes from looking the filtered density up in ⟨ρ_*⟩ -- the *vertically filtered* reference --
+    # matching the construction the simulation now uses. Against the unfiltered ρ_* this would be the
+    # g_z = δ(z) horizontal limit, which is not what the online field computes.
     ds_filt = xr.Dataset({"b̄": gf.apply(ds_rho["b"], dims=FILTER_DIMS)})
     ds_filt.attrs.update(ds_raw.attrs)
     ds_filt = calculate_density_fields_from_buoyancy(ds_filt, buoyancy_name="b̄", density_name="ρ̄")
-    filt_local_pes = local_potential_energies_timeseries(ds_filt, sorted_state.rho_sorted, sorted_state.dz_sorted,
+    ref_rho_sorted = filtered_reference_profile(sorted_state.rho_sorted, sorted_state.dz_sorted, ℓ)
+    filt_local_pes = local_potential_energies_timeseries(ds_filt, ref_rho_sorted, sorted_state.dz_sorted,
                                                          density_name="ρ̄", n_workers=args.n_workers, verbose_level=0)
 
     ūᵢ = gf.apply(ds_rho["uᵢ"], dims=FILTER_DIMS)

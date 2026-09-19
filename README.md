@@ -28,6 +28,24 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 
 All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--filter-scales`, and `--n-workers`. Run any script with `--help` for its full argument list.
 
+### Scale decomposition (`--reference`)
+
+`03_energy_transfer.py`, `05_sfs_ape_budget.py` and `sweep2_energy_transfer.py` take `--reference {filtered,true}`, selecting the reference state the **resolved** reservoir is measured against:
+
+| Value | Reference | Valid for |
+|-------|-----------|-----------|
+| `filtered` (default) | the vertically filtered profile ⟨ρ_*⟩ | any kernel, including one with vertical extent |
+| `true` | the unfiltered ρ_* | horizontal kernels only (the `g_z = δ(z)` limit) |
+
+The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` reproduces the earlier behaviour and is kept for comparison. The simulation's online APE terms (`Π_A_ℓ<ℓ>`, `ε_As_ℓ<ℓ>` and the rest, under `--save_sorted`) are built against ⟨ρ_*⟩, and reading them is what makes the budget close; `true` therefore always recomputes offline. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
+
+`00_get_budgets.sh` forwards the flag:
+
+```bash
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference filtered
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference true
+```
+
 ## Setup
 
 Create the conda environment for Python post-processing:
@@ -72,6 +90,11 @@ bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 
 Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
 
+`SAVE_SORTED` defaults to `1`, so the simulation writes the sorted reference state and the online APE budget
+terms, and `03`/`05` read `Π_A` and `ε_Aˢ` back from it. That read is what closes the APE budget — at Nz=128 the
+residual against the dominant term goes 18.1% → 2.0% (ℓ=1) and 15.5% → 1.2% (ℓ=7). Pass `SAVE_SORTED=0` for
+smaller output, at the cost of the offline recompute and a looser budget.
+
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
 - `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
@@ -97,7 +120,7 @@ resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor component
 are full 3D fields (off by default to keep production output lean) and are consumed only by the
 validation scripts in `postprocessing/validation/`.
 
-`SAVE_SORTED=1` passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
+`SAVE_SORTED` (default **1**) passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
 state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
 (`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
 the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It

@@ -6,12 +6,16 @@ using Random
 using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
+using Oceananigans.Grids: topology, znode
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
+using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
+using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
+      FilteredAvailablePotentialEnergyDisplacementPotential, FilteredAvailablePotentialEnergyDissipationRate
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
@@ -291,6 +295,117 @@ function matched_filter(ℓ)
     return GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))
 end
 
+# The vertical marginal of that same Gaussian, for filtering the sorted column into ⟨b✶⟩ (see the
+# filtered-reference block under --save_sorted). The column is a 1×1×N grid spanning Lz uniformly, so a
+# filter carrying the *physical* σ convolves in true height — true only because this model grid is
+# uniform in z. On a stretched grid the column's slot heights vary (slot k is ΔV_k/(Lx·Ly)) while its
+# grid stays uniform, so the convolution would silently run in index space; ⟨b✶⟩ would then have to be
+# built on the model grid instead. Same restriction the offline `filtered_reference_profile` carries.
+# Oceanostics wraps every composed sub-filter expression in a KernelFunctionOperation carrying a trivial
+# passthrough kernel (see `subfilter_ape_ccc` and friends upstream). That is not cosmetic: a writer is
+# specialised on the type of its whole output NamedTuple, and an unwrapped `Field(gf(Field(a))) - b` is a
+# deep BinaryOperation nest. Handing a writer several of those sent LLVM's instruction selector quadratic
+# (DAGCombiner::CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation for >45 min
+# at Nz=32. Wrapping collapses each term to one flat KernelFunctionOperation, as the built-in ones already are.
+# Levels per σ on the grid ⟨b✶⟩ is filtered on; see `coarse_column`. Matches the offline
+# REFERENCE_FILTER_K in src/aux01_pe_functions.py.
+const REFERENCE_FILTER_K = 1000
+
+@inline _passthrough_ccc(i, j, k, grid, a) = @inbounds a[i, j, k]
+flatten(op) = KernelFunctionOperation{Center, Center, Center}(_passthrough_ccc, grid, op)
+
+# ⟨b✶⟩ is a Gaussian convolution of width σ, so it carries no structure below σ and filtering it at the
+# column's own resolution is wasted work: the column has one slot per grid cell, which oversamples the
+# result by ~400x at ℓ=1 and ~3000x at ℓ=7. Worse, the cost is quadratic -- N slots against a stencil
+# that itself grows with N, since σ in slot units is σN/Lz -- so at Nz=512 the two scales together cost
+# ~6e9 operations per output. Oceanostics' filter is a KernelAbstractions kernel written for GPUs, and on
+# CI's two CPU threads that measured ~3 hours of a 4h23m run.
+#
+# Instead, block-average the column onto REFERENCE_FILTER_K levels per σ, filter there, and hand that pair
+# straight to `ProfileLookup`, which takes a (b✶, z✶) of any length. Both grids are uniform, so a block
+# average is an exact area average -- the right resampling, since the column carries structure below the
+# coarse spacing (its tie runs among it) that point-sampling would alias.
+#
+# The filter runs on those M levels, and ⟨b✶⟩ is then interpolated back onto the column's N heights before
+# the lookup, so only the *convolution* is coarse: Υ̃ = z̃✶(b̄) - z keeps the column's own resolution. Reading
+# the coarse cells whole instead quantises Υ̃ to Lz/M, and Π̃_A = -τ(uᵢ,b) ∂ᵢΥ̃ differentiates it with nothing
+# downstream to smooth the steps -- at Nz=1024, ℓ=7 that is δz̃✶ = dz/8.2, a ~12% staircase in ∂Υ̃/∂z, plainly
+# visible in the Π_A panel while every term that *integrates* Υ̃ stayed smooth. The interpolation costs one
+# O(N) kernel and nothing in the lookup, which is a binary search (`searchsortedfirst`), so O(log N).
+_column_N() = grid.Nx * grid.Ny * grid.Nz
+
+# One coarse cell is the mean of `n` consecutive column slots. The kernel is launched over the coarse
+# grid and reads the column field directly; both are 1×1×· so only k varies.
+@inline function _block_mean_ccc(i, j, k, coarse_grid, fine, n)
+    acc = zero(eltype(fine))
+    @inbounds for m in 1:n
+        acc += fine[1, 1, (k - 1) * n + m]
+    end
+    return acc / n
+end
+
+# ...and back: coarse cell κ is the mean of column slots (κ-1)n+1 … κn, so it stands at fractional column
+# index (κ-0.5)n + 0.5, and column slot k sits at fractional coarse index (k-0.5)/n + 0.5. Interpolating
+# there rather than reading the coarse cell whole is what keeps the z̃✶ lookup at the column's own
+# resolution: the filter still runs on M levels (that is the expensive part), but Υ̃ = z̃✶(b̄) - z is no
+# longer quantised to Lz/M. Mapping in index space rather than in z avoids depending on M*n == N, which
+# `fld` does not guarantee. Outside the range this clamps, matching the edge extension either side and
+# numpy's interp, which the offline `filtered_reference_profile` ends with.
+@inline function _interp_from_coarse_ccc(i, j, k, column_grid, coarse, n, M)
+    FT = eltype(column_grid)
+    t  = (k - FT(0.5)) / n + FT(0.5)
+    κ  = clamp(floor(Int, t), 1, M - 1)
+    w  = clamp(t - κ, zero(FT), one(FT))
+    @inbounds return (one(FT) - w) * coarse[1, 1, κ] + w * coarse[1, 1, κ + 1]
+end
+
+"""Coarse 1×1×M column and the block size that maps the sorted column onto it, for filter scale ℓ."""
+function coarse_column(ℓ)
+    N = _column_N()
+    σ = _FWHM_to_σ(ℓ)
+    M_target = ceil(Int, REFERENCE_FILTER_K * grid.Lz / σ)
+    n = max(1, fld(N, min(M_target, N)))          # slots per coarse cell
+    M = fld(N, n)                                  # drops at most n-1 slots at the top
+    tx, ty, tz = topology(grid)
+    z_bottom = znode(1, 1, 1, grid, Center(), Center(), Face())
+    coarse = RectilinearGrid(architecture(grid), eltype(grid);
+                             size = (1, 1, M), topology = (tx, ty, tz),
+                             x = (0, grid.Lx), y = (0, grid.Ly),
+                             z = (z_bottom, z_bottom + grid.Lz))
+    return coarse, n, M
+end
+
+# The column filter is Oceanostics' Gaussian in every respect except how the weights are carried, and it
+# is spelled out here rather than reused because that difference is fatal at this width. `GaussianFilterKernel`
+# stores its weights as an `NTuple` inside the kernel's *type* and fully unrolls the stencil loop, which is
+# the right design at the widths the x-z filter uses (tens) and pathological at ~8K: the tuple is passed
+# **by value** into CUDA's 32 KiB kernel parameter space, so a 8017-wide stencil is 62.6 KiB and the launch
+# fails outright ("Kernel invocation uses too much parameter memory", sm_80), and asking LLVM to unroll 8017
+# iterations is its own cost. Weights in a device array and a plain loop: the array costs 72 bytes as a
+# kernel parameter no matter how long it is, so the width ceiling goes away and K is an accuracy choice again.
+@inline function _gauss_column_ccc(i, j, k, coarse_grid, ψ, w, hw)
+    FT = eltype(coarse_grid)
+    s = zero(FT); w_sum = zero(FT)
+    Nz = size(coarse_grid, 3)
+    @inbounds for m = -hw:hw
+        kk = min(max(k + m, 1), Nz)    # edge extension, matching Oceanostics' boundary=:edge and scipy's :nearest
+        ω  = w[m + hw + 1]
+        s     += ω * ψ[1, 1, kk]
+        w_sum += ω
+    end
+    return s / w_sum
+end
+
+"""The vertical marginal of the same Gaussian, on a coarse column of M levels (stencil ≈ 8K, not 8σN/Lz)."""
+function coarse_filter(ℓ, coarse)
+    σ  = _FWHM_to_σ(ℓ)
+    Δ  = grid.Lz / size(coarse, 3)
+    hw = max(1, floor(Int, 4σ / Δ + 0.5))          # truncate at 4σ, matching scipy
+    FT = eltype(grid)
+    w  = on_architecture(architecture(grid), FT[exp(-(m * Δ)^2 / (2σ^2)) for m = -hw:hw])
+    return ψ -> KernelFunctionOperation{Center, Center, Center}(_gauss_column_ccc, coarse, ψ, w, hw)
+end
+
 _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
     gf = matched_filter(ℓ)
@@ -384,24 +499,50 @@ if save_sorted
     z✶_lookup = reference_height(model, method=lookup)
     R_full = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
 
+    # The sub-filter APE terms use the filtered-reference scale decomposition (Wenegrat, Chor & Barkan
+    # Eqs. 2.3-2.5, 2.19-2.22). Measuring the resolved reservoir against the unfiltered b✶ instead is the
+    # g_z = δ(z) horizontal-filter limit: with a kernel that has vertical extent a fluid at rest still
+    # carries APE against b✶, so that reservoir does not vanish at rest and the remainder goes negative.
+    # This filter acts in x *and* z, so only ⟨b✶⟩ gives a decomposition into two non-negative reservoirs,
+    # and the unfiltered form is not written at all. The offline pipeline keeps `--reference true` for
+    # reproducing earlier results; it recomputes those terms itself.
+    #
+    # Nothing here needs a new Oceanostics diagnostic: ProfileLookup takes an external (b✶, z✶) pair,
+    # refreshes it on every compute! when it is a Field, and skips the O(N log N) sort; and the
+    # two-argument constructors let the two halves of each sub-filter quantity carry *different*
+    # reference profiles, composed here exactly as R_s already is.
     _ape_pairs = Pair{Symbol, Any}[]
     for ℓ in filter_ℓs
         gf = matched_filter(ℓ)
-        ε_As = SubFilterAvailablePotentialEnergyDissipationRate(model, gf; method=lookup)
-        Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf; dims=(1, 3), method=lookup)
-        E_as = SubFilterAvailablePotentialEnergy(model, gf; method=lookup)
+        # τ(w, b_r) is reference-independent: b̄_r = b̄ - ⟨b✶⟩(z) is exactly filter(b_r), since b✶(z)
+        # depends on z alone, so the sub-filter half is the same either way.
         wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
 
-        # Rˢ = filter(R) - Rˡ, both measured against the same shared profile
-        z✶ˡ = reference_height(Field(gf(b)); method=lookup)
-        R_l = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶ˡ)
-        R_s = Field(gf(R_full)) - R_l
+        coarse_ℓ, n_ℓ, M_ℓ = coarse_column(ℓ)
+        _blk(f) = Field(KernelFunctionOperation{Center, Center, Center}(_block_mean_ccc, coarse_ℓ, f, n_ℓ))
+        b✶_crs  = Field(coarse_filter(ℓ, coarse_ℓ)(_blk(reference_buoyancy(z✶_1dsort))))  # ⟨b✶⟩ on M levels
+        b✶_flt  = Field(KernelFunctionOperation{Center, Center, Center}(_interp_from_coarse_ccc,
+                                                z✶_1dsort.grid, b✶_crs, n_ℓ, M_ℓ))        # ...back onto the N slots
+        lookup_flt = ProfileLookup(b✶_flt, z✶_1dsort)                         # heights unchanged; only b✶ filtered
+        z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
 
-        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")        => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
-                          Symbol("Π_A_ℓ$(ℓ)")         => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
-                          Symbol("E_as_ℓ$(ℓ)")        => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
-                          Symbol("wb_rs_ℓ$(ℓ)")       => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
-                          Symbol("R_s_ℓ$(ℓ)")         => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
+        L    = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)                          # L̃ = Ẽ_A(b̄, z)
+        E_as = flatten(Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup)))) - L)   # S̃ = Ē_A - L̃
+        Υ    = FilteredAvailablePotentialEnergyDisplacementPotential(model, z✶ˡ_flt)      # Υ̃ = z̃✶(b̄) - z
+        Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
+        ε_As = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
+                       FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
+        # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
+        R_l  = ReferenceTendencyCorrection(model, TimeDerivative(b✶_flt, model), z✶ˡ_flt)
+        R_s  = flatten(Field(gf(R_full)) - R_l)
+
+        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
+                          Symbol("Π_A_ℓ$(ℓ)")   => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
+                          Symbol("E_as_ℓ$(ℓ)")  => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
+                          Symbol("L_ℓ$(ℓ)")     => L,    Symbol("L_ℓ$(ℓ)_int")    => Integral(L),
+                          Symbol("Υ_ℓ$(ℓ)")     => Υ,
+                          Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
+                          Symbol("R_s_ℓ$(ℓ)")   => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
                           Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
                           Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
     end
@@ -412,6 +553,11 @@ if save_sorted
     # The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the
     # panels animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl.
     # All are model-grid, so the 2D file stays single-grid.
+    #
+    # Keep this tuple small. A writer is specialised on the type of its whole output NamedTuple, and
+    # growing it from ~50 to ~76 heterogeneous entries once sent LLVM's instruction selector quadratic
+    # (CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation of this writer for
+    # >45 min at Nz=32. `flatten` above is what keeps each term one flat type; do not remove it.
     twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
 end
 #---
@@ -420,7 +566,11 @@ outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filter
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
-output_filename = "output/$(simulation_name).nc"
+# Output lands in $KHAPE_OUTPUT_DIR when set, so an HPC run can write to scratch without symlinking the
+# repo directory (which does not work: `output/.gitkeep` is tracked, so git reports it deleted).
+output_dir = get(ENV, "KHAPE_OUTPUT_DIR", "output")
+mkpath(output_dir)
+output_filename = joinpath(output_dir, "$(simulation_name).nc")
 
 if !(model.closure isa ScalarDiffusivity)
     ν = viscosity(model)
@@ -437,7 +587,7 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_f
                                                   global_attributes = params,
                                                   overwrite_existing = true)
 
-output_filename_2d = "output/$(simulation_name)_2d.nc"
+output_filename_2d = joinpath(output_dir, "$(simulation_name)_2d.nc")
 simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
                                                        schedule = TimeInterval(2),
                                                        filename = output_filename_2d,
@@ -446,7 +596,7 @@ simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., two
                                                        global_attributes = params,
                                                        overwrite_existing = true)
 
-@info "Output will be saved to: $(output_filename).nc"
+@info "Output will be saved to: $(output_filename)"
 #---
 
 #+++ Run simulation

@@ -11,13 +11,14 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
 from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
     calculate_sfs_ape_tendency,
     calculate_sfs_R_correction,
     calculate_sfs_ape_dissipation,
+    filtered_reference_profile,
 )
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -30,6 +31,11 @@ parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelv
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Reference state the resolved reservoir is measured against. 'filtered' (default) uses the "
+                         "vertically filtered profile ⟨ρ_*⟩, the scale decomposition valid for a kernel with vertical "
+                         "extent. 'true' uses the unfiltered ρ_* for both reservoirs, the horizontal-filter limit, "
+                         "which is what the pipeline did before and is kept for reproducing those results.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -38,13 +44,16 @@ PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
 fixed_reference = args.fixed_reference
+filtered_reference = args.reference == "filtered"
 #---
 
 #+++ Load data and grid
 print("\n" + "="*60)
 print("Loading data and grid...")
 t0 = time.time()
-ds = load_dataset_and_grid(filename)
+# Pad exactly as 01 did, so the sort and the budgets see the grid the fields were filtered on.
+_filtered_fn = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
@@ -60,7 +69,7 @@ filter_scales = ds_filt.filter_scale.values
 filtered_dimensions = ["x_caa", "z_aac"]
 
 ds = condense_uw_velocities(ds, indices=[1, 3])
-ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+ds_full = ds[["b", "dV", "dV_physical", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
@@ -124,10 +133,7 @@ print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}
 # one term on a different reference state from the rest and the budget would not close. That variant
 # therefore falls back to the offline expression, which is also what validation/inv08 checks the online
 # field against. Map a filter scale to its sim-output name, matching the Julia Symbol("<var>_ℓ$(ℓ)").
-def online_name(var, ℓ):
-    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
-
-dV = ds_full.dV
+dV = ds_full.dV_physical   # padding carries no volume; see _pad_domain_in_z
 budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
 
@@ -152,8 +158,21 @@ for ℓ in filter_scales:
     ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
     print(f"  ρ̄ calculated  ({time.time()-t0:.1f}s)")
 
+    # The reference the resolved reservoir is measured against. With a kernel that has vertical extent the
+    # unfiltered ρ_* is the wrong one: a fluid at rest filters to a profile that still carries APE against
+    # ρ_*, so Eₐˡ does not vanish at rest and the remainder Eₐˢ goes negative. ⟨ρ_*⟩ — the rest state as the
+    # filter sees it — makes both reservoirs vanish at rest and positive semi-definite (Eqs. 2.3-2.5). It is
+    # scale-dependent, hence built inside this loop. `--reference true` restores the horizontal-limit path.
+    if filtered_reference:
+        t0 = time.time()
+        ref_rho_sorted = filtered_reference_profile(full_local_pes.rho_sorted, full_local_pes.dz_sorted, ℓ)
+        print(f"  ⟨ρ_*⟩ built (filtered reference)  ({time.time()-t0:.1f}s)")
+    else:
+        ref_rho_sorted = full_local_pes.rho_sorted
+        print("  reference: unfiltered ρ_* (horizontal-filter limit)")
+
     t0 = time.time()
-    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, full_local_pes.rho_sorted, full_local_pes.dz_sorted,
+    filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, ref_rho_sorted, full_local_pes.dz_sorted,
                                                          density_name="ρ̄", n_workers=n_workers)
     print(f"  filt_local_pes  ({time.time()-t0:.1f}s)")
 
@@ -165,20 +184,17 @@ for ℓ in filter_scales:
     # ε_Aˢ: read the online field when it is there and the reference is time-varying, integrated on the
     # budget's padded grid (the padding repeats each edge value, so every gradient there vanishes and
     # ε_Aˢ ≈ 0, exactly as for Π_K and ε_Kˢ in 04). It is an optimisation, not a requirement: the frozen
-    # profile makes it inconsistent with the other terms, and --save_sorted is off by default so a
-    # production run may not have it at all. Fall back to the offline expression in either case, naming
-    # the reason so a silent switch is visible in the log.
-    reason = ("fixed reference" if fixed_reference else
-              "no online field" if online_name("ε_As", ℓ) not in ds else None)
-    if reason is not None:
-        t0 = time.time()
-        sfs_ape_dissipation = calculate_sfs_ape_dissipation(
-            ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
-            filter_dims=filtered_dimensions,
-            filtered_density=ds_filt_ℓ.ρ̄,)
-        print(f"  sfs_ape_dissipation (offline, {reason})  ({time.time()-t0:.1f}s)")
-    else:
-        sfs_ape_dissipation = ds[online_name("ε_As", ℓ)]
+    # ε_Aˢ is built on the filtered reference profile, which is exact only offline (the simulation
+    # coarsens it), so it is computed here rather than read -- see 03 and filtered_reference_decisions.md.
+    # The offline gradients are centred rather than face-paired, which cost 18.1% vs 2.0% of the dominant
+    # term at Nz=128; measured at Nz=1024 the two agree to 0.99 and the residual moves 0.287% -> 0.320%,
+    # so at production resolution consistency is worth more than the discretisation.
+    t0 = time.time()
+    sfs_ape_dissipation = calculate_sfs_ape_dissipation(
+        ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
+        filter_dims=filtered_dimensions,
+        filtered_density=ds_filt_ℓ.ρ̄,)
+    print(f"  sfs_ape_dissipation: offline, against the exact (FFT) reference profile  ({time.time()-t0:.1f}s)")
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
     ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
@@ -187,7 +203,8 @@ for ℓ in filter_scales:
     t0 = time.time()
     R_s = calculate_sfs_R_correction(full_local_pes.rho_sorted, full_local_pes.z0, filt_local_pes.z0,
                                      full_local_pes.dz_sorted, gaussian_filter,
-                                     filter_dims=filtered_dimensions, n_workers=n_workers)
+                                     filter_dims=filtered_dimensions, n_workers=n_workers,
+                                     filt_rho_sorted=ref_rho_sorted if filtered_reference else None)
     print(f"  R_s  ({time.time()-t0:.1f}s)")
 
     dAPE_dt = calculate_sfs_ape_tendency(subfilter_local_ape)
@@ -236,7 +253,7 @@ for ℓ in filter_scales:
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
 
     # Free memory before the next iteration
-    del ds_filt_ℓ, filt_local_pes, full_local_ape_filtered, subfilter_local_ape
+    del ds_filt_ℓ, filt_local_pes, full_local_ape_filtered, subfilter_local_ape, ref_rho_sorted
     del sfs_ape_dissipation, R_s, dAPE_dt, budget_ℓ
     del ape_to_ke_exchange, int_ape_to_ke_exchange
     del int_dAPE_dt, int_sfs_ape_dissipation, int_R_s
@@ -249,6 +266,8 @@ sfs_ape_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
                                                                dims="filter_scale",
                                                                name="filter_scale"))
 sfs_ape_budget_terms.attrs.update(ds.attrs)
+sfs_ape_budget_terms.attrs["ape_reference"] = "filtered" if filtered_reference else "true"
+
 # Scale-independent fields don't need filter_scale dimension
 sfs_ape_budget_terms["ρ"] = ds_full.ρ
 print("\nDone!")

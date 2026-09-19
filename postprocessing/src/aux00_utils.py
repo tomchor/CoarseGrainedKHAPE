@@ -4,7 +4,8 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
+# $KHAPE_PP_OUTPUT redirects the derived budget files, as $KHAPE_OUTPUT_DIR does the simulation output.
+PP_OUTPUT = Path(os.environ.get("KHAPE_PP_OUTPUT") or Path(__file__).resolve().parent.parent / "output")
 
 #+++ Multi-grid output files
 # A NetCDFWriter holding outputs on more than one grid disambiguates by suffixing every dimension name
@@ -65,17 +66,63 @@ def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
 #---
 
 #+++ Load data
-def _pad_domain_in_z(ds):
-    """Extend the z domain to twice its original height using edge-value padding.
+def required_pad_margin(filter_scales):
+    """Physical z margin the padding must provide for the widest filter in `filter_scales`.
 
-    Adds Nz//2 cells at the bottom (each filled with that field's bottom boundary
-    value) and Nz//2 cells at the top (each filled with the top boundary value),
-    doubling the domain height. Assumes a uniform z grid. Δz_aac is extended with
-    the same constant dz; dV and z-extent attributes are recomputed.
+    The sub-filter decomposition S̃ = Ē_A - L̃ is an identity only where filter(z) = z, which fails
+    within one stencil of an array boundary: the truncated, asymmetric stencil no longer reproduces a
+    linear coordinate. Padding restores it, provided the physical domain sits at least a full stencil
+    half-width — 4σ, matching scipy's truncate=4 — inside the padded array.
+
+    The default Nz//2 padding gives a margin of Lz/2, which is 12.5 for this setup: enough for ℓ = 7
+    (4σ = 11.89) and not for anything larger. The sweep spans ℓ up to 20 (4σ = 33.97), so it needs
+    roughly 3.7x the domain height in padding.
+    """
+    σ_max = max(float(ℓ) for ℓ in filter_scales) * _FWHM_TO_SIGMA
+    return 4.0 * σ_max
+
+
+def pad_margin_of(ds_filt):
+    """The padding margin the filtering step recorded, so every later step pads identically.
+
+    The sort in 02 and the budgets in 03-05 must see the same padded grid the fields were filtered on,
+    so the margin is written once by 01/sweep1 and read back here rather than recomputed. Returns None
+    for files written before this was recorded, which restores the old Nz//2 default.
+    """
+    m = ds_filt.attrs.get("pad_margin")
+    return None if m is None else float(m)
+
+
+def pad_margin_for_run(filtered_filename):
+    """Read the recorded margin off a run's filtered-fields file, or None if it has none.
+
+    Every step after 01 must pad exactly as 01 did -- the sort in 02 and the budgets in 03-05 all have
+    to see the same padded grid -- so each reads the margin from the file 01 wrote rather than deriving
+    it again. Missing file or missing attribute returns None, which restores the Nz//2 default and keeps
+    output written before this existed readable.
+    """
+    import xarray as _xr
+    try:
+        with _xr.open_dataset(filtered_filename, decode_times=False) as d:
+            return pad_margin_of(d)
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _pad_domain_in_z(ds, min_margin=None):
+    """Extend the z domain using edge-value padding.
+
+    Adds cells at the bottom (each filled with that field's bottom boundary value) and the top (the
+    top boundary value). By default it adds Nz//2 each side, doubling the domain height; `min_margin`
+    (a physical z distance, e.g. from `required_pad_margin`) widens that when a filter needs more
+    room, and never narrows it. Assumes a uniform z grid. Δz_aac is extended with the same constant
+    dz; dV and z-extent attributes are recomputed.
     """
     Nz     = ds.sizes["z_aac"]
-    Nz_pad = Nz // 2
     dz     = float(ds.Δz_aac.isel(z_aac=0))
+    Nz_pad = Nz // 2
+    if min_margin is not None:
+        Nz_pad = max(Nz_pad, int(np.ceil(float(min_margin) / dz)))
 
     z_orig = ds.z_aac.values
     z_bot  = z_orig[0]  - np.arange(Nz_pad, 0, -1) * dz
@@ -87,11 +134,13 @@ def _pad_domain_in_z(ds):
         if name in {"Δz_aac", "dV"} or "z_aac" not in da.dims:
             new_vars[name] = da
             continue
-        # Use actual boundary values: multiply a zero slab by 0 then add boundary scalar
-        bot_slab = (da.isel(z_aac=slice(None, Nz_pad)) * 0
-                    + da.isel(z_aac=0)).assign_coords(z_aac=z_bot)
-        top_slab = (da.isel(z_aac=slice(-Nz_pad, None)) * 0
-                    + da.isel(z_aac=-1)).assign_coords(z_aac=z_top)
+        # Each slab is the boundary value broadcast over the new z axis. Building it by *slicing* Nz_pad
+        # cells out of the field as a zero template would cap the slab at Nz cells, which is invisible
+        # while Nz_pad = Nz//2 and breaks as soon as a filter needs a margin wider than the domain.
+        bot_slab = (xr.zeros_like(xr.DataArray(z_bot, dims=["z_aac"], coords={"z_aac": z_bot}))
+                    + da.isel(z_aac=0, drop=True)).transpose(*da.dims)
+        top_slab = (xr.zeros_like(xr.DataArray(z_top, dims=["z_aac"], coords={"z_aac": z_top}))
+                    + da.isel(z_aac=-1, drop=True)).transpose(*da.dims)
         new_vars[name] = xr.concat([bot_slab, da, top_slab], dim="z_aac")
 
     new_vars["Δz_aac"] = xr.DataArray(
@@ -103,6 +152,25 @@ def _pad_domain_in_z(ds):
     ds_new = xr.Dataset(new_vars, coords={**other_coords, "z_aac": z_new}, attrs=ds.attrs)
     ds_new["dV"] = ds_new.Δx_caa * ds_new.Δy_aca * ds_new.Δz_aac
 
+    # The padding carries no volume, so every `integrate(·, dV)` covers the physical domain alone and
+    # no call site has to know the padding exists. It is not merely that padded cells are unphysical:
+    # they are edge-valued, so ⟨ρ_*⟩ is exactly constant there and inverting it for z̃_* is degenerate.
+    # Π_A = -τ(uᵢ,b) ∂ᵢΥ̃ is then pure noise rather than ~0, and re-randomises under perturbations as
+    # small as round-off -- measured at Nz=256, two computations of ⟨ρ_*⟩ agreeing to 2.4e-15 gave Π_A
+    # fields that were bit-identical across the interface and fully decorrelated in the padding
+    # (rms(diff) ≈ rms(Π_A)), moving ∫Π_A dV by 76% at ℓ=1. Fields keep the padding, since the budget
+    # needs filter(z) = z a stencil deep and `drop_padding` in the tests cuts it there.
+    # dV stays the true cell volume: `sorted_timeseries` builds the sorted column's slot heights from
+    # dV/(Lx·Ly), so zeroing it there collapses those slots to zero height and the z_1d_sorted coordinate
+    # repeats. `dV_physical` is the integration weight instead — the same volumes with the padding set to
+    # zero — and every `integrate(·, ·)` in the budget uses it.
+    physical = (ds_new.z_aac >= z_orig[0] - dz/2) & (ds_new.z_aac <= z_orig[-1] + dz/2)
+    ds_new["dV_physical"] = ds_new["dV"].where(physical, 0.0)
+
+    ds_new.attrs["n_pad_z"]        = int(Nz_pad)
+    ds_new.attrs["z_min_physical"] = float(z_orig[0])  - dz / 2
+    ds_new.attrs["z_max_physical"] = float(z_orig[-1]) + dz / 2
+
     ds_new.attrs["z_min"] = float(z_new[0])  - dz / 2
     ds_new.attrs["z_max"] = float(z_new[-1]) + dz / 2
     ds_new.attrs["Lz"]    = ds_new.attrs["z_max"] - ds_new.attrs["z_min"]
@@ -110,7 +178,7 @@ def _pad_domain_in_z(ds):
     return ds_new
 
 
-def load_dataset_and_grid(filename):
+def load_dataset_and_grid(filename, min_margin=None):
     """
     Load the simulation output and grid information
 
@@ -154,7 +222,7 @@ def load_dataset_and_grid(filename):
     ds["LxLy"] = ds.Lx * ds.Ly
 
     # Pad domain in z (double height using boundary values of each field)
-    ds = _pad_domain_in_z(ds)
+    ds = _pad_domain_in_z(ds, min_margin=min_margin)
 
     return ds
 #---

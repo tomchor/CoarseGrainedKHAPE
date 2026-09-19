@@ -33,9 +33,17 @@ jobs:
         with:
           ref: ${{ inputs.head_sha || github.sha }}
 
+      # Pinned to 1.12 rather than the floating '1'. Oceananigans' NetCDF grid reconstruction
+      # (ext/OceananigansNCDatasetsExt/grid_reconstruction.jl) recovers the grid's *positional*
+      # constructor arguments from an unordered Dict and splats `values(...)` into the constructor.
+      # Julia's Dict iteration order is stable within a version but not across them, so 1.13.0 hands
+      # RectilinearGrid (Float64, CPU()) where 1.12 hands (CPU(), Float64), and the plotting step at
+      # the end of the simulation dies with a MethodError. Nothing in this repo changed; a floating
+      # version means an upstream Julia release can break CI on its own. Unpin once the argument
+      # recovery is fixed upstream.
       - uses: julia-actions/setup-julia@v2
         with:
-          version: '1'
+          version: '1.12'
 
       - uses: julia-actions/cache@v2
 

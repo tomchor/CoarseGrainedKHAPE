@@ -7,6 +7,7 @@ following Winters et al. (1995).
 
 import numpy as np
 import xarray as xr
+from scipy.signal import fftconvolve
 import concurrent.futures
 from src.aux00_utils import integrate, calculate_gradient
 
@@ -584,7 +585,7 @@ def calculate_sfs_ape_tendency(subfilter_local_ape):
 #+++ SFS reference-tendency correction R_s
 def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted,
                                filter, filter_dims=["x_caa", "y_aca"], z_name="z_aac",
-                               n_workers=None):
+                               n_workers=None, filt_rho_sorted=None):
     """
     Compute the subfilter reference-tendency correction
 
@@ -608,6 +609,11 @@ def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted
     full_dz_sorted : xr.DataArray
         2D cell heights in sorted state (time, z_1d_sorted),
         e.g. full_local_pes.dz_sorted.
+    filt_rho_sorted : xr.DataArray or None
+        Vertically filtered reference profile ⟨ρ_*⟩ (time, z_1d_sorted), from
+        filtered_reference_profile(). When given, Rˡ is measured against it rather
+        than against the unfiltered ρ_*, which is what the filtered-reference scale
+        decomposition requires. None keeps the horizontal-limit behaviour.
     filter : gcm_filters.Filter
         Filter object used for the spatial filtering operation.
     filter_dims : list of str
@@ -621,8 +627,13 @@ def calculate_sfs_R_correction(full_rho_sorted, full_z0, filt_z0, full_dz_sorted
         4D subfilter correction R_s (time, x, y, z).
     """
     drho_star_dt = calculate_drho_star_dt(full_rho_sorted)
-    R_full = calculate_R_reference_tendency(full_z0, drho_star_dt, full_dz_sorted, z_name=z_name, n_workers=n_workers)
-    R_l    = calculate_R_reference_tendency(filt_z0, drho_star_dt, full_dz_sorted, z_name=z_name, n_workers=n_workers)
+    # Rˡ is measured against whichever reference the resolved reservoir uses. Under the filtered-reference
+    # construction that is ⟨ρ_*⟩, so its own tendency ∂ₜ⟨ρ_*⟩ drives Rˡ — Eq. (2.18), R̃ˡ = ⟨Ψ̇_*⟩(z) -
+    # ⟨Ψ̇_*⟩(z̃_*(b̄)). With no filtered profile given this falls back to the unfiltered ρ_* for both halves,
+    # which is the horizontal-limit form of Eq. (2.25)/(2.26).
+    dfilt_star_dt = drho_star_dt if filt_rho_sorted is None else calculate_drho_star_dt(filt_rho_sorted)
+    R_full = calculate_R_reference_tendency(full_z0, drho_star_dt,  full_dz_sorted, z_name=z_name, n_workers=n_workers)
+    R_l    = calculate_R_reference_tendency(filt_z0, dfilt_star_dt, full_dz_sorted, z_name=z_name, n_workers=n_workers)
     return filter.apply(R_full, dims=filter_dims) - R_l
 #---
 
@@ -888,4 +899,126 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_ca
     )
     grad_upsilon = calculate_gradient(upsilon)
     return -(tau_i * grad_upsilon).sum(dim=index_dim)
+#---
+
+#+++ Filtered reference profile ⟨ρ_*⟩
+# Relative tolerance on the sorted column's slot spacing. The column's slot heights are dV/(Lx·Ly), so
+# they are uniform exactly when the model's Δz is, which the offline pipeline already requires elsewhere
+# (`_pad_domain_in_z` extends the domain with a single constant dz, and `GaussianFilter` convolves in
+# index space). Filtering the profile with one σ is only meaningful on a uniform column, so a violation
+# is raised rather than silently smoothed with the wrong width.
+SLOT_SPACING_RTOL = 1e-10
+
+# Levels per σ on the grid ⟨ρ_*⟩ is filtered on. The sorted column carries one slot per grid cell, which
+# is far finer than a Gaussian-filtered profile can resolve: a convolution of width σ is smooth on scale
+# σ, so sampling it below that stores information it cannot contain. Filtering on the column therefore
+# costs O(N²) -- N slots against a stencil that itself grows with N -- which at Nz=2048 is ~400 hours
+# over the sweep's 30 scales. Resampling to K levels per σ, filtering there, and interpolating back onto
+# the column keeps the full z̃_* lookup resolution while making the filter cost independent of N.
+#
+# K trades accuracy against cost as δz̃_* ≈ σ/(8K²) and cost ≈ K², so the *wide* filters bind, not the
+# narrow ones. Matching the column's own lookup granularity (Lz/2N) needs K ≈ 79 at Nz=512 and ≈ 317 at
+# Nz=2048; K=1000 is deliberately generous, costing ~1.6 h at Nz=2048 against 402 h for the column. Lower
+# it if that becomes the bottleneck -- K=300 is ~6x cheaper and still meets the granularity criterion.
+# Gaussian convolution of the sorted column, by FFT. scipy's gaussian_filter1d convolves directly, so it
+# costs O(N · stencil) with a stencil of 8σ/Δz slots -- at Nz=1024 that is 29 s per record at ℓ=1 and
+# 600 s at ℓ=20, which is what the old block-averaging path existed to avoid. By FFT the same convolution
+# is O(N log N): measured 0.04-0.16 s over ℓ = 1…20 on that column, agreeing with the direct result to
+# 1.1e-13 on an O(1) field. So the column is filtered whole and there is no coarse grid, no levels-per-σ
+# parameter, and no interpolation back.
+def _fft_gaussian(row, σ_slots, truncate=4.0):
+    """Convolve with a Gaussian truncated at `truncate`σ, extending the ends with their edge value.
+
+    The edge padding reproduces scipy's mode="nearest": every output point inside the column then sees
+    only real or edge-extended values, never the zeros `fftconvolve` pads with outside the kept window.
+
+    The result is clamped non-increasing. ⟨ρ_*⟩ inherits the sorted column's ordering (densest at the
+    bottom), and convolving a non-increasing profile with a non-negative kernel is non-increasing -- so
+    the clamp can only remove round-off, never real structure. It matters because the column is mostly
+    tie runs -- ~50% of adjacent slots are exactly equal at developed times, rising to 99% at t=0 when the
+    field is still horizontally uniform -- so a large fraction of the column sits on a flat
+    stretch where ~1e-14 of FFT round-off would otherwise alternate sign, and `ProfileLookup`'s
+    `searchsorted` on a non-monotonic profile returns whatever slot it likes, silently.
+    """
+    hw = max(int(truncate * σ_slots + 0.5), 1)
+    k  = np.exp(-0.5 * (np.arange(-hw, hw + 1) / σ_slots) ** 2)
+    k /= k.sum()
+    padded = np.concatenate([np.full(hw, row[0]), row, np.full(hw, row[-1])])
+    out = fftconvolve(padded, k, mode="same")[hw:hw + row.size]
+    return np.minimum.accumulate(out)
+
+
+def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted"):
+    """
+    Vertically filter the reference density profile:  ⟨ρ_*⟩(z) = ∫ g_z(s) ρ_*(z + s) ds.
+
+    This is the reference state *as the filter sees it* — Eq. (2.3) of Wenegrat, Chor & Barkan. A
+    filter with vertical extent lifts the filtered field's centre of mass, so measuring the resolved
+    APE against the unfiltered ρ_* leaves it non-zero for a fluid at rest and drives the sub-filter
+    remainder negative. Measured against ⟨ρ_*⟩ instead, both reservoirs vanish at rest and are
+    positive semi-definite everywhere else.
+
+    g_z is the vertical marginal of the separable Gaussian the rest of the pipeline uses, so this is
+    the same 1D convolution `GaussianFilter.apply` performs in z (σ = ℓ·FWHM→σ, mode="nearest"),
+    applied on the sorted column's own grid rather than the model grid. Working on the column keeps
+    the full N = Nx·Ny·Nz height resolution of the z_*(ρ̄) lookup, so ∇Υ̃ carries no grid-scale
+    staircase; see the module note on the online port, where the column is not automatically uniform.
+
+    Filtering preserves monotonicity — a weighted average of a monotone profile with non-negative
+    weights is monotone — so ⟨ρ_*⟩ remains a valid reference profile and its inverse z̃_* is
+    well-defined.
+
+    Parameters
+    ----------
+    rho_sorted : xr.DataArray
+        Sorted reference density profile (time, z_1d_sorted), from sorted_timeseries().
+    dz_sorted : xr.DataArray
+        Sorted cell heights (time, z_1d_sorted), from sorted_timeseries().
+    ℓ : float
+        Filter length scale (FWHM) in physical units, matching make_gaussian_filter().
+    z_sorted_name : str
+        Name of the sorted column's vertical coordinate.
+
+    Returns
+    -------
+    xr.DataArray
+        ⟨ρ_*⟩ with the same shape and coordinates as rho_sorted.
+    """
+    from src.aux00_utils import _FWHM_TO_SIGMA
+
+    Δz = dz_sorted.values
+    Δz0 = float(Δz.flat[0])
+    if not np.allclose(Δz, Δz0, rtol=SLOT_SPACING_RTOL):
+        raise ValueError(f"filtered_reference_profile needs a uniformly spaced sorted column, but the slot "
+                         f"heights vary (min {Δz.min():.6e}, max {Δz.max():.6e}). The column inherits the "
+                         f"model's Δz, so this means a stretched vertical grid; filtering the profile with a "
+                         f"single σ is not valid there.")
+
+    σ_slots = ℓ * _FWHM_TO_SIGMA / Δz0
+
+    # A frozen reference is the same profile at every output: `sorted_timeseries(fixed_reference=True)`
+    # sorts t=0 once and repeats that row, so filter the one distinct row and broadcast it back.
+    if rho_sorted.sizes.get("time", 1) > 1:
+        first = rho_sorted.isel(time=0)
+        if bool((rho_sorted == first).all()):
+            one = _fft_gaussian(first.values, σ_slots)
+            filtered = xr.zeros_like(rho_sorted) + xr.DataArray(one, dims=[z_sorted_name],
+                                                                coords={z_sorted_name: first[z_sorted_name]})
+            filtered.name = "⟨ρ_*⟩"
+            filtered.attrs.update(long_name="vertically filtered reference density profile",
+                                  filter_scale=float(ℓ), time_invariant=1)
+            return filtered
+
+    filtered = xr.apply_ufunc(
+        _fft_gaussian, rho_sorted, σ_slots,
+        input_core_dims=[[z_sorted_name], []],
+        output_core_dims=[[z_sorted_name]],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[rho_sorted.dtype],
+        dask_gufunc_kwargs={"allow_rechunk": True},
+    )
+    filtered.name = "⟨ρ_*⟩"
+    filtered.attrs.update(long_name="vertically filtered reference density profile", filter_scale=float(ℓ))
+    return filtered
 #---
