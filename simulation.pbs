@@ -31,8 +31,26 @@ SAVE_SORTED=${SAVE_SORTED:-1}   # on by default: 03/05 read the online Pi_A and 
 
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
-juliaup add 1.12.4   # Julia 1.12.6 has a GPU-codegen regression (InvalidIRError in gpu_fill_kernel!); 1.12.4 works
-time julia +1.12.4 --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ $TENSOR_FLAG $SORTED_FLAG 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
+
+# Julia 1.12.6 has a GPU-codegen regression (InvalidIRError in gpu_fill_kernel!); 1.12.4 works. How you get
+# 1.12.4 is per-user, so find it rather than assume: $JULIA if the caller set one, else juliaup, else a
+# standalone tarball under $WORK. Hard-coding either route means whoever uses the other carries a local
+# edit to this file, and loses it at the next pull -- which has happened.
+if [ -n "${JULIA:-}" ]; then
+    echo "Using \$JULIA = $JULIA"
+elif command -v juliaup >/dev/null 2>&1; then
+    juliaup add 1.12.4
+    JULIA="julia +1.12.4"
+elif [ -x "$WORK/julia-1.12.4/bin/julia" ]; then
+    JULIA="$WORK/julia-1.12.4/bin/julia"
+else
+    echo "error: no Julia 1.12.4 found. Set \$JULIA, install juliaup, or unpack the 1.12.4 tarball to" >&2
+    echo "       \$WORK/julia-1.12.4 (https://julialang-s3.julialang.org/bin/linux/x64/1.12/julia-1.12.4-linux-x86_64.tar.gz)" >&2
+    exit 1
+fi
+$JULIA --version
+
+time $JULIA --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ $TENSOR_FLAG $SORTED_FLAG 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
 
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.log
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.out
