@@ -52,16 +52,16 @@ jobs:
 
       # --save_sorted adds the Winters sorted reference state, which tests/test_online_vs_offline.py
       # checks against the offline sort. It costs one extra sort per output and no extra 3D fields.
-      - name: Run simulation (Nz=512, CPU)
-        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3 --filter_ls 1 7 --save_sorted
+      - name: Run simulation (Nz=1024, CPU)
+        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 1024 --Ri 0.1 --stop_time 70 --Re0 1e-3 --filter_ls 1 7 --save_sorted
 
       - name: Upload simulation output
         uses: actions/upload-artifact@v4
         with:
           name: simulation-output
           path: |
-            output/khi_Nz512_Ri0.10.nc
-            output/khi_Nz512_Ri0.10_2d.nc
+            output/khi_Nz1024_Ri0.10.nc
+            output/khi_Nz1024_Ri0.10_2d.nc
           compression-level: 9
           retention-days: 2
 
@@ -170,7 +170,7 @@ jobs:
 
       - name: Run postprocessing pipeline
         working-directory: postprocessing
-        run: N_WORKERS=2 bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
+        run: N_WORKERS=2 bash 00_get_budgets.sh output/khi_Nz1024_Ri0.10.nc --filter-scales 1 7
 
       - name: Run budget closure tests
         id: pytest
@@ -185,7 +185,7 @@ jobs:
         working-directory: postprocessing
         run: |
           for l in 1 7; do
-            python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8
+            python anim1_panels.py --filename output/khi_Nz1024_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8
           done
 
       - name: List output files
@@ -289,7 +289,7 @@ jobs:
 
       - name: Run postprocessing pipeline (fixed reference)
         working-directory: postprocessing
-        run: bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --fixed-reference
+        run: bash 00_get_budgets.sh output/khi_Nz1024_Ri0.10.nc --filter-scales 1 7 --fixed-reference
 
       - name: Run budget closure tests (fixed reference)
         id: pytest
@@ -304,7 +304,7 @@ jobs:
         working-directory: postprocessing
         run: |
           for l in 1 7; do
-            python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8 --fixed-reference
+            python anim1_panels.py --filename output/khi_Nz1024_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8 --fixed-reference
           done
 
       - name: List output files
