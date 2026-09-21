@@ -207,14 +207,14 @@ Set `N_WORKERS` to control Dask parallelism (default 1): `N_WORKERS=4 bash 00_ge
 
 ## Tests
 
-The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and expects post-processing output for `khi_Nz512_Ri0.10` in `postprocessing/output/`.
+The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and expects the CI run, `khi_Nz1024_Ri0.10`, in `output/` with its post-processing output in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py`; change it there to test a different run.
 
 ```bash
 pytest tests/ -v -s                                  # time-varying reference (default)
 pytest tests/ -v -s --ref-suffix _fixed_ref          # fixed reference variant
 ```
 
-CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=512) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.
+CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=1024) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 

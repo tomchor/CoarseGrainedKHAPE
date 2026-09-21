@@ -32,12 +32,7 @@ so it holds for either.
 import pytest
 import numpy as np
 import xarray as xr
-from pathlib import Path
-
-REPO_ROOT  = Path(__file__).resolve().parent.parent
-PP_OUTPUT  = REPO_ROOT / "postprocessing" / "output"
-SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
-STEM       = "khi_Nz512_Ri0.10"
+from conftest import PP_OUTPUT, SIM_OUTPUT, STEM
 
 #+++ Tolerances
 # Worst allowed excursion below zero, as a fraction of the field's own rms: min(field)/rms(field) > -TOL.

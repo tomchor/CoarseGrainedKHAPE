@@ -38,6 +38,7 @@ import xarray as xr
 sys.path.insert(0, str(Path(__file__).parent.parent / "postprocessing"))
 from src.aux00_utils import GaussianFilter
 from src.aux01_pe_functions import local_potential_energies_timeseries, sorted_timeseries
+from conftest import SIM_OUTPUT
 
 #+++ Thresholds
 # Horizontal filter: Jensen is exact, so only roundoff is allowed. The discrete z✶ lookup does not
@@ -147,7 +148,6 @@ def test_vertical_filtering_breaks_the_jensen_bound(synthetic, cells):
 # It is held to the same bound `test_positivity.py` uses for the offline S̃ rather than to roundoff: S̃
 # inherits the nearest-slot z✶ lookup, on both of the profiles it involves, and online also carries the
 # M-level lookup granularity of the coarse column ⟨b✶⟩ is filtered on. `report` prints max and frac(>0) too.
-SIM_OUTPUT = Path(__file__).resolve().parent.parent / "output" / "khi_Nz512_Ri0.10.nc"
 ONLINE_FILTER_SCALES = [1, 7]   # the simulation's --filter_ls, which CI leaves at its default
 
 

@@ -1,8 +1,15 @@
 import xarray as xr
 from pathlib import Path
 
-PP_OUTPUT = Path(__file__).parent.parent / "postprocessing" / "output"
-STEM = "khi_Nz512_Ri0.10"
+#+++ The run under test
+# CI's run (.github/workflows/test.yml), so STEM has to follow its --Nz. The test modules import these from here
+# and name the file nowhere else: a stale copy fails quietly, because the tests that read SIM_OUTPUT skip when it
+# is missing.
+REPO_ROOT  = Path(__file__).resolve().parent.parent
+PP_OUTPUT  = REPO_ROOT / "postprocessing" / "output"
+STEM       = "khi_Nz1024_Ri0.10"
+SIM_OUTPUT = REPO_ROOT / "output" / f"{STEM}.nc"
+#---
 
 
 def pytest_addoption(parser):

@@ -33,9 +33,10 @@ from pathlib import Path
 
 import pytest
 
+from conftest import SIM_OUTPUT
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VALIDATION = REPO_ROOT / "postprocessing" / "validation"
-SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
 
 # Tolerances are on rms(online - offline) / rms(online), and were calibrated by measurement rather than
 # guessed. They fall into two groups.
