@@ -116,20 +116,24 @@ def test_sfs_ke_is_positive(ke_fields, l_idx):
 #---
 
 #+++ SFS APE under the filtered reference
-def drop_padding(da, z_name="z_aac"):
-    """Restrict to the physical domain, dropping the z padding `_pad_domain_in_z` adds at load time.
+def drop_padding(da, n_pad, z_name="z_aac"):
+    """Restrict to the physical domain, dropping the `n_pad` z cells `_pad_domain_in_z` adds each side.
 
-    That helper extends the domain to twice its height with Nz//2 edge-valued cells at each end, so the
-    physical domain is the middle half of what the budget files carry. Two reasons to cut it here. The
-    padding is manufactured fluid — constant in z by construction — so its Eₐ says nothing about the
-    run. And S̃ is computed as Ē_A - L̃, an identity that needs filter(z) = z; the filter extends the
-    bounded axis with its edge value, so within a stencil of the padded grid's own walls the kernel is
-    one-sided and the identity picks up a spurious τ(z, b). Cutting to the physical domain puts a full
-    Nz/4 of margin between the assertion and that edge, which is wider than the largest filter here.
+    Two reasons to cut it. The padding is manufactured fluid — constant in z by construction — so its
+    Eₐ says nothing about the run. And S̃ is computed as Ē_A - L̃, an identity that needs filter(z) = z;
+    the filter extends the bounded axis with its edge value, so within a stencil of the padded grid's
+    own walls the kernel is one-sided and the identity picks up a spurious τ(z, b). Cutting to the
+    physical domain puts the whole padding between the assertion and that edge, and the padding is
+    sized at 4σ of the widest filter in the run, so the margin is a full stencil by construction.
+
+    `n_pad` comes from the file's own `n_pad_z` attribute rather than being derived from the array. It
+    used to be computed as Nz_padded//4, which holds only while the padding is the default Nz//2 — and
+    `required_pad_margin` widens it past that as soon as a filter needs more than Lz/2 of room, which
+    the sweep's ℓ=20 does. Deriving it would then silently keep padding inside the assertion.
     """
     n = da.sizes[z_name]
-    pad = n // 4
-    return da.isel({z_name: slice(pad, n - pad)})
+    assert 0 <= n_pad < n // 2, f"implausible padding: n_pad={n_pad} on {n} cells"
+    return da.isel({z_name: slice(n_pad, n - n_pad)})
 
 
 def test_sfs_ape_is_positive(ape_fields, l_idx):
@@ -143,8 +147,11 @@ def test_sfs_ape_is_positive(ape_fields, l_idx):
         pytest.skip(f"budget built with ape_reference={reference!r}; S̃ ≥ 0 only holds for 'filtered'")
 
     l = ape_fields.filter_scale.values[l_idx]
-    print(f"\nSFS APE, filtered reference  (l={l:.4f})")
-    check_positive(drop_padding(ape_fields["Eaˢ(ρ, z)"].sel(filter_scale=l)), "Eaˢ(ρ, z)", SFS_APE_TOL)
+    # Files written before `n_pad_z` was recorded carry the old default, which is Nz_padded//4 per side.
+    n_pad = ape_fields.attrs.get("n_pad_z", ape_fields.sizes["z_aac"] // 4)
+    print(f"\nSFS APE, filtered reference  (l={l:.4f}, dropping {int(n_pad)} padded cells per side)")
+    check_positive(drop_padding(ape_fields["Eaˢ(ρ, z)"].sel(filter_scale=l), int(n_pad)),
+                   "Eaˢ(ρ, z)", SFS_APE_TOL)
 #---
 
 #+++ Local APE (online, --save_sorted)
