@@ -117,17 +117,20 @@ for row, (fields, row_label, cmap, vmin, vmax) in enumerate(rows):
 
         # One colourbar per row: the scale is shared, so three identical bars would be three times the
         # ink for the same information. It goes in the last column, inset as in S2_panels.
-        if col == ncol - 1:
+        if col == 0:
             # The bar sits inside the panel, so what is behind it changes with the field and the time --
             # dark blue here, near-white there. A backing patch keeps the ticks legible either way, rather
-            # than picking a tick colour that happens to work for one snapshot.
-            ax.add_patch(plt.Rectangle((0.14, 0.025), 0.72, 0.145, transform=ax.transAxes,
+            # than picking a tick colour that happens to work for one snapshot. The patch has to clear the
+            # tick *labels*, which hang below the bar: sized from the bar's own position rather than by eye.
+            BAR_Y, BAR_H, PAD_BELOW = 0.155, 0.030, 0.115
+            ax.add_patch(plt.Rectangle((0.14, BAR_Y - PAD_BELOW), 0.72, BAR_H + PAD_BELOW + 0.025,
+                                       transform=ax.transAxes,
                                        facecolor="white", edgecolor="none", alpha=0.8, zorder=3))
-            cax = ax.inset_axes([0.2, 0.09, 0.6, 0.03], zorder=4)
+            cax = ax.inset_axes([0.2, BAR_Y, 0.6, BAR_H], zorder=4)
             cb = fig.colorbar(im, cax=cax, orientation="horizontal", extend="both")
             cb.locator = MaxNLocator(nbins=4)
             cb.update_ticks()
-            cax.tick_params(colors="black")
+            cax.tick_params(colors="black", labelsize=8, pad=1.5)
             for spine in cax.spines.values():
                 spine.set_edgecolor("black")
 
@@ -159,8 +162,8 @@ for ax, letter in zip(axes.flat, "abcdefghijkl"):
 
 label = run_label(ds.attrs)
 if label:
-    axes[1, 0].text(0.98, 0.04, label, transform=axes[1, 0].transAxes, fontsize=10, ha="right", va="bottom",
-                    bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
+    axes[1, -1].text(0.98, 0.04, label, transform=axes[1, -1].transAxes, fontsize=10, ha="right", va="bottom",
+                     bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 
 t_tag = "-".join(f"{t:.0f}" for t in t_sel)
 outfile = str(FIGURES / f"{stem}_b_br_snapshots_t{t_tag}{ref_suffix}.png")
