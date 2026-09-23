@@ -51,6 +51,7 @@ print(f"  Filter scales: {et.filter_scale.values}")
 C_PI_K   = "#2166ac"  # blue
 C_PI_A   = "#d6604d"  # red
 C_SFS    = "#1b7837"  # green
+C_SUM    = "#000000"  # black — a derived total, not a fourth measured term, so neutral rather than a new hue
 LW       = 1.8
 MK       = "o"
 MS       = 4
@@ -66,6 +67,14 @@ for var, color, label_str in [
     ("∫(SFS APE->KE) dV", C_SFS,   r"SFS APE$\to$KE exchange: $\overline{w\,b_r} - \bar w\,b_r^\ell$"),
 ]:
     ax_top.plot(et.inv_scale, et[var].values, color=color, lw=LW, label=label_str)
+
+# Total cross-scale flux. Π_K and Π_A are the two halves of the energy that crosses the filter scale, so
+# their sum is the net cascade -- the quantity that has to be signed consistently if the scale is to be
+# called forward or inverse, and which individual terms of opposite sign can hide. Drawn heavier and
+# semi-transparent so the components stay readable where it runs over them, and neutral so it does not
+# read as a fourth independent measurement.
+ax_top.plot(et.inv_scale, (et["∫Π_K dV"] + et["∫Π_A dV"]).values, color=C_SUM, lw=2.4, alpha=0.7,
+            label=r"$\Pi_K + \Pi_A$  (total cross-scale flux)")
 
 ax_top.axhline(0, color="k", lw=0.8, ls="--")
 for ℓ in [1, 7]:
