@@ -159,7 +159,9 @@ if label:
                      bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 
 t_tag = "-".join(f"{t:.0f}" for t in t_sel)
-outfile = str(FIGURES / f"{stem}_b_br_snapshots_t{t_tag}{ref_suffix}.png")
+# PDF, as the other paper figures (S3, plot2). The pcolormesh layers are rasterized above, so the file
+# stays small while the contours, axes and text remain vector.
+outfile = str(FIGURES / f"{stem}_b_br_snapshots_t{t_tag}{ref_suffix}.pdf")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")
