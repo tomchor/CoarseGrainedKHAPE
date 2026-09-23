@@ -19,7 +19,7 @@ print = logging.info
 import argparse
 parser = argparse.ArgumentParser(description="Time-evolution snapshots: buoyancy b (top row) and relative buoyancy b_r (bottom row), one column per time")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--times", type=float, nargs="+", default=[20, 50, 70], help="Snapshot times, one column each (nearest available is used)")
+parser.add_argument("--times", type=float, nargs="+", default=[20, 50, 80], help="Snapshot times, one column each (nearest available is used)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Use the fixed-in-time reference profile produced by 02 with --fixed-reference")
 parser.add_argument("--zlim", type=float, default=4.0, help="Half-height of the plotted z window")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
@@ -98,7 +98,8 @@ blevels = np.linspace(b_vmin, b_vmax, 12)
 #+++ Plot
 print("Plotting...")
 ncol = len(t_sel)
-fig, axes = plt.subplots(2, ncol, figsize=(5.0 * ncol, 6.3), constrained_layout=True,
+# Extra width for the row colourbars, which sit outside the panels and take their space from the figure.
+fig, axes = plt.subplots(2, ncol, figsize=(5.0 * ncol + 0.9, 6.3), constrained_layout=True,
                          gridspec_kw=dict(wspace=0, hspace=0), squeeze=False)
 
 rows = [
@@ -107,33 +108,17 @@ rows = [
 ]
 
 for row, (fields, row_label, cmap, vmin, vmax) in enumerate(rows):
+    im_row = None
     for col, field in enumerate(fields):
         ax = axes[row, col]
         x, z, data = _xzdata(field)
-        im = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
+        im_row = ax.pcolormesh(x, z, data, cmap=cmap, vmin=vmin, vmax=vmax, rasterized=True)
 
         bx, bz, bdata = _xzdata(b_fields[col])
         ax.contour(bx, bz, bdata, levels=blevels, colors="k", linewidths=0.6, alpha=0.5)
 
         # One colourbar per row: the scale is shared, so three identical bars would be three times the
         # ink for the same information. It goes in the last column, inset as in S2_panels.
-        if col == 0:
-            # The bar sits inside the panel, so what is behind it changes with the field and the time --
-            # dark blue here, near-white there. A backing patch keeps the ticks legible either way, rather
-            # than picking a tick colour that happens to work for one snapshot. The patch has to clear the
-            # tick *labels*, which hang below the bar: sized from the bar's own position rather than by eye.
-            BAR_Y, BAR_H, PAD_BELOW = 0.155, 0.030, 0.115
-            ax.add_patch(plt.Rectangle((0.14, BAR_Y - PAD_BELOW), 0.72, BAR_H + PAD_BELOW + 0.025,
-                                       transform=ax.transAxes,
-                                       facecolor="white", edgecolor="none", alpha=0.8, zorder=3))
-            cax = ax.inset_axes([0.2, BAR_Y, 0.6, BAR_H], zorder=4)
-            cb = fig.colorbar(im, cax=cax, orientation="horizontal", extend="both")
-            cb.locator = MaxNLocator(nbins=4)
-            cb.update_ticks()
-            cax.tick_params(colors="black", labelsize=8, pad=1.5)
-            for spine in cax.spines.values():
-                spine.set_edgecolor("black")
-
         if col == 0:
             ax.text(0.5, 0.97, row_label, transform=ax.transAxes, fontsize=11, ha="center", va="top",
                     color="black", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.6))
@@ -143,6 +128,14 @@ for row, (fields, row_label, cmap, vmin, vmax) in enumerate(rows):
         ax.set_ylim(-args.zlim, +args.zlim)
         ax.set_aspect("equal")
         ax.set_yticks([-3, -1, 1, 3])
+
+    # One vertical bar per row, off the end of the row. Outside the panels it needs no backing patch and
+    # cannot cover data, and spanning the row states plainly that the scale is shared along it.
+    cb = fig.colorbar(im_row, ax=list(axes[row, :]), location="right", extend="both",
+                      fraction=0.018, pad=0.01, aspect=22)
+    cb.locator = MaxNLocator(nbins=5)
+    cb.update_ticks()
+    cb.ax.tick_params(labelsize=9)
 
 for row in range(2):
     axes[row, 0].set_ylabel("z")
