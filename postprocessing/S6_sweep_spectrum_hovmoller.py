@@ -20,6 +20,10 @@ parser.add_argument("--linear-width", type=float, default=1e-2,
                     help="Width of the near-linear region of the colour scale; the mapping is logarithmic "
                          "beyond it, with a smooth transition.")
 parser.add_argument("--cmap", default="coolwarm", help="Diverging colormap for the transfer")
+parser.add_argument("--orient", choices=["scale-x", "time-x"], default="scale-x",
+                    help="Which variable runs along x. 'scale-x' puts 1/l on x with time up the y axis; "
+                         "'time-x' flips them, the conventional Hovmoller orientation. The flipped version "
+                         "is written to its own file, so the two can sit side by side.")
 parser.add_argument("--fig-height", type=float, default=7.2, help="Figure height in inches; lower compresses the time axis")
 parser.add_argument("--hov-ratio", type=float, default=1.0, help="Height of the component rows relative to the total row")
 args = parser.parse_args()
@@ -67,31 +71,44 @@ norm = AsinhNorm(linear_width=args.linear_width, vmin=-vmax, vmax=vmax)
 #+++ Figure
 # All three rows are Hovmollers on one 1/ℓ axis and one colour scale, so a colour means the same rate in
 # every panel and the total can be compared with its parts by eye. Time runs up the y axis in each.
-fig, axes = plt.subplots(3, 1, figsize=(7.0, args.fig_height), constrained_layout=True, sharex=True,
+fig, axes = plt.subplots(3, 1, figsize=(7.0, args.fig_height), constrained_layout=True,
+                         sharex=True, sharey=(args.orient == "time-x"),
                          gridspec_kw=dict(height_ratios=[1.0, args.hov_ratio, args.hov_ratio]))
 ax_T, ax_K, ax_A = axes
 
+time_x = args.orient == "time-x"
 for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$"),
                              (ax_K, pi_K, "b", r"$\Pi_K$"),
                              (ax_A, pi_A, "c", r"$\Pi_A$")]:
     # A light ground behind the cells: these colormaps put near-white at zero, so on a white page a
     # quiescent region would be indistinguishable from no data at all.
     ax.set_facecolor("#e9e9e9")
-    pcm = ax.pcolormesh(inv, da.time.values, da.transpose("time", "filter_scale").values,
-                        norm=norm, cmap=args.cmap, shading="auto", rasterized=True)
-    ax.set_xscale("log")
-    ax.set_ylabel(r"$t$")
+    if time_x:
+        pcm = ax.pcolormesh(da.time.values, inv, da.transpose("filter_scale", "time").values,
+                            norm=norm, cmap=args.cmap, shading="auto", rasterized=True)
+        ax.set_yscale("log")
+        ax.set_ylabel(r"$1/\ell$")
+    else:
+        pcm = ax.pcolormesh(inv, da.time.values, da.transpose("time", "filter_scale").values,
+                            norm=norm, cmap=args.cmap, shading="auto", rasterized=True)
+        ax.set_xscale("log")
+        ax.set_ylabel(r"$t$")
     ax.grid(True, alpha=0.15, color="k")
     # Inside the panel, upper right: the top edge of (a) is then free for the ℓ axis, and no row spends
     # vertical space on a title. Boxed, since it sits over data.
     ax.text(0.985, 0.955, f"({letter})  {name}", transform=ax.transAxes, fontsize=11,
             ha="right", va="top", bbox=dict(facecolor="white", edgecolor="none", pad=2.5, alpha=0.85))
 
-ax_A.set_xlabel(r"$1/\ell$")
 # Both conventions on the figure: the data is plotted against 1/ℓ, but the text discusses scales as ℓ.
-# On the top edge of (a), which the in-panel labels leave free.
-ax_ell = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
-ax_ell.set_xlabel(r"filter scale $\ell$")
+# It goes on the far edge of (a), which the in-panel labels leave free.
+if time_x:
+    ax_A.set_xlabel(r"$t$")
+    ax_ell = ax_T.secondary_yaxis("right", functions=(lambda x: 1 / x, lambda x: 1 / x))
+    ax_ell.set_ylabel(r"filter scale $\ell$")
+else:
+    ax_A.set_xlabel(r"$1/\ell$")
+    ax_ell = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
+    ax_ell.set_xlabel(r"filter scale $\ell$")
 
 cbar = fig.colorbar(pcm, ax=axes.tolist(), orientation="vertical", extend="both",
                     fraction=0.032, pad=0.015)
@@ -105,6 +122,7 @@ ax_T.text(0.98, 0.04, ",  ".join(filter(None, [label, f"$t \\in [{t0:.0f}, {t1:.
 #---
 
 plot_filename = str(FIGURES / os.path.basename(input_filename)
-                    .replace("energy_transfer_sweep", "S6_spectrum_hovmoller").replace(".nc", ".pdf"))
+                    .replace("energy_transfer_sweep",
+                             "S6_spectrum_hovmoller" + ("_timex" if time_x else "")).replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
