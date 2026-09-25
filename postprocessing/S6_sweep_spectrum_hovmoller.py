@@ -24,7 +24,13 @@ parser.add_argument("--orient", choices=["scale-x", "time-x"], default="scale-x"
                     help="Which variable runs along x. 'scale-x' puts 1/l on x with time up the y axis; "
                          "'time-x' flips them, the conventional Hovmoller orientation. The flipped version "
                          "is written to its own file, so the two can sit side by side.")
-parser.add_argument("--fig-height", type=float, default=7.2, help="Figure height in inches; lower compresses the time axis")
+parser.add_argument("--fig-height", type=float, default=None,
+                    help="Figure height in inches. Default 7.2 with scale on x, 6.4 with time on x.")
+parser.add_argument("--fig-width", type=float, default=None,
+                    help="Figure width in inches. Default 7.0 with scale on x, 9.5 with time on x: the time "
+                         "axis carries the finest structure -- the post-saturation oscillation is only a few "
+                         "output records per cycle -- so it is worth more width than the scale axis, whose "
+                         "bands are broad and smooth.")
 parser.add_argument("--hov-ratio", type=float, default=1.0, help="Height of the component rows relative to the total row")
 args = parser.parse_args()
 
@@ -71,7 +77,9 @@ norm = AsinhNorm(linear_width=args.linear_width, vmin=-vmax, vmax=vmax)
 #+++ Figure
 # All three rows are Hovmollers on one 1/ℓ axis and one colour scale, so a colour means the same rate in
 # every panel and the total can be compared with its parts by eye. Time runs up the y axis in each.
-fig, axes = plt.subplots(3, 1, figsize=(7.0, args.fig_height), constrained_layout=True,
+fig_w = args.fig_width  if args.fig_width  is not None else (9.5 if args.orient == "time-x" else 7.0)
+fig_h = args.fig_height if args.fig_height is not None else (6.4 if args.orient == "time-x" else 7.2)
+fig, axes = plt.subplots(3, 1, figsize=(fig_w, fig_h), constrained_layout=True,
                          sharex=True, sharey=(args.orient == "time-x"),
                          gridspec_kw=dict(height_ratios=[1.0, args.hov_ratio, args.hov_ratio]))
 ax_T, ax_K, ax_A = axes
