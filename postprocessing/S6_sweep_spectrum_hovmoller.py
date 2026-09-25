@@ -82,15 +82,17 @@ for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$   (total)"),
     ax.set_xscale("log")
     ax.set_ylabel(r"$t\ \,(h/U)$")
     ax.grid(True, alpha=0.15, color="k")
-    # Title rather than an in-panel box: nothing to collide with the data or with the panel letter. The
-    # top panel carries the ℓ axis as well, so its title needs room to clear it.
-    ax.set_title(f"({letter})   {name}", loc="left", fontsize=11, pad=26 if ax is ax_T else 6)
+    # Title rather than an in-panel box: nothing collides with the data or with the panel letter, and all
+    # three sit at the same height because the ℓ axis is at the foot of the figure rather than above (a).
+    ax.set_title(f"({letter})   {name}", loc="left", fontsize=11, pad=6)
 
 ax_A.set_xlabel(r"$1/\ell\ \,(h^{-1})$")
 # Both conventions on the figure: the data is plotted against 1/ℓ, but the text discusses scales as ℓ.
-ax_top = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
-ax_top.set_xlabel(r"filter scale $\ell\ \,(h)$", fontsize=9)
-ax_top.tick_params(labelsize=8)
+# Below the primary axis rather than above panel (a), where it would sit between that panel's title and
+# its data and make the title read as a heading for the whole figure.
+ax_ell = ax_A.secondary_xaxis(-0.38, functions=(lambda x: 1 / x, lambda x: 1 / x))
+ax_ell.set_xlabel(r"filter scale $\ell\ \,(h)$", fontsize=9)
+ax_ell.tick_params(labelsize=8)
 
 cbar = fig.colorbar(pcm, ax=axes.tolist(), orientation="vertical", extend="both",
                     fraction=0.032, pad=0.015)
