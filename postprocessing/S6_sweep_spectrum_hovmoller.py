@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from matplotlib.colors import SymLogNorm
+from matplotlib.colors import AsinhNorm
 from src.aux03_plotting import run_label, collapse_time_pairs
 #---
 
@@ -16,7 +16,10 @@ parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="P
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
 parser.add_argument("--extension", default="edge", help="Which wall-extension run to plot ('edge' is the default sweep)")
 parser.add_argument("--max-time", type=float, default=140.0, help="Latest time included, in both the average and the Hovmollers")
-parser.add_argument("--linthresh", type=float, default=1e-2, help="Linear threshold of the symmetric-log colour scale")
+parser.add_argument("--linear-width", type=float, default=1e-2,
+                    help="Width of the near-linear region of the colour scale; the mapping is logarithmic "
+                         "beyond it, with a smooth transition.")
+parser.add_argument("--cmap", default="coolwarm", help="Diverging colormap for the transfer")
 parser.add_argument("--fig-height", type=float, default=7.2, help="Figure height in inches; lower compresses the time axis")
 parser.add_argument("--hov-ratio", type=float, default=1.0, help="Height of the component rows relative to the total row")
 args = parser.parse_args()
@@ -50,12 +53,15 @@ inv = 1.0 / et.filter_scale.values           # the shared x axis of all three ro
 #---
 
 #+++ Colour scale
-# One symmetric-log scale across both Hovmollers, so the two rows are directly comparable and a colour
-# means the same rate in each. Symmetric log rather than linear because the transfer spans decades and
-# changes sign; `linthresh` sets where it stops being logarithmic so zero is representable.
+# One scale across all three rows, so a colour means the same rate in every panel.
+#
+# The transfer spans about three decades and changes sign, so a linear scale would show the peak and
+# leave the rest blank. asinh rather than symlog for the compression: symlog is piecewise, with a real
+# kink where its linear region meets its logarithmic one, and that kink shows up in the image as a band
+# of near-constant colour at |value| ~ linthresh -- a feature of the threshold, not of the flow. asinh is
+# the same idea, linear near zero and logarithmic far from it, but smooth everywhere.
 vmax = float(np.nanmax(np.abs(np.concatenate([pi_T.values.ravel(), pi_K.values.ravel(), pi_A.values.ravel()]))))
-norm = SymLogNorm(linthresh=args.linthresh, linscale=1.0, vmin=-vmax, vmax=vmax, base=10)
-C_PI_K, C_PI_A = "#2166ac", "#d6604d"
+norm = AsinhNorm(linear_width=args.linear_width, vmin=-vmax, vmax=vmax)
 #---
 
 #+++ Figure
@@ -65,36 +71,36 @@ fig, axes = plt.subplots(3, 1, figsize=(7.0, args.fig_height), constrained_layou
                          gridspec_kw=dict(height_ratios=[1.0, args.hov_ratio, args.hov_ratio]))
 ax_T, ax_K, ax_A = axes
 
-C_PI_K, C_PI_A, C_PI_T = "#2166ac", "#d6604d", "#000000"
-for ax, da, name, color in [(ax_T, pi_T, r"$\Pi_K + \Pi_A$", C_PI_T),
-                            (ax_K, pi_K, r"$\Pi_K$",          C_PI_K),
-                            (ax_A, pi_A, r"$\Pi_A$",          C_PI_A)]:
+for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$   (total)"),
+                             (ax_K, pi_K, "b", r"$\Pi_K$"),
+                             (ax_A, pi_A, "c", r"$\Pi_A$")]:
+    # A light ground behind the cells: these colormaps put near-white at zero, so on a white page a
+    # quiescent region would be indistinguishable from no data at all.
+    ax.set_facecolor("#e9e9e9")
     pcm = ax.pcolormesh(inv, da.time.values, da.transpose("time", "filter_scale").values,
-                        norm=norm, cmap="RdBu_r", shading="auto", rasterized=True)
+                        norm=norm, cmap=args.cmap, shading="auto", rasterized=True)
     ax.set_xscale("log")
-    ax.set_ylabel("Time")
-    ax.grid(True, alpha=0.2)
-    ax.text(0.015, 0.96, name, transform=ax.transAxes, fontsize=12, ha="left", va="top",
-            color=color, bbox=dict(facecolor="white", edgecolor="none", pad=2.5, alpha=0.85))
+    ax.set_ylabel(r"$t\ \,(h/U)$")
+    ax.grid(True, alpha=0.15, color="k")
+    # Title rather than an in-panel box: nothing to collide with the data or with the panel letter. The
+    # top panel carries the ℓ axis as well, so its title needs room to clear it.
+    ax.set_title(f"({letter})   {name}", loc="left", fontsize=11, pad=26 if ax is ax_T else 6)
 
-ax_A.set_xlabel("Inverse of filter scale 1/ℓ")
+ax_A.set_xlabel(r"$1/\ell\ \,(h^{-1})$")
+# Both conventions on the figure: the data is plotted against 1/ℓ, but the text discusses scales as ℓ.
 ax_top = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
-ax_top.set_xlabel("Filter scale ℓ")
+ax_top.set_xlabel(r"filter scale $\ell\ \,(h)$", fontsize=9)
+ax_top.tick_params(labelsize=8)
 
 cbar = fig.colorbar(pcm, ax=axes.tolist(), orientation="vertical", extend="both",
                     fraction=0.032, pad=0.015)
-cbar.set_label("Cross-scale transfer")
+cbar.set_label(r"$\int \Pi\, \mathrm{d}V$")
 
 label = run_label(et.attrs)
 ax_T.text(0.98, 0.04, ",  ".join(filter(None, [label, f"$t \\in [{t0:.0f}, {t1:.0f}]$"])),
           transform=ax_T.transAxes, fontsize=9, ha="right", va="bottom",
           bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 
-# Each row carries a term label at the far left, so the letter is nudged clear of it -- further on the
-# total row, whose label is the widest.
-for ax, letter, x in [(ax_T, "a", 0.225), (ax_K, "b", 0.105), (ax_A, "c", 0.105)]:
-    ax.text(x, 0.96, f"({letter})", transform=ax.transAxes, fontsize=11, fontweight="bold",
-            ha="left", va="top")
 #---
 
 plot_filename = str(FIGURES / os.path.basename(input_filename)
