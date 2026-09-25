@@ -71,7 +71,7 @@ fig, axes = plt.subplots(3, 1, figsize=(7.0, args.fig_height), constrained_layou
                          gridspec_kw=dict(height_ratios=[1.0, args.hov_ratio, args.hov_ratio]))
 ax_T, ax_K, ax_A = axes
 
-for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$   (total)"),
+for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$"),
                              (ax_K, pi_K, "b", r"$\Pi_K$"),
                              (ax_A, pi_A, "c", r"$\Pi_A$")]:
     # A light ground behind the cells: these colormaps put near-white at zero, so on a white page a
@@ -80,19 +80,18 @@ for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$   (total)"),
     pcm = ax.pcolormesh(inv, da.time.values, da.transpose("time", "filter_scale").values,
                         norm=norm, cmap=args.cmap, shading="auto", rasterized=True)
     ax.set_xscale("log")
-    ax.set_ylabel(r"$t\ \,(h/U)$")
+    ax.set_ylabel(r"$t$")
     ax.grid(True, alpha=0.15, color="k")
-    # Title rather than an in-panel box: nothing collides with the data or with the panel letter, and all
-    # three sit at the same height because the ℓ axis is at the foot of the figure rather than above (a).
-    ax.set_title(f"({letter})   {name}", loc="left", fontsize=11, pad=6)
+    # Inside the panel, upper right: the top edge of (a) is then free for the ℓ axis, and no row spends
+    # vertical space on a title. Boxed, since it sits over data.
+    ax.text(0.985, 0.955, f"({letter})  {name}", transform=ax.transAxes, fontsize=11,
+            ha="right", va="top", bbox=dict(facecolor="white", edgecolor="none", pad=2.5, alpha=0.85))
 
-ax_A.set_xlabel(r"$1/\ell\ \,(h^{-1})$")
+ax_A.set_xlabel(r"$1/\ell$")
 # Both conventions on the figure: the data is plotted against 1/ℓ, but the text discusses scales as ℓ.
-# Below the primary axis rather than above panel (a), where it would sit between that panel's title and
-# its data and make the title read as a heading for the whole figure.
-ax_ell = ax_A.secondary_xaxis(-0.38, functions=(lambda x: 1 / x, lambda x: 1 / x))
-ax_ell.set_xlabel(r"filter scale $\ell\ \,(h)$", fontsize=9)
-ax_ell.tick_params(labelsize=8)
+# On the top edge of (a), which the in-panel labels leave free.
+ax_ell = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
+ax_ell.set_xlabel(r"filter scale $\ell$")
 
 cbar = fig.colorbar(pcm, ax=axes.tolist(), orientation="vertical", extend="both",
                     fraction=0.032, pad=0.015)
