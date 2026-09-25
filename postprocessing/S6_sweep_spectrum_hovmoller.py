@@ -118,19 +118,16 @@ else:
     ax_ell = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
     ax_ell.set_xlabel(r"filter scale $\ell$")
 
+# Trim the time axis to the record itself. `shading="auto"` centres each cell on its coordinate, so the
+# outermost cells reach half a step beyond the first and last output and the axis would otherwise run to
+# t < 0 and past the end of the run.
+for ax in axes:
+    (ax.set_xlim if time_x else ax.set_ylim)(t0, t1)
+
 # The two scales the budgets are shown at, marked on the total so the detailed figures can be located
-# against the cascade. Labelled, since two bare lines on one panel would be ambiguous.
+# against the cascade. The secondary ℓ axis identifies them, so the lines are left unlabelled.
 for ℓ_mark in [7, 1]:
-    if time_x:
-        ax_T.axhline(1.0 / ℓ_mark, color="k", lw=0.9, ls="--", alpha=0.55)
-        ax_T.text(0.012, 1.0 / ℓ_mark, f"$\\ell={ℓ_mark}$", transform=ax_T.get_yaxis_transform(),
-                  fontsize=8, ha="left", va="bottom",
-                  bbox=dict(facecolor="white", edgecolor="none", pad=1.2, alpha=0.8))
-    else:
-        ax_T.axvline(1.0 / ℓ_mark, color="k", lw=0.9, ls="--", alpha=0.55)
-        ax_T.text(1.0 / ℓ_mark, 0.012, f"$\\ell={ℓ_mark}$", transform=ax_T.get_xaxis_transform(),
-                  fontsize=8, ha="left", va="bottom", rotation=90,
-                  bbox=dict(facecolor="white", edgecolor="none", pad=1.2, alpha=0.8))
+    (ax_T.axhline if time_x else ax_T.axvline)(1.0 / ℓ_mark, color="k", lw=0.9, ls="--", alpha=0.55)
 
 cbar = fig.colorbar(pcm, ax=axes.tolist(), orientation="vertical", extend="both",
                     fraction=0.032, pad=0.015)
