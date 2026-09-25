@@ -100,7 +100,9 @@ for name, M in terms.items():
         s = (t - ts[i]) / tau[i]
         rows.append(np.interp(S_GRID, s, curves[name][i], left=np.nan, right=np.nan))
     R = np.array(rows)
-    spread = np.nanstd(R, axis=0)
+    n_valid = np.sum(np.isfinite(R), axis=0)
+    with np.errstate(invalid="ignore"):
+        spread = np.where(n_valid >= 2, np.nanstd(np.where(np.isfinite(R), R, np.nan), axis=0), np.nan)
     core = (S_GRID > -0.2) & (S_GRID < 1.2)
     quality[name] = (R, float(np.nanmedian(spread[core])))
     print(f"  {name}: {R.shape[0]} scales collapsed, median spread over the event = {quality[name][1]:.3f}"
@@ -110,7 +112,7 @@ for name, M in terms.items():
 #+++ Plot
 fig, axes = plt.subplots(3, 2, figsize=(10.5, 10.0), constrained_layout=True)
 cmap = plt.get_cmap("viridis")
-norm_l = (np.log10(L) - np.log10(L).min()) / max(np.log10(L).ptp(), 1e-12)
+norm_l = (np.log10(L) - np.log10(L).min()) / max(float(np.ptp(np.log10(L))), 1e-12)
 
 for col, (name, M) in enumerate(terms.items()):
     ts, tau, pk = stats[name]
