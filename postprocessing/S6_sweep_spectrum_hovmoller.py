@@ -17,6 +17,8 @@ parser.add_argument("--fixed-reference", action="store_true", default=False, hel
 parser.add_argument("--extension", default="edge", help="Which wall-extension run to plot ('edge' is the default sweep)")
 parser.add_argument("--max-time", type=float, default=140.0, help="Latest time included, in both the average and the Hovmollers")
 parser.add_argument("--linthresh", type=float, default=1e-2, help="Linear threshold of the symmetric-log colour scale")
+parser.add_argument("--fig-height", type=float, default=7.2, help="Figure height in inches; lower compresses the time axis")
+parser.add_argument("--hov-ratio", type=float, default=0.95, help="Height of each Hovmoller row relative to the spectrum row")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
@@ -54,10 +56,11 @@ C_PI_K, C_PI_A = "#2166ac", "#d6604d"
 
 #+++ Figure
 # Shared x across all three rows, so a feature in the spectrum lines up vertically with the times that
-# produced it. The spectrum is given less height than the Hovmollers: it is one curve per term, while the
-# panels below carry a whole time axis each.
-fig, axes = plt.subplots(3, 1, figsize=(7.0, 9.0), constrained_layout=True, sharex=True,
-                         gridspec_kw=dict(height_ratios=[1.0, 1.35, 1.35]))
+# produced it. The Hovmoller rows are deliberately not tall: their y axis is time, which is read for where
+# features sit rather than off a fine scale, so height spent there buys little. --fig-height and
+# --hov-ratio tune it without editing the script.
+fig, axes = plt.subplots(3, 1, figsize=(7.0, args.fig_height), constrained_layout=True, sharex=True,
+                         gridspec_kw=dict(height_ratios=[1.0, args.hov_ratio, args.hov_ratio]))
 ax_sp, ax_K, ax_A = axes
 
 #+++ Row 1: the time-averaged spectrum
