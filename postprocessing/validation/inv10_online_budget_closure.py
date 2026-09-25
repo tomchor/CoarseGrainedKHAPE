@@ -86,6 +86,17 @@ ds = strip_grid_suffix(ds, model_grid_suffix(ds))
 # there, their differencing window never having completed before the run ended.
 ds = ds.isel(time=slice(args.skip, -1))
 
+# τ(w,b_r) is the one term the two budgets share, with opposite signs: it is a reversible exchange
+# between the reservoirs, so whatever the sub-filter KE gains the sub-filter APE loses. That also means
+# it is **not sign-definite** — the filtered/sub-filter separation of the conversion puts no bound on
+# either half, and τ swings through zero as the billow alternately converts and restores. Do not read a
+# negative ∫τ dV as a failure; only the residuals are held to a threshold here.
+#
+# It is also the *largest* term in the KE budget at the resolutions measured (Nz=128/Re=262: rms 5.1e-02
+# at ℓ=1, 100% of the next largest; 86% of the largest at ℓ=7), so this is where the online closure check
+# is most sensitive to it. This is the only Python that reads the simulation's `wb_rs_ℓ<ℓ>_int` — the
+# offline pipeline builds its own exchange in 04 — which makes it easy to assume the online field is
+# unused and drop it. It is not: delete it and both residuals below lose a dominant term.
 BUDGETS = {
     "KE": dict(
         tendency = "dKs_dt_ℓ{}_int",
@@ -101,6 +112,10 @@ BUDGETS = {
                  "∫Rˢ dV": ("R_s_ℓ{}_int", +1)},
     ),
 }
+# Only the *integral* is read, and that is what makes this check insensitive to which reference profile
+# τ was built against: with δ(z) = b✶ - ⟨b✶⟩ the difference is Δτ = filter(wδ) - w̄δ, whose volume integral
+# is exactly zero. The pointwise field is not insensitive — see the KNOWN ISSUE at the construction site
+# in kelvin_helmholtz_instability.jl. A green result here therefore says nothing about that.
 #---
 
 #+++ Residuals

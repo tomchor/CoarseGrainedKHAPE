@@ -514,8 +514,36 @@ if save_sorted
     _ape_pairs = Pair{Symbol, Any}[]
     for ℓ in filter_ℓs
         gf = matched_filter(ℓ)
-        # τ(w, b_r) is reference-independent: b̄_r = b̄ - ⟨b✶⟩(z) is exactly filter(b_r), since b✶(z)
-        # depends on z alone, so the sub-filter half is the same either way.
+        # τˡ(w, b_r) = filter(w b_r) - w̄ b_rˡ, the sub-filter half of the APE↔KE conversion. Load-bearing,
+        # in three separate ways, so do not drop it because the offline pipeline ignores it (04 builds its
+        # own exchange term and 05 reads 04's):
+        #   * it is a *term* in both online budgets — inv10 reads wb_rs_ℓ<ℓ>_int with +1 in residual_K and
+        #     -1 in residual_A. At Nz=128/Re=262 it is the largest term in the KE budget at ℓ=1 (rms
+        #     5.1e-02, 100% of the next largest) and 86% of the largest at ℓ=7. Removing it opens a hole
+        #     that size and the fully-online closure check stops meaning anything;
+        #   * plot_kelvin_helmholtz_instability.jl derives `panel_ℓs` by scanning for `wb_rs_ℓ*` field
+        #     names, so dropping the 3D field yields *no* panels animation at all, not one panel fewer;
+        #   * it is the physical exchange, not scaffolding.
+        #
+        # It is a reversible exchange, not a source or a sink, so **neither half of the separation has a
+        # fixed sign**: filter(w b_r) and w̄ b_rˡ are each of either sign, and so is their difference.
+        # Energy runs both ways between the reservoirs. Unlike ε_Kˢ (a dissipation) or S̃ (non-negative by
+        # construction against ⟨b✶⟩), τˡ admits no positivity check — a negative value here is physics, not
+        # a symptom, and test_positivity.py deliberately says nothing about it.
+        #
+        # KNOWN ISSUE — reference profile. Every other APE term below is built against ⟨b✶⟩ (`lookup_flt`);
+        # this one still passes the unfiltered `lookup`. Upstream takes b✶ from whatever `method` carries
+        # (`b✶ᶻ = reference_buoyancy_at_height(grid, lookup.profile)`) and its docstring is explicit that
+        # "the reference profile is **not** filtered in either half ... the two choices differ once the
+        # filter acts in the vertical" — and this filter is dims=(1,3). So the two are *not* interchangeable
+        # here, contrary to what this comment used to claim.
+        # What saves the budgets is narrower than reference-independence: writing δ(z) = b✶ - ⟨b✶⟩, the
+        # change is Δτ = filter(wδ) - w̄δ, and ∫Δτ dV = 0 exactly, because ∫w dx dy vanishes at every height
+        # (incompressible, periodic in x, w = 0 at the walls) and filtering preserves that. Measured: the
+        # integrals agree to 6e-11 while the pointwise fields differ by 13x. So every budget number is
+        # right and only the *plotted field* is wrong — which matters, because it is drawn as a heatmap
+        # beside the filtered-reference panels and CI publishes it as `animation-online`.
+        # Fix is `method=lookup_flt`, moving this statement below where lookup_flt is built.
         wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
 
         coarse_ℓ, n_ℓ, M_ℓ = coarse_column(ℓ)
