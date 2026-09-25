@@ -19,7 +19,7 @@ parser.add_argument("--max-time", type=float, default=140.0, help="Latest time i
 parser.add_argument("--linear-width", type=float, default=1e-2,
                     help="Width of the near-linear region of the colour scale; the mapping is logarithmic "
                          "beyond it, with a smooth transition.")
-parser.add_argument("--cmap", default="coolwarm", help="Diverging colormap for the transfer")
+parser.add_argument("--cmap", default="RdBu_r", help="Diverging colormap for the transfer")
 parser.add_argument("--orient", choices=["scale-x", "time-x"], default="scale-x",
                     help="Which variable runs along x. 'scale-x' puts 1/l on x with time up the y axis; "
                          "'time-x' flips them, the conventional Hovmoller orientation. The flipped version "
@@ -88,8 +88,10 @@ time_x = args.orient == "time-x"
 for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$"),
                              (ax_K, pi_K, "b", r"$\Pi_K$"),
                              (ax_A, pi_A, "c", r"$\Pi_A$")]:
-    # A light ground behind the cells: these colormaps put near-white at zero, so on a white page a
-    # quiescent region would be indistinguishable from no data at all.
+    # Shows only where a panel has no data -- the cells cover it everywhere else. It does not help the
+    # near-zero cells themselves: RdBu_r puts 0.969 grey-white at the midpoint, so a quiescent region does
+    # read much like the page. coolwarm is the one diverging map here with a genuinely grey centre (0.867)
+    # if that ever matters more than the saturation of the extremes.
     ax.set_facecolor("#e9e9e9")
     if time_x:
         pcm = ax.pcolormesh(da.time.values, inv, da.transpose("filter_scale", "time").values,
