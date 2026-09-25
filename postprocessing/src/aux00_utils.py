@@ -109,8 +109,33 @@ def pad_margin_for_run(filtered_filename):
         return None
 
 
-def _pad_domain_in_z(ds, min_margin=None):
-    """Extend the z domain using edge-value padding.
+# Admissible ways to extend b and b✶ past a wall (Wenegrat, Chor & Barkan §2): the extended profile must
+# stay monotonic, and extending a fluid at rest must add no APE. Both of these qualify, and the paper
+# requires b and b✶ be treated the same way -- which padding b and *then* sorting does automatically,
+# since for a saturated profile the wall values are the global density extremes and the padded fluid
+# sorts to the ends of the column. Anything that changes between the two is a choice artifact, not
+# physics, which is what makes running both a test of §4's "does not affect results".
+_EXTENSIONS = {
+    "edge": dict(mode="edge"),                            # repeat the wall value (§4, the default)
+    "odd":  dict(mode="reflect", reflect_type="odd"),     # odd reflection about the wall value
+}
+
+
+def _pad_along_z(da, n, kw, z_name="z_aac"):
+    """np.pad along z alone, for pad widths that may exceed the axis length (ℓ=20 needs 2784 of 2048)."""
+    def _p(a):                       # apply_ufunc puts the core dim last
+        return np.pad(a, [(0, 0)] * (a.ndim - 1) + [(n, n)], **kw)
+    return xr.apply_ufunc(
+        _p, da,
+        input_core_dims=[[z_name]], output_core_dims=[[z_name]],
+        exclude_dims={z_name},        # the core dim changes length; apply_ufunc requires this to be declared
+        dask="parallelized", output_dtypes=[da.dtype],
+        dask_gufunc_kwargs={"output_sizes": {z_name: da.sizes[z_name] + 2 * n}},
+    )
+
+
+def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
+    """Extend the z domain past both walls, by `extension` (see `_EXTENSIONS`).
 
     Adds cells at the bottom (each filled with that field's bottom boundary value) and the top (the
     top boundary value). By default it adds Nz//2 each side, doubling the domain height; `min_margin`
@@ -118,6 +143,10 @@ def _pad_domain_in_z(ds, min_margin=None):
     room, and never narrows it. Assumes a uniform z grid. Δz_aac is extended with the same constant
     dz; dV and z-extent attributes are recomputed.
     """
+    if extension not in _EXTENSIONS:
+        raise ValueError(f"unknown extension {extension!r}; expected one of {sorted(_EXTENSIONS)}")
+    pad_kw = _EXTENSIONS[extension]
+
     Nz     = ds.sizes["z_aac"]
     dz     = float(ds.Δz_aac.isel(z_aac=0))
     Nz_pad = Nz // 2
@@ -134,14 +163,11 @@ def _pad_domain_in_z(ds, min_margin=None):
         if name in {"Δz_aac", "dV"} or "z_aac" not in da.dims:
             new_vars[name] = da
             continue
-        # Each slab is the boundary value broadcast over the new z axis. Building it by *slicing* Nz_pad
-        # cells out of the field as a zero template would cap the slab at Nz cells, which is invisible
-        # while Nz_pad = Nz//2 and breaks as soon as a filter needs a margin wider than the domain.
-        bot_slab = (xr.zeros_like(xr.DataArray(z_bot, dims=["z_aac"], coords={"z_aac": z_bot}))
-                    + da.isel(z_aac=0, drop=True)).transpose(*da.dims)
-        top_slab = (xr.zeros_like(xr.DataArray(z_top, dims=["z_aac"], coords={"z_aac": z_top}))
-                    + da.isel(z_aac=-1, drop=True)).transpose(*da.dims)
-        new_vars[name] = xr.concat([bot_slab, da, top_slab], dim="z_aac")
+        # np.pad rather than building slabs by hand: it is the one formulation that covers every mode
+        # and, importantly, pad widths larger than the axis itself (ℓ=20 needs 2784 cells of a 2048 grid),
+        # which a single mirrored slab cannot express.
+        new_vars[name] = (_pad_along_z(da, Nz_pad, pad_kw)
+                          .assign_coords(z_aac=z_new).transpose(*da.dims))
 
     new_vars["Δz_aac"] = xr.DataArray(
         np.full(len(z_new), dz), dims=["z_aac"],
@@ -168,6 +194,7 @@ def _pad_domain_in_z(ds, min_margin=None):
     ds_new["dV_physical"] = ds_new["dV"].where(physical, 0.0)
 
     ds_new.attrs["n_pad_z"]        = int(Nz_pad)
+    ds_new.attrs["z_extension"]    = extension
     ds_new.attrs["z_min_physical"] = float(z_orig[0])  - dz / 2
     ds_new.attrs["z_max_physical"] = float(z_orig[-1]) + dz / 2
 
@@ -178,7 +205,26 @@ def _pad_domain_in_z(ds, min_margin=None):
     return ds_new
 
 
-def load_dataset_and_grid(filename, min_margin=None):
+def extension_suffix(extension):
+    """Filename tag for a non-default extension, so the two runs can sit side by side."""
+    return "" if extension == "edge" else f"_{extension}"
+
+
+def extension_of(ds_filt):
+    """The wall extension the filtering step used, so every later step extends identically."""
+    return ds_filt.attrs.get("z_extension", "edge")
+
+
+def extension_for_run(filtered_filename):
+    """Read the extension off a run's filtered-fields file; 'edge' for files written before it existed."""
+    try:
+        with xr.open_dataset(filtered_filename, decode_times=False) as d:
+            return extension_of(d)
+    except (FileNotFoundError, OSError):
+        return "edge"
+
+
+def load_dataset_and_grid(filename, min_margin=None, extension="edge"):
     """
     Load the simulation output and grid information
 
@@ -222,7 +268,7 @@ def load_dataset_and_grid(filename, min_margin=None):
     ds["LxLy"] = ds.Lx * ds.Ly
 
     # Pad domain in z (double height using boundary values of each field)
-    ds = _pad_domain_in_z(ds, min_margin=min_margin)
+    ds = _pad_domain_in_z(ds, min_margin=min_margin, extension=extension)
 
     return ds
 #---

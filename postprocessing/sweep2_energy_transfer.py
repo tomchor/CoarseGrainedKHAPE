@@ -5,7 +5,8 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid
+from src.aux00_utils import (pad_margin_for_run, extension_for_run, extension_suffix,
+                            load_dataset_and_grid)
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
@@ -16,6 +17,10 @@ parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE t
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--extension", choices=["edge", "odd"], default="edge",
+                    help="Which sweep1 run to read: the one filtered with wall-value extension ('edge', the "
+                         "default) or with odd reflection ('odd'). Comparing the two measures how much the "
+                         "extension choice moves the spectrum at large filter scale.")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
@@ -32,7 +37,16 @@ filtered_reference = args.reference == "filtered"
 n_workers = args.n_workers
 chunks = dict(time=1)
 ref_suffix = "_fixed_ref" if fixed_reference else ""
-filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities_sweep.nc"))
+# --extension picks *which* sweep1 run to read. The extension actually used is then taken from that file's
+# own attributes, so the raw field here is extended exactly as sweep1 extended it -- the same contract
+# `pad_margin` already has, and it catches a flag that disagrees with the file it names.
+filtered_filename = str(PP_OUTPUT / (Path(filename).stem
+                                     + f"_filtered_velocities_sweep{extension_suffix(args.extension)}.nc"))
+extension  = extension_for_run(filtered_filename)
+ext_suffix = extension_suffix(extension)
+if extension != args.extension:
+    raise ValueError(f"--extension {args.extension!r} but {Path(filtered_filename).name} records "
+                     f"z_extension={extension!r}; rerun sweep1 with --extension {args.extension}")
 #---
 
 #+++ Load data and grid
@@ -43,7 +57,9 @@ t0 = time.time()
 # one grid. The margin has to come from the *sweep's* filtered file, not 01's: the sweep spans ℓ up to 20,
 # whose 4σ margin is ~3x what the budget scales need, so 01's margin would pad the raw field shallower
 # than ds_filt and xarray would quietly align the two to their intersection rather than raising.
-ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(filtered_filename))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(filtered_filename),
+                           extension=extension)
+print(f"  wall extension: {extension!r} (from {Path(filtered_filename).name})")
 ds = ds.chunk(chunks)
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
@@ -100,7 +116,7 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
-output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}.nc"))
+output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}{ext_suffix}.nc"))
 tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
 tmp_dir.mkdir(exist_ok=True)
 tmp_files = []
