@@ -6,7 +6,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.colors import AsinhNorm
-from src.aux03_plotting import run_label, collapse_time_pairs
+from src.aux03_plotting import collapse_time_pairs
 #---
 
 #+++ Configuration
@@ -110,14 +110,23 @@ else:
     ax_ell = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
     ax_ell.set_xlabel(r"filter scale $\ell$")
 
+# The two scales the budgets are shown at, marked on the total so the detailed figures can be located
+# against the cascade. Labelled, since two bare lines on one panel would be ambiguous.
+for ℓ_mark in [7, 1]:
+    if time_x:
+        ax_T.axhline(1.0 / ℓ_mark, color="k", lw=0.9, ls="--", alpha=0.55)
+        ax_T.text(0.012, 1.0 / ℓ_mark, f"$\\ell={ℓ_mark}$", transform=ax_T.get_yaxis_transform(),
+                  fontsize=8, ha="left", va="bottom",
+                  bbox=dict(facecolor="white", edgecolor="none", pad=1.2, alpha=0.8))
+    else:
+        ax_T.axvline(1.0 / ℓ_mark, color="k", lw=0.9, ls="--", alpha=0.55)
+        ax_T.text(1.0 / ℓ_mark, 0.012, f"$\\ell={ℓ_mark}$", transform=ax_T.get_xaxis_transform(),
+                  fontsize=8, ha="left", va="bottom", rotation=90,
+                  bbox=dict(facecolor="white", edgecolor="none", pad=1.2, alpha=0.8))
+
 cbar = fig.colorbar(pcm, ax=axes.tolist(), orientation="vertical", extend="both",
                     fraction=0.032, pad=0.015)
 cbar.set_label(r"$\int \Pi\, \mathrm{d}V$")
-
-label = run_label(et.attrs)
-ax_T.text(0.98, 0.04, ",  ".join(filter(None, [label, f"$t \\in [{t0:.0f}, {t1:.0f}]$"])),
-          transform=ax_T.transAxes, fontsize=9, ha="right", va="bottom",
-          bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 
 #---
 
