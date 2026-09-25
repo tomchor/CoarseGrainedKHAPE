@@ -125,6 +125,12 @@ def _pad_along_z(da, n, kw, z_name="z_aac"):
     """np.pad along z alone, for pad widths that may exceed the axis length (ℓ=20 needs 2784 of 2048)."""
     def _p(a):                       # apply_ufunc puts the core dim last
         return np.pad(a, [(0, 0)] * (a.ndim - 1) + [(n, n)], **kw)
+    # Padding needs the whole column: an edge value comes from one end of z and a reflection reaches an
+    # arbitrary depth into it, so z cannot be split across chunks. The production files are chunked in z
+    # (a 128-cell test file is not, which is why this only shows up at Nz=2048), so rechunk rather than
+    # pass allow_rechunk -- this way the single chunk is along z alone, and time and x stay as they were.
+    if da.chunks is not None:
+        da = da.chunk({z_name: -1})
     return xr.apply_ufunc(
         _p, da,
         input_core_dims=[[z_name]], output_core_dims=[[z_name]],
