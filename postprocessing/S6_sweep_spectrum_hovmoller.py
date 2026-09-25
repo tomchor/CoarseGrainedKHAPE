@@ -6,7 +6,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.colors import SymLogNorm
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, collapse_time_pairs
 #---
 
 #+++ Configuration
@@ -34,7 +34,7 @@ ext_suffix = "" if args.extension == "edge" else f"_{args.extension}"
 #+++ Load
 print("Loading energy transfer data...")
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}{ext_suffix}.nc"))
-et = xr.open_dataset(input_filename, decode_timedelta=False).chunk(dict(time=1))
+et = collapse_time_pairs(xr.open_dataset(input_filename, decode_timedelta=False)).chunk(dict(time=1))
 et = et.sel(time=slice(None, args.max_time)).sortby("filter_scale")
 t0, t1 = float(et.time.min()), float(et.time.max())
 print(f"  Loaded: {input_filename}")

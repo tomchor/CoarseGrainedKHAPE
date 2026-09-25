@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, collapse_time_pairs
 #---
 
 #+++ Configuration
@@ -32,7 +32,7 @@ ext_suffix = "" if args.extension == "edge" else f"_{args.extension}"
 
 #+++ Load
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}{ext_suffix}.nc"))
-et = xr.open_dataset(input_filename, decode_timedelta=False).sel(time=slice(None, args.max_time)).sortby("filter_scale")
+et = collapse_time_pairs(xr.open_dataset(input_filename, decode_timedelta=False)).sel(time=slice(None, args.max_time)).sortby("filter_scale")
 inv = 1.0 / et.filter_scale.values
 t = et.time.values
 K = et["∫Π_K dV"].transpose("time", "filter_scale").values
