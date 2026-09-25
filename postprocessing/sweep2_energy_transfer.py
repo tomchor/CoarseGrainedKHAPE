@@ -6,6 +6,7 @@ import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid
+from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
 
@@ -60,26 +61,27 @@ print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
 #---
 
-#+++ Load sorted density (only when using fixed reference)
+#+++ Build the frozen reference column (only when using fixed reference)
 rho_sorted = dz_sorted = None
 if fixed_reference:
-    sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
-    ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk(chunks)
-    # 02 pads to 01's margin -- the budget scales -- so its column is the sort of a *different* grid from
-    # the one loaded above whenever the sweep needs more room. z✶ is read straight off that column's own
-    # heights, so a mismatch shifts every Υ̃ with nothing downstream to reveal it. Refuse rather than
-    # produce that: a fixed-reference sweep needs its own sorted file, built on the sweep's padding.
-    n_pad_sorted = ds_sorted.attrs.get("n_pad_z")
-    if n_pad_sorted is not None and int(n_pad_sorted) != int(ds.attrs["n_pad_z"]):
-        raise ValueError(
-            f"{sorted_density_filename} was sorted on a grid padded with {int(n_pad_sorted)} cells per side, "
-            f"but the sweep pads with {int(ds.attrs['n_pad_z'])} (margin {pad_margin_for_run(filtered_filename)}). "
-            f"The reference column would not belong to the field it is used on. Re-run 02_sort_density.py "
-            f"against the sweep's padding, or run the sweep without --fixed-reference.")
-    ds_sorted = ds_sorted.reindex(time=ds_filt.time)
-    rho_sorted = ds_sorted.rho_sorted
-    dz_sorted  = ds_sorted.dz_sorted
-    print(f"  Sorted density loaded from: {sorted_density_filename}")
+    # Built here rather than read from 02's `_sorted_density_fixed_ref.nc`. The column's z✶ are the padded
+    # grid's own heights, and the sweep pads to 4σ of ℓ=20 while 02 pads to the budget scales -- so 02's
+    # column belongs to a different grid and cannot be reused: reading it would shift every displacement
+    # with nothing downstream to reveal it. Nothing is lost by rebuilding -- the frozen reference is the
+    # sort of t=0 alone, broadcast over the time axis, so this is one sort rather than one per output.
+    t0 = time.time()
+    print("\n" + "="*60)
+    print("Sorting t=0 density for the frozen reference (on the sweep's own padded grid)...")
+    # isel *before* sorting: `sorted_timeseries` does `ds[field].values`, which would otherwise pull the
+    # whole padded density timeseries into RAM only to read row 0.
+    ds_for_sort = ds[["b", "dV", "LxLy"]].isel(time=[0]).copy()
+    ds_for_sort.attrs.update(ds.attrs)
+    ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name="b", density_name="ρ")
+    sorted_t0 = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=1, fixed_reference=True)
+    sorted_density = sorted_t0.isel(time=0, drop=True).expand_dims(time=ds_filt.time).chunk(chunks)
+    rho_sorted = sorted_density.rho_sorted
+    dz_sorted  = sorted_density.dz_sorted
+    print(f"  Reference column built on {ds.sizes['z_aac']} padded z cells (n_pad_z={int(ds.attrs['n_pad_z'])})  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Calculate cross-scale transfer terms
