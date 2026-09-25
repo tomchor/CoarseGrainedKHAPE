@@ -5,7 +5,6 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from matplotlib import cm
 from src.aux03_plotting import run_label
 #---
 
@@ -65,17 +64,25 @@ print("  phases: " + ",  ".join(f"[{a:.0f}, {b:.0f}]" for a, b in zip(edges[:-1]
 #+++ Plot
 # Phases are ordered, so they get a sequential ramp (light = early, dark = late) rather than categorical
 # hues: the reader should be able to see the direction of evolution without consulting the legend.
-fig, (ax_K, ax_A) = plt.subplots(2, 1, figsize=(7.0, 6.4), constrained_layout=True, sharex=True)
-ramps = {"K": cm.get_cmap("Blues"), "A": cm.get_cmap("Reds")}
+fig, (ax_K, ax_A, ax_T) = plt.subplots(3, 1, figsize=(7.0, 9.2), constrained_layout=True, sharex=True)
+# Pi_K and Pi_A keep the hues they carry elsewhere in the paper; the total is neutral, since it is a
+# derived sum rather than a third measured term. Each ramp runs light (early) to dark (late).
+ramps = {"K": plt.get_cmap("Blues"), "A": plt.get_cmap("Reds"), "T": plt.get_cmap("Greys")}
+spans = {"K": (0.30, 0.92), "A": (0.30, 0.92), "T": (0.40, 0.95)}
 n = len(edges) - 1
 
-for ax, M, key, name in [(ax_K, K, "K", r"$\Pi_K$"), (ax_A, A, "A", r"$\Pi_A$")]:
+# Pi_K and Pi_A are the two halves of the energy crossing the filter scale, so their sum is the net
+# cascade -- the quantity whose sign says whether a scale is forward or inverse overall, and which
+# components of opposite sign can hide.
+for ax, M, key, name in [(ax_K, K, "K", r"$\Pi_K$"), (ax_A, A, "A", r"$\Pi_A$"),
+                         (ax_T, K + A, "T", r"$\Pi_K + \Pi_A$")]:
     for i, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
         sel = (t >= a) & (t <= b)
         if not sel.any():
             continue
+        lo, hi = spans[key]
         ax.plot(inv, M[sel].mean(axis=0), lw=1.8,
-                color=ramps[key](0.30 + 0.62 * i / max(n - 1, 1)),
+                color=ramps[key](lo + (hi - lo) * i / max(n - 1, 1)),
                 label=f"$t \\in [{a:.0f}, {b:.0f}]$")
     ax.axhline(0, color="k", lw=0.8, ls="--")
     for ℓ in [1, 7]:
@@ -85,14 +92,14 @@ for ax, M, key, name in [(ax_K, K, "K", r"$\Pi_K$"), (ax_A, A, "A", r"$\Pi_A$")]
     ax.set_ylabel("Volume-integrated rate")
     ax.legend(loc="best", fontsize=8, framealpha=0.9, title=name, title_fontsize=9)
 
-ax_A.set_xlabel("Inverse of filter scale 1/ℓ")
+ax_T.set_xlabel("Inverse of filter scale 1/ℓ")
 ax_top = ax_K.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
 ax_top.set_xlabel("Filter scale ℓ")
 label = run_label(et.attrs)
 if label:
     ax_K.text(0.98, 0.04, label, transform=ax_K.transAxes, fontsize=9, ha="right", va="bottom",
               bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
-for ax, letter in [(ax_K, "a"), (ax_A, "b")]:
+for ax, letter in [(ax_K, "a"), (ax_A, "b"), (ax_T, "c")]:
     ax.text(0.015, 0.96, f"({letter})", transform=ax.transAxes, fontsize=11, fontweight="bold", ha="left", va="top")
 #---
 
