@@ -17,9 +17,14 @@ set -eo pipefail
 
 NZ=${NZ:-4096}
 N_TIME_SKIP=${N_TIME_SKIP:-2}
+# How b and b_* are extended past the walls: 'edge' repeats the wall value (the manuscript's §4 choice),
+# 'odd' reflects oddly about it. Both are admissible under §2, so running both measures how much of the
+# spectrum at large ℓ is set by the choice rather than the flow. 'odd' writes to _sweep_odd files.
+EXTENSION=${EXTENSION:-edge}
 SIM=khi_Nz${NZ}_Ri0.10
 PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
-JOB_NAME="sweep_filter_Nz${NZ}_Ri0.10"
+[ "$EXTENSION" = "edge" ] && EXT_TAG="" || EXT_TAG="_${EXTENSION}"
+JOB_NAME="sweep_filter_Nz${NZ}_Ri0.10${EXT_TAG}"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 # Clear the environment from any previously loaded modules
@@ -32,6 +37,6 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-time $PYTHON -u sweep1_filter_fields.py --filename output/${SIM}.nc --n-time-skip $N_TIME_SKIP 2>&1 | tee logs/${JOB_NAME}.out
+time $PYTHON -u sweep1_filter_fields.py --filename output/${SIM}.nc --n-time-skip $N_TIME_SKIP --extension $EXTENSION 2>&1 | tee logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

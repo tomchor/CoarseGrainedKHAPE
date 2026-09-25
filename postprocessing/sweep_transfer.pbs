@@ -19,8 +19,10 @@ NZ=${NZ:-4096}
 SIM=khi_Nz${NZ}_Ri0.10
 PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
 FIXED_REF=${FIXED_REF:-0}
+EXTENSION=${EXTENSION:-edge}   # must match the sweep_filter run this reads; see sweep_filter.pbs
+[ "$EXTENSION" = "edge" ] && EXT_TAG="" || EXT_TAG="_${EXTENSION}"
 [ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
-JOB_NAME="sweep_transfer_Nz${NZ}_Ri0.10${REF_SUFFIX}"
+JOB_NAME="sweep_transfer_Nz${NZ}_Ri0.10${REF_SUFFIX}${EXT_TAG}"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 # Clear the environment from any previously loaded modules
@@ -33,7 +35,11 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-time $PYTHON -u sweep2_energy_transfer.py --filename output/${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
-time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u sweep2_energy_transfer.py --filename output/${SIM}.nc --n-workers 18 --extension $EXTENSION $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
+# sweep3 reads the default (edge) transfer file, so it is only meaningful for the edge run. An `if`
+# rather than `cond && cmd`: under `set -e` a false test as the last command would fail the job.
+if [ "$EXTENSION" = "edge" ]; then
+    time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+fi
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out
