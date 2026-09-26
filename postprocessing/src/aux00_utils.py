@@ -93,20 +93,40 @@ def pad_margin_of(ds_filt):
     return None if m is None else float(m)
 
 
-def pad_margin_for_run(filtered_filename):
+def pad_margin_for_run(filtered_filename, required=False):
     """Read the recorded margin off a run's filtered-fields file, or None if it has none.
 
     Every step after 01 must pad exactly as 01 did -- the sort in 02 and the budgets in 03-05 all have
     to see the same padded grid -- so each reads the margin from the file 01 wrote rather than deriving
-    it again. Missing file or missing attribute returns None, which restores the Nz//2 default and keeps
-    output written before this existed readable.
+    it again. A file without the attribute returns None, which restores the Nz//2 default and keeps
+    output written before it existed readable. A missing file does the same unless `required`, in which
+    case it raises: the steps that follow 01 would otherwise pad to Nz//2 whatever 01 went on to use.
     """
     import xarray as _xr
     try:
         with _xr.open_dataset(filtered_filename, decode_times=False) as d:
             return pad_margin_of(d)
     except (FileNotFoundError, OSError):
+        if required:
+            raise FileNotFoundError(f"{filtered_filename} is missing or unreadable. Run the filtering step "
+                                    f"(01, or sweep1 for the sweep) first: its recorded margin is what every "
+                                    f"later step pads to.") from None
         return None
+
+
+def check_same_padded_grid(ds, other, other_name):
+    """Raise unless `other` (e.g. 02's sorted density) was built on the padded grid `ds` was loaded on.
+
+    The sorted column's heights are the padded grid's own, so a column sorted on a different padding shifts
+    every z✶ with nothing downstream to reveal it. 02 copies the loaded dataset's attributes onto its output,
+    so the padding each side recorded can be compared directly. Output written before these attributes
+    existed carries none and is refused too: it cannot be shown to match.
+    """
+    for key in ("n_pad_z", "z_extension"):
+        mine, theirs = ds.attrs.get(key), other.attrs.get(key)
+        if theirs is None or theirs != mine:
+            raise ValueError(f"{other_name} was built on a padded grid with {key}={theirs}, but this step loaded "
+                             f"{key}={mine}. Rerun 02 (after 01, if the filter scales changed).")
 
 
 # Admissible ways to extend b and b✶ past a wall (Wenegrat, Chor & Barkan §2): the extended profile must

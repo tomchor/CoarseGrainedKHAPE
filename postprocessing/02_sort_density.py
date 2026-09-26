@@ -27,7 +27,7 @@ print("\n" + "="*60)
 print("Loading data and grid...")
 # Pad exactly as 01 did, so the sort and the budgets see the grid the fields were filtered on.
 _filtered_fn = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
-ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn, required=True))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---

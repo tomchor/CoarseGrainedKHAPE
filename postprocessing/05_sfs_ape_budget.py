@@ -12,7 +12,7 @@ import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter,
-                             load_energy_transfer, reference_suffix)
+                             load_energy_transfer, reference_suffix, check_same_padded_grid)
 from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
@@ -54,7 +54,7 @@ print("Loading data and grid...")
 t0 = time.time()
 # Pad exactly as 01 did, so the sort and the budgets see the grid the fields were filtered on.
 _filtered_fn = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
-ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn, required=True))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
@@ -80,6 +80,7 @@ out_suffix = ref_suffix + reference_suffix(args.reference)   # 02's sort is shar
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 t0 = time.time()
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+check_same_padded_grid(ds, ds_sorted, Path(sorted_density_filename).name)   # sorted on this padded grid?
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 

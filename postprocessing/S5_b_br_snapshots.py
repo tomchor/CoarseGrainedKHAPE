@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from src.aux00_utils import PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid
+from src.aux00_utils import PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, check_same_padded_grid
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r
 from src.aux03_plotting import run_label
 #---
@@ -40,7 +40,7 @@ ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 print("Loading simulation dataset...")
 # Pad as 02 did, so ρ_*'s own z grid is the one b_r interpolates it onto.
 _filtered_fn = str(PP_OUTPUT / f"{stem}_filtered_velocities.nc")
-ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn, required=True))
 
 t_sel = [float(ds.time.sel(time=t, method="nearest").values) for t in args.times]
 for want, got in zip(args.times, t_sel):
@@ -54,6 +54,7 @@ ds_b = calculate_density_fields_from_buoyancy(ds_b, buoyancy_name="b", density_n
 sorted_filename = str(PP_OUTPUT / f"{stem}_sorted_density{ref_suffix}.nc")
 print(f"Loading sorted reference profile: {sorted_filename}")
 ds_sorted = xr.open_dataset(sorted_filename, decode_times=False)
+check_same_padded_grid(ds, ds_sorted, Path(sorted_filename).name)   # sorted on this padded grid?
 rho_sorted = ds_sorted.rho_sorted.sel(time=t_sel, method="nearest")
 drift = np.abs(rho_sorted.time.values - np.asarray(t_sel)).max()
 if drift > 1e-6:

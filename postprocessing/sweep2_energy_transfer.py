@@ -56,7 +56,7 @@ t0 = time.time()
 # one grid. The margin has to come from the *sweep's* filtered file, not 01's: the sweep spans ℓ up to 20,
 # whose 4σ margin is ~3x what the budget scales need, so 01's margin would pad the raw field shallower
 # than ds_filt and xarray would quietly align the two to their intersection rather than raising.
-ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(filtered_filename),
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(filtered_filename, required=True),
                            extension=extension)
 print(f"  wall extension: {extension!r} (from {Path(filtered_filename).name})")
 ds = ds.chunk(chunks)
