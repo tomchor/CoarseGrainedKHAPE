@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FILENAME="${1:-output/khi_Nz512_Ri0.10.nc}"
+FILENAME="${1:-output/khi_Nz1024_Ri0.10.nc}"   # the CI run, which tests/conftest.py names as STEM
 shift 1 2>/dev/null || true
 
 # Separate --fixed-reference and --reference <x> from the remaining args (e.g. --filter-scales).
