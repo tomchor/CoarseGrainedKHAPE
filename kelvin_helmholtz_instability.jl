@@ -15,7 +15,7 @@ using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
 using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
-      FilteredAvailablePotentialEnergyDisplacementPotential, FilteredAvailablePotentialEnergyDissipationRate,
+      FilteredAvailablePotentialEnergyDissipationRate,
       FilteredAvailablePotentialToKineticEnergyConversion
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
@@ -560,9 +560,8 @@ if save_sorted
                         FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup) -
                         FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup_flt))
 
-        L    = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)                          # L̃ = Ẽ_A(b̄, z)
+        L    = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)       # L̃ = Ẽ_A(b̄, z): builds S̃, not written itself
         E_as = flatten(Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup)))) - L)   # S̃ = Ē_A - L̃
-        Υ    = FilteredAvailablePotentialEnergyDisplacementPotential(model, z✶ˡ_flt)      # Υ̃ = z̃✶(b̄) - z
         Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
         ε_As = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
                        FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
@@ -573,8 +572,6 @@ if save_sorted
         push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
                           Symbol("Π_A_ℓ$(ℓ)")   => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
                           Symbol("E_as_ℓ$(ℓ)")  => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
-                          Symbol("L_ℓ$(ℓ)")     => L,    Symbol("L_ℓ$(ℓ)_int")    => Integral(L),
-                          Symbol("Υ_ℓ$(ℓ)")     => Υ,
                           Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
                           Symbol("R_s_ℓ$(ℓ)")   => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
                           Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
