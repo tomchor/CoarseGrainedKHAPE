@@ -12,23 +12,26 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
-from src.aux00_utils import PP_OUTPUT
+from src.aux00_utils import PP_OUTPUT, reference_suffix
 
 parser = argparse.ArgumentParser(description="Compare sweep transfer terms between two wall extensions")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scale", type=float, default=20.0, help="Filter scale to compare at")
 parser.add_argument("--all", action="store_true", help="Compare at every scale the two runs share, not just one")
 parser.add_argument("--fixed-reference", action="store_true", default=False)
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 parser.add_argument("--extension", default="odd", help="The non-default extension to compare against 'edge'")
 args = parser.parse_args()
 
 stem = Path(args.filename).stem
-ref_suffix = "_fixed_ref" if args.fixed_reference else ""
+ref_suffix = ("_fixed_ref" if args.fixed_reference else "") + reference_suffix(args.reference)   # adds _trueref for --reference true
 
 def load(suffix):
     path = PP_OUTPUT / f"{stem}_energy_transfer_sweep{ref_suffix}{suffix}.nc"
     if not path.exists():
         raise SystemExit(f"missing {path}\nRun extension_test.pbs first (and the production sweep for 'edge').")
+    print(f"  loading {path.name}")
     ds = xr.open_dataset(str(path), decode_timedelta=False)
     # Output made before the rule was restricted to the buoyancy also reflected u and w, which moves ∫Π_K
     # by ~30% on its own; comparing against it measures the velocity extension, not the buoyancy one.

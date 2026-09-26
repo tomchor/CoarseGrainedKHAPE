@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
+from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid, reference_suffix
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -19,6 +19,8 @@ parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="P
 parser.add_argument("--time", type=float, default=85, help="Target time for snapshot (nearest available will be used)")
 parser.add_argument("--filter-scale", type=float, default=None, help="Target filter length scale (nearest available will be used; defaults to the smallest available)")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -27,12 +29,13 @@ FIGURES   = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
+ref_suffix = reference_suffix(args.reference)   # adds _trueref for --reference true
 #---
 
 #+++ Load budgets
 print("Loading KE and APE budgets...")
-ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields.nc"),  decode_times=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields.nc"), decode_times=False)
+ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields{ref_suffix}.nc"),  decode_times=False)
+ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_suffix}.nc"), decode_times=False)
 
 ke_budget = ke_budget.sel(z_aac=slice(-4, +4))
 ape_budget = ape_budget.sel(z_aac=slice(-4, +4))
@@ -125,7 +128,7 @@ for ax, field, (xlo, xhi, zlo, zhi) in zip(axes.flat, panels, quadrants):
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-outfile = str(FIGURES / f"{stem}_thumbnail_t{t_sel:.1f}_l{ℓ_sel:.4f}.jpg")
+outfile = str(FIGURES / f"{stem}_thumbnail_t{t_sel:.1f}_l{ℓ_sel:.4f}{ref_suffix}.jpg")
 fig.savefig(outfile, dpi=3000, pad_inches=0)
 print(f"Figure saved to: {outfile}")
 #---

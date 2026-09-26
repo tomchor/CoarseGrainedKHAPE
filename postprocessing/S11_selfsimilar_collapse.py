@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import PP_OUTPUT
+from src.aux00_utils import PP_OUTPUT, reference_suffix
 from src.aux03_plotting import run_label, collapse_time_pairs
 #---
 
@@ -27,6 +27,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Self-similar collapse test for the cross-scale transfer spectra")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc")
 parser.add_argument("--fixed-reference", action="store_true", default=False)
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 parser.add_argument("--extension", default="edge")
 parser.add_argument("--max-time", type=float, default=140.0)
 parser.add_argument("--threshold", type=float, default=0.2,
@@ -41,7 +43,7 @@ print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" fo
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIGURES = REPO_ROOT / "figures"; FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-ref_suffix = "_fixed_ref" if args.fixed_reference else ""
+ref_suffix = ("_fixed_ref" if args.fixed_reference else "") + reference_suffix(args.reference)   # adds _trueref for --reference true
 ext_suffix = "" if args.extension == "edge" else f"_{args.extension}"
 #---
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import PP_OUTPUT
+from src.aux00_utils import PP_OUTPUT, reference_suffix
 from src.aux03_plotting import run_label
 #---
 
@@ -14,6 +14,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Cross-scale transfer spectra, with shading at +-1 standard deviation in time")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 parser.add_argument("--extension", default="edge", help="Which wall-extension run to plot ('edge' is the default sweep)")
 parser.add_argument("--min-time", type=float, default=0.0,
                     help="Earliest time included. The run is non-stationary -- the transfer grows from ~0 as the "
@@ -29,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FIGURES   = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-ref_suffix = "_fixed_ref" if args.fixed_reference else ""
+ref_suffix = ("_fixed_ref" if args.fixed_reference else "") + reference_suffix(args.reference)   # adds _trueref for --reference true
 ext_suffix = "" if args.extension == "edge" else f"_{args.extension}"
 #---
 
