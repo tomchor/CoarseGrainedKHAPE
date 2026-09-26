@@ -50,6 +50,7 @@ print("Filtering velocity and buoyancy fields in x and z...")
 ds_filt = filter_fields(ds, filter_scales)
 ds_filt.attrs["pad_margin"]  = required_pad_margin(filter_scales)
 ds_filt.attrs["z_extension"] = args.extension   # sweep2 reads this back, as it does pad_margin
+ds_filt.attrs["z_extension_vars"] = ds.attrs["z_extension_vars"]   # which fields the rule reached
 print("Done!")
 #---
 

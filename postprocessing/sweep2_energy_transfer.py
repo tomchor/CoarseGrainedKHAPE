@@ -70,6 +70,12 @@ print("Loading pre-filtered fields...")
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk(dict(time=1, filter_scale=1))
 ds = ds.reindex(time=ds_filt.time).chunk(chunks)
+# A non-edge sweep1 file written before the rule was restricted to b also reflected u and w, while `ds`
+# above is padded with the restricted rule, so the two would disagree in the padding. Refuse it.
+if extension != "edge" and ds_filt.attrs.get("z_extension_vars") != ds.attrs["z_extension_vars"]:
+    raise ValueError(f"{Path(filtered_filename).name} was extended with z_extension_vars="
+                     f"{ds_filt.attrs.get('z_extension_vars')!r}, not {ds.attrs['z_extension_vars']!r}: it predates "
+                     f"restricting --extension {extension} to the buoyancy. Rerun sweep1 with --extension {extension}.")
 
 filter_scales = ds_filt.filter_scale.values
 print(f"  Loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")

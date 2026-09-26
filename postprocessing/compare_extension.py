@@ -30,7 +30,13 @@ def load(suffix):
     path = PP_OUTPUT / f"{stem}_energy_transfer_sweep{ref_suffix}{suffix}.nc"
     if not path.exists():
         raise SystemExit(f"missing {path}\nRun extension_test.pbs first (and the production sweep for 'edge').")
-    return xr.open_dataset(str(path), decode_timedelta=False)
+    ds = xr.open_dataset(str(path), decode_timedelta=False)
+    # Output made before the rule was restricted to the buoyancy also reflected u and w, which moves ∫Π_K
+    # by ~30% on its own; comparing against it measures the velocity extension, not the buoyancy one.
+    if suffix and ds.attrs.get("z_extension_vars") is None:
+        raise SystemExit(f"{path.name} predates restricting the extension to b (no z_extension_vars "
+                         f"attribute); rerun extension_test.pbs")
+    return ds
 
 a = load("")                      # edge: the production sweep
 b = load(f"_{args.extension}")    # the alternative rule

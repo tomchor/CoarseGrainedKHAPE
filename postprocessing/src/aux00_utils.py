@@ -120,6 +120,12 @@ _EXTENSIONS = {
     "odd":  dict(mode="reflect", reflect_type="odd"),     # odd reflection about the wall value
 }
 
+# The fields the extension rule applies to. The rule is a choice about the buoyancy (§2), so every other
+# field keeps the wall-value extension and an edge-vs-odd comparison changes b alone. Reflecting u too puts
+# ±3U in the padding at ℓ=20 and moved ∫Π_K, which never involves b, by ~30% at Nz=192. Recorded on the
+# padded dataset as `z_extension_vars`, so output padded before this restriction can be told apart.
+EXTENSION_VARS = ("b",)
+
 
 def _pad_along_z(da, n, kw, z_name="z_aac"):
     """np.pad along z alone, for pad widths that may exceed the axis length (ℓ=20 needs 2784 of 2048)."""
@@ -143,15 +149,16 @@ def _pad_along_z(da, n, kw, z_name="z_aac"):
 def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
     """Extend the z domain past both walls, by `extension` (see `_EXTENSIONS`).
 
-    Adds cells at the bottom (each filled with that field's bottom boundary value) and the top (the
-    top boundary value). By default it adds Nz//2 each side, doubling the domain height; `min_margin`
-    (a physical z distance, e.g. from `required_pad_margin`) widens that when a filter needs more
-    room, and never narrows it. Assumes a uniform z grid. Δz_aac is extended with the same constant
-    dz; dV and z-extent attributes are recomputed.
+    Adds cells at the bottom and the top. The fields in `EXTENSION_VARS` (the buoyancy) are extended by
+    `extension`; every other field repeats its wall value, whatever `extension` is. By default it adds
+    Nz//2 each side, doubling the domain height; `min_margin` (a physical z distance, e.g. from
+    `required_pad_margin`) widens that when a filter needs more room, and never narrows it. Assumes a
+    uniform z grid. Δz_aac is extended with the same constant dz; dV and z-extent attributes are recomputed.
     """
     if extension not in _EXTENSIONS:
         raise ValueError(f"unknown extension {extension!r}; expected one of {sorted(_EXTENSIONS)}")
-    pad_kw = _EXTENSIONS[extension]
+    pad_kw  = _EXTENSIONS[extension]
+    edge_kw = _EXTENSIONS["edge"]
 
     Nz     = ds.sizes["z_aac"]
     dz     = float(ds.Δz_aac.isel(z_aac=0))
@@ -172,7 +179,8 @@ def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
         # np.pad rather than building slabs by hand: it is the one formulation that covers every mode
         # and, importantly, pad widths larger than the axis itself (ℓ=20 needs 2784 cells of a 2048 grid),
         # which a single mirrored slab cannot express.
-        new_vars[name] = (_pad_along_z(da, Nz_pad, pad_kw)
+        kw = pad_kw if name in EXTENSION_VARS else edge_kw
+        new_vars[name] = (_pad_along_z(da, Nz_pad, kw)
                           .assign_coords(z_aac=z_new).transpose(*da.dims))
 
     new_vars["Δz_aac"] = xr.DataArray(
@@ -200,7 +208,8 @@ def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
     ds_new["dV_physical"] = ds_new["dV"].where(physical, 0.0)
 
     ds_new.attrs["n_pad_z"]        = int(Nz_pad)
-    ds_new.attrs["z_extension"]    = extension
+    ds_new.attrs["z_extension"]      = extension
+    ds_new.attrs["z_extension_vars"] = ",".join(EXTENSION_VARS)
     ds_new.attrs["z_min_physical"] = float(z_orig[0])  - dz / 2
     ds_new.attrs["z_max_physical"] = float(z_orig[-1]) + dz / 2
 
