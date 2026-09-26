@@ -70,7 +70,6 @@ print("Calculating cross-scale transfer terms...")
 # Υ̃, L̃, S̃, Rˢ -- is computed offline against the one exact profile, and the simulation's versions are the
 # independent cross-check that inv08/inv09/inv10 exist to make. Π_K and ε_Kˢ are unaffected: they are built
 # from velocities alone and never touch the reference state, so 04 still reads them online.
-online_pi_a = None
 print(f"  Π_A: computing offline, against {'⟨ρ_*⟩, the FFT-filtered sorted profile' if filtered_reference else 'the unfiltered ρ_*'}")
 
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
@@ -79,7 +78,6 @@ energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             dz_sorted=ds_sorted.dz_sorted,
                                             n_workers=n_workers,
                                             include_pi_k=False,
-                                            online_pi_a=online_pi_a,
                                             filtered_reference=filtered_reference)
 print("\nDone!")
 #---
