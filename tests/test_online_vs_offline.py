@@ -19,9 +19,8 @@ Only the time-varying reference is covered. Most of these quantities are referen
 filtered field, Π_K and ε_Kˢ are built from velocities alone, and the sorted state is a property of the
 instantaneous buoyancy field — so running them again under `--fixed-reference` would repeat identical
 work on identical inputs. ε_Aˢ is the exception: it does depend on the reference state, and the online
-one is always the sort of the current buoyancy, so `05_sfs_ape_budget.py` reads it only for the
-time-varying reference and recomputes it offline under `--fixed-reference`. There is nothing to compare
-in that variant either way.
+one is always the sort of the current buoyancy, so it has no counterpart under `--fixed-reference`.
+There is nothing to compare in that variant either way.
 
 `inv03` (the S̄/τ tensor components) is not included: it needs a `--save_tensors` run, which writes six
 extra 3D fields per filter scale, and the quantities it checks already enter Π_K, which `inv02` covers.
@@ -76,7 +75,7 @@ VALIDATION = REPO_ROOT / "postprocessing" / "validation"
 # volume integral both agree to ~1e-11, so it is held at 1e-6 (six orders of headroom over the measured
 # value, and still far below the percent level a real physics regression would show).
 #
-# `inv08` (the sub-filter ε_Aˢ that `05_sfs_ape_budget.py` reads online) is approximate for two
+# `inv08` (the sub-filter ε_Aˢ, which `05_sfs_ape_budget.py` computes offline) is approximate for two
 # reasons. First, discretization: the online form pairs its two factors on the face where both
 # differences live and interpolates the product to the cell center, while the offline
 # `calculate_gradient` takes centered derivatives at the center and multiplies those, which filters out
@@ -90,7 +89,7 @@ VALIDATION = REPO_ROOT / "postprocessing" / "validation"
 #   4.0e-02 (field, l=7)   1.1e-01 (int eps_As dV, l=7)
 # so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
 
-# `inv09` (the cross-scale APE flux Π_A that `03_energy_transfer.py` reads online) is the APE twin of
+# `inv09` (the cross-scale APE flux Π_A, which `03_energy_transfer.py` computes offline) is the APE twin of
 # `inv02`, and was expected to be as loose: both are a product of two filtered-and-differentiated
 # fields, and inv02's map measures 6.7e-01 against 9.4e-02 on its integral. It is not. Measured at
 # Nz=192/Re=262:

@@ -8,10 +8,10 @@ The simulation computes, at each scale ℓ in its online `filter_ℓs` and each 
     ε_Aˢ = filter(ε_A) - ε_Aˡ ,   ε_Aˡ = -q̄ᵢ ∂ᵢΥˡ ,   q̄ᵢ = filter(κ ∂ᵢb) ,   Υˡ = z✶(b̄) - z
 
 (Oceanostics' `SubFilterAvailablePotentialEnergyDissipationRate`), the diffusive sink of the sub-filter
-APE budget of Wenegrat, Chor & Barkan (2026). `05_sfs_ape_budget.py` reads it straight back, the same
-way `04_sfs_ke_budget.py` reads Π_K and ε_Kˢ, so this script is what stands between that budget and a
-silently wrong online field. The offline expression it is checked against is the one the pipeline used
-to call, `calculate_sfs_ape_dissipation`, still kept in `src/aux01_pe_functions.py`.
+APE budget of Wenegrat, Chor & Barkan (2026). The budget does not read it: `05_sfs_ape_budget.py` computes
+ε_Aˢ offline with `calculate_sfs_ape_dissipation` (`src/aux01_pe_functions.py`), the expression this
+script checks the online field against. The online field is the cross-check, and the source of the online
+panels animation.
 
 Three differences between the two, none of them errors, all of them measured here:
 

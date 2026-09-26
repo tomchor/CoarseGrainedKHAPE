@@ -3,7 +3,7 @@
 #   NZ            vertical resolution
 #   SAVE_TENSORS  also write the per-scale strain/stress tensor components (0 or 1, for online-vs-offline validation)
 #   SAVE_SORTED   also write the Winters (1995) sorted reference state and the online APE budget terms (0 or 1;
-#                 default 1 -- 03/05 read the online Pi_A and eps_As from it, which is what closes the budget)
+#                 default 1 -- the validation scripts and the online panels animation use them; the budget does not)
 NZ=1024
 SAVE_TENSORS=0
 SAVE_SORTED=1

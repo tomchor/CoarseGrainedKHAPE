@@ -134,14 +134,6 @@ for step, d in (("03", energy_transfer), ("04", ke_budget)):
         raise ValueError(f"{step} output was built with ape_reference={d.attrs.get('ape_reference')!r}, but this run "
                          f"uses --reference {args.reference}; rerun 03 and 04 with --reference {args.reference}")
 
-# ε_Aˢ is computed online by the simulation, so the budget reads it instead of recomputing — but only
-# for the time-varying reference. Unlike Π_K and ε_Kˢ (built from velocities alone, hence
-# reference-independent, which is why 04 can always read them), ε_Aˢ is measured against a reference
-# state, and the online one is always the sort of the *current* buoyancy. Under --fixed-reference every
-# other term here is measured against the t=0 profile instead, so mixing in the online ε_Aˢ would put
-# one term on a different reference state from the rest and the budget would not close. That variant
-# therefore falls back to the offline expression, which is also what validation/inv08 checks the online
-# field against. Map a filter scale to its sim-output name, matching the Julia Symbol("<var>_ℓ$(ℓ)").
 dV = ds_full.dV_physical   # padding carries no volume; see _pad_domain_in_z
 budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
@@ -190,9 +182,6 @@ for ℓ in filter_scales:
     subfilter_local_ape = full_local_ape_filtered - filt_local_pes.ape
     print(f"  local APE filtered  ({time.time()-t0:.1f}s)")
 
-    # ε_Aˢ: read the online field when it is there and the reference is time-varying, integrated on the
-    # budget's padded grid (the padding repeats each edge value, so every gradient there vanishes and
-    # ε_Aˢ ≈ 0, exactly as for Π_K and ε_Kˢ in 04). It is an optimisation, not a requirement: the frozen
     # ε_Aˢ is built on the filtered reference profile, which is exact only offline (the simulation
     # coarsens it), so it is computed here rather than read -- see 03 and filtered_reference_decisions.md.
     # The offline gradients are centred rather than face-paired, which cost 18.1% vs 2.0% of the dominant

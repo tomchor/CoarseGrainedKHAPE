@@ -9,8 +9,9 @@
 # Usage: bash submit_all_pbs.sh [NZ=2048] [FIXED_REF=0] [VALIDATE=0] [PLOTS=0] [SAVE_SORTED=1]
 #   NZ         vertical resolution
 #   FIXED_REF  use fixed-in-time reference profile: 0 or 1
-#   VALIDATE   also run the online-vs-offline validation (adds --save_tensors so the tensor comparison
-#              works; --save_sorted is on regardless, see below): 0 or 1
+#   VALIDATE   also run the online-vs-offline validation (adds --save_tensors for the tensor comparison and
+#              forces --save_sorted, which inv06-inv10 read): 0 or 1
+#   SAVE_SORTED  write the sorted reference state and the online APE budget terms (default 1): 0 or 1
 #   PLOTS      also run the final plots after sweep_transfer: 0 or 1
 #
 # To run post-processing alone:
@@ -25,12 +26,13 @@ for arg in "$@"; do case $arg in
   PLOTS=*)     PLOTS="${arg#*=}";;
 esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
-# validation needs the per-scale tensors (inv03); only it is gated on VALIDATE.
-# --save_sorted is always on: it carries the online Pi_A and eps_As that 03/05 read back, and measured at
-# Nz=128 that read takes the APE budget residual from 18.1% to 2.0% (l=1) and 15.5% to 1.2% (l=7).
-# Pass SAVE_SORTED=0 to opt out (smaller output, offline recompute, looser closure).
+# --save_sorted is on by default. It writes the sorted reference state and the online APE budget terms, the
+# cross-check that the validation job (inv06-inv10) and the online panels animation use. The offline budget
+# does not read them: 03 and 05 compute Pi_A and eps_As themselves, against the exact filtered profile.
+# SAVE_SORTED=0 gives smaller output and changes no budget number; VALIDATE=1 turns it back on.
 SAVE_SORTED=${SAVE_SORTED:-1}
-[ "$VALIDATE" = "1" ] && SAVE_TENSORS=1 || SAVE_TENSORS=0
+if [ "$VALIDATE" = "1" ]; then SAVE_SORTED=1; fi          # inv06-inv10 read the sorted state
+[ "$VALIDATE" = "1" ] && SAVE_TENSORS=1 || SAVE_TENSORS=0   # inv03 reads the per-scale tensors
 
 SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
                -o logs/kelvin_helmholtz_${NZ}.log \

@@ -8,10 +8,10 @@ The simulation computes, at each scale ℓ in its online `filter_ℓs` and each 
     Π_A = -τᵢ ∂ᵢΥˡ ,   τᵢ = filter(b uᵢ) - b̄ ūᵢ ,   Υˡ = z✶(b̄) - z
 
 (Oceanostics' `AvailablePotentialEnergyCrossScaleFlux`), the rate at which the filter moves available
-potential energy from the resolved to the sub-filter scales. `03_energy_transfer.py` reads it straight
-back for the time-varying reference, so this script is what stands between the APE budget and a
-silently wrong online field. The offline expression it is checked against is the one that step used to
-call, `calculate_cross_scale_ape_flux`, still kept in `src/aux01_pe_functions.py`.
+potential energy from the resolved to the sub-filter scales. The budget does not read it:
+`03_energy_transfer.py` computes Π_A offline with `calculate_cross_scale_ape_flux`
+(`src/aux01_pe_functions.py`), the expression this script checks the online field against. The online
+field is the cross-check, and the source of the online panels animation.
 
 Three differences between the two, none of them errors:
 

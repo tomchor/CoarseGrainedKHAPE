@@ -37,7 +37,7 @@ All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--
 | `filtered` (default) | the vertically filtered profile ⟨ρ_*⟩ | any kernel, including one with vertical extent |
 | `true` | the unfiltered ρ_* | horizontal kernels only (the `g_z = δ(z)` limit) |
 
-The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` reproduces the earlier behaviour and is kept for comparison. The simulation's online APE terms (`Π_A_ℓ<ℓ>`, `ε_As_ℓ<ℓ>` and the rest, under `--save_sorted`) are built against ⟨ρ_*⟩, and reading them is what makes the budget close; `true` therefore always recomputes offline. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
+The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` reproduces the earlier behaviour and is kept for comparison. The simulation's online APE terms (`Π_A_ℓ<ℓ>`, `ε_As_ℓ<ℓ>` and the rest, under `--save_sorted`) are built against ⟨ρ_*⟩ too, on a coarse column; the budget computes every APE term offline under either value, and the online set is the validation cross-check. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
 
 `--reference true` tags the outputs of 03–06 and `sweep2` with `_trueref`, so both references can sit side by side; 05 refuses 03/04 output built against the other one. `00_get_budgets.sh` forwards the flag, including to 06:
 
@@ -92,20 +92,17 @@ bash submit_all_pbs.sh NZ=1024
 bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 
 # Add the online-vs-offline validation and/or the final plots (independently toggleable)
-bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors
+bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors and --save_sorted
 bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_transfer
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
 Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
 
-`SAVE_SORTED` defaults to `1`, so the simulation writes the sorted reference state and the online APE budget
-terms, and `03`/`05` read `Π_A` and `ε_Aˢ` back from it. That read is what closes the APE budget — at Nz=128 the
-residual against the dominant term goes 18.1% → 2.0% (ℓ=1) and 15.5% → 1.2% (ℓ=7). Pass `SAVE_SORTED=0` for
-smaller output, at the cost of the offline recompute and a looser budget.
+`SAVE_SORTED` defaults to `1`, so the simulation writes the sorted reference state and the online APE budget terms. The validation job (`inv06`–`inv10`) and the online panels animation use them; the offline budget does not, since `03` and `05` compute `Π_A` and `ε_Aˢ` offline against the exact ⟨ρ_*⟩. `SAVE_SORTED=0` gives smaller output and changes no budget number, and `VALIDATE=1` turns it back on.
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
-- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
+- `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
 - `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
 
 ### Run simulation only
