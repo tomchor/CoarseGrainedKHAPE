@@ -9,6 +9,7 @@ the sweep at that scale -- which matters most at large ℓ, where the kernel rea
 """
 import argparse
 import os
+import re
 from pathlib import Path
 import numpy as np
 import xarray as xr
@@ -30,24 +31,38 @@ ref_suffix = ("_fixed_ref" if args.fixed_reference else "") + reference_suffix(a
 def sweep_path(suffix, scale_tag=""):
     return PP_OUTPUT / f"{stem}_energy_transfer_sweep{ref_suffix}{scale_tag}{suffix}.nc"
 
+nz = re.search(r"Nz(\d+)", stem)
+NZ = nz.group(1) if nz else "<Nz>"
+
+def source(suffix, scale_tag=""):
+    """The job that writes the file `sweep_path(suffix, scale_tag)` names."""
+    if not suffix:
+        return f"the production sweep (bash submit_sweep.sh NZ={NZ})"
+    if scale_tag:
+        return (f"the single-scale test (bash submit_extension_test.sh NZ={NZ} SCALE={args.filter_scale:g} "
+                f"EXTENSION={args.extension})")
+    return f"the full sweep with this rule (bash submit_sweep.sh NZ={NZ} EXTENSION={args.extension})"
+
 def load(suffix, scale_tag=""):
     path = sweep_path(suffix, scale_tag)
     if not path.exists():
-        raise SystemExit(f"missing {path}\nRun extension_test.pbs first (and the production sweep for 'edge').")
+        raise SystemExit(f"missing {path}\nIt is written by {source(suffix, scale_tag)}.")
     print(f"  loading {path.name}")
     ds = xr.open_dataset(str(path), decode_timedelta=False)
     # Output made before the rule was restricted to the buoyancy also reflected u and w, which moves ∫Π_K
     # by ~30% on its own; comparing against it measures the velocity extension, not the buoyancy one.
     if suffix and ds.attrs.get("z_extension_vars") is None:
         raise SystemExit(f"{path.name} predates restricting the extension to b (no z_extension_vars "
-                         f"attribute); rerun extension_test.pbs")
+                         f"attribute); rerun {source(suffix, scale_tag)}.")
     return ds
 
 a = load("")                      # edge: the production sweep
-# The alternative rule comes from extension_test.pbs, one scale tagged with it (_l20), or from a full sweep run
-# with EXTENSION=odd. A single-scale comparison prefers the tagged run and falls back to the full one.
+# The alternative rule comes from the single-scale test, tagged with its scale (_l20), or from a full sweep run
+# with EXTENSION=odd. A single-scale comparison prefers the tagged run and falls back to the full one; when
+# neither exists it asks for the single-scale test, and --all asks for the full sweep.
+odd = f"_{args.extension}"
 odd_tags = ([] if args.all else [scale_subset_tag([args.filter_scale])]) + [""]
-b = load(f"_{args.extension}", next((t for t in odd_tags if sweep_path(f"_{args.extension}", t).exists()), ""))
+b = load(odd, next((t for t in odd_tags if sweep_path(odd, t).exists()), odd_tags[0]))
 
 if args.all:
     # Scales present in both runs. Matched by value rather than by index: a single-scale odd run and the
