@@ -17,7 +17,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 4-panel thumbnail of local SFS budget terms (no labels)")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--time", type=float, default=85, help="Target time for snapshot (nearest available will be used)")
-parser.add_argument("--filter-scale", type=float, default=None, help="Target filter length scale (nearest available will be used; defaults to the smallest available)")
+parser.add_argument("--filter-scale", type=float, default=None,
+                    help="Target filter length scale (nearest available will be used; defaults to the smallest available)")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")

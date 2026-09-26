@@ -15,7 +15,8 @@ print = logging.info
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="2x3 panel snapshot: vorticity/buoyancy in col 1, total/SFS energy in cols 2-3 (KE top row, APE bottom row)")
+parser = argparse.ArgumentParser(description="2x3 panel snapshot: vorticity/buoyancy in col 1, total/SFS energy in cols 2-3 (KE top row, "
+                                             "APE bottom row)")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--time", type=float, default=50, help="Target time for snapshot (nearest available will be used)")
 parser.add_argument("--filter-scale", type=float, default=1.0, help="Target filter length scale (nearest available will be used)")
@@ -144,7 +145,8 @@ for (row, col), (field, title, kind) in panels.items():
 
     ax.contour(bx, bz, bdata, levels=blevels, colors=contour_color, linewidths=0.6, alpha=0.5)
 
-    ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=11, ha="center", va="top", color=title_color, bbox=dict(facecolor=title_facecolor, edgecolor="none", pad=2, alpha=0.6))
+    ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=11, ha="center", va="top", color=title_color,
+            bbox=dict(facecolor=title_facecolor, edgecolor="none", pad=2, alpha=0.6))
     ax.set_title("")
     ax.set_ylim(-4, +4)
     ax.set_aspect("equal")

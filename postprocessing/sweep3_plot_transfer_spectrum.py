@@ -11,8 +11,10 @@ from src.aux03_plotting import run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot cross-scale KE and APE transfer spectra")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
+                    help="Path to simulation NetCDF file (used to derive energy transfer filename)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load output produced with the fixed-in-time reference profile")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 args = parser.parse_args()

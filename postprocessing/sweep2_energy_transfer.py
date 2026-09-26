@@ -17,7 +17,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale KE and APE transfer terms")
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 parser.add_argument("--extension", choices=["edge", "odd"], default="edge",
                     help="Which sweep1 run to read: the one filtered with wall-value extension ('edge', the "
                          "default) or with odd reflection ('odd'). Comparing the two measures how much the "

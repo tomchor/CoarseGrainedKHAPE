@@ -18,7 +18,8 @@ from src.aux02_ke_functions import (
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against, in the APE->KE conversion term. "
                          "Must match what 03 and 05 are run with: 05 reads this script's exchange term, so a mismatch "

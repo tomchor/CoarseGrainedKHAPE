@@ -45,7 +45,8 @@ parser = argparse.ArgumentParser(description="Check that the online SFS KE and A
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Simulation NetCDF file (run with --save_sorted)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
 parser.add_argument("--skip", type=int, default=2, help="Leading outputs to drop (default 2: the first ConsecutiveIterations pair)")
-parser.add_argument("--offline-stem", default=None, help="Stem of the offline budget files in postprocessing/output/, for a side-by-side residual")
+parser.add_argument("--offline-stem", default=None,
+                    help="Stem of the offline budget files in postprocessing/output/, for a side-by-side residual")
 add_tolerance_arg(parser)
 args = parser.parse_args()
 set_tolerance(args.tolerance)

@@ -13,8 +13,10 @@ from src.aux03_plotting import run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Hovmöller plots (time vs filter scale) of Π_K and Π_A")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
+                    help="Path to simulation NetCDF file (used to derive energy transfer filename)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load output produced with the fixed-in-time reference profile")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 parser.add_argument("--max-time", type=float, default=140.0, help="Latest time included in the hovmöller")
@@ -69,7 +71,8 @@ if label:
 #+++ Save
 figures_dir = REPO_ROOT / "figures"
 figures_dir.mkdir(exist_ok=True)
-plot_filename = str(figures_dir / os.path.basename(input_filename).replace("energy_transfer_sweep", "hovmoller_PiK_PiA").replace(".nc", ".pdf"))
+plot_filename = str(figures_dir / os.path.basename(input_filename)
+                    .replace("energy_transfer_sweep", "hovmoller_PiK_PiA").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
 #---

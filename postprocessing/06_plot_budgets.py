@@ -11,8 +11,10 @@ from src.aux03_plotting import budget_colors, run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot SFS KE and APE budget terms from saved budget files")
-parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
+parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc",
+                    help="Path to simulation NetCDF file (used to derive budget filenames)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Plot the budgets built with this --reference (03-05 tag the 'true' ones _trueref)")
 args = parser.parse_args()

@@ -14,7 +14,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale APE transfer (Π_A) and APE↔KE exchange terms (Π_K is computed online)")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "

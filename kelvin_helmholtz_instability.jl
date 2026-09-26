@@ -7,12 +7,14 @@ using ArgParse
 using CUDA: has_cuda_gpu
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Grids: topology, znode
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor,
+      SubFilterKineticEnergyEquation
 using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
-using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral,
+      VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
 using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
       FilteredAvailablePotentialEnergyDissipationRate,
@@ -78,17 +80,24 @@ let s = ArgParseSettings()
             default = 0.05
 
         "--filter_ls"
-            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields, Πₖ, ε_Kˢ, and Π_A/ε_Aˢ under --save_sorted). The offline budget pipeline's --filter-scales must be a subset of these (default: 1 7)"
+            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields, Πₖ, ε_Kˢ, and \
+                    Π_A/ε_Aˢ under --save_sorted). The offline budget pipeline's --filter-scales must be a subset of these \
+                    (default: 1 7)"
             arg_type = Int
             nargs = '+'
             default = [1, 7]
 
         "--save_tensors"
-            help = "Also output the strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale (for online-vs-offline validation). These are full 3D fields, so off by default to keep production output lean."
+            help = "Also output the strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale \
+                    (for online-vs-offline validation). These are full 3D fields, so off by default to keep production \
+                    output lean."
             action = :store_true
 
         "--save_sorted"
-            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), the local APE Eₐ, and the cross-scale APE flux Π_A with the sub-filter APE dissipation ε_Aˢ at each online filter scale. Adds a few 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
+            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the \
+                    three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), the local APE Eₐ, and the \
+                    cross-scale APE flux Π_A with the sub-filter APE dissipation ε_Aˢ at each online filter scale. Adds a \
+                    few 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
             action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
@@ -180,7 +189,8 @@ b = model.tracers.b
 #+++ Define initial conditions: shear flow with stratification and perturbation
 shear_flow(x, z) = params.U * tanh(z / params.h) # Base shear flow
 stratification(x, z) = params.B₀ * tanh(z / params.h) # Base stratification
-perturbation(x, z) = params.perturbation_amplitude * abs(randn()) * exp(-z^2) * sin(x * params.k_max - π) # Small perturbation to trigger instability
+# Small perturbation to trigger instability
+perturbation(x, z) = params.perturbation_amplitude * abs(randn()) * exp(-z^2) * sin(x * params.k_max - π)
 
 # Set initial conditions
 uᵢ(x, y, z) = shear_flow(x, z)
@@ -436,8 +446,10 @@ for ℓ in filter_ℓs
         S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))      # strain of the filtered velocity
         τ = SubFilterKineticEnergyEquation.subfilter_stress_tensor(model, gf; dims=(1, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
         push!(_ke_pairs,
-              Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃), Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
-              Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃), Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
+              Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃),
+              Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
+              Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃),
+              Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
     end
 end
 ke_transfer_fields = (; _ke_pairs...)
@@ -593,7 +605,8 @@ if save_sorted
 end
 #---
 
-outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields..., ε̄, ε, L_K, Ri=Ri_field, S=S_field)
+outputs = (; ω=vorticity, b, pe, PE, u=u_center, v=v_center, w=w_center, filtered_fields..., ke_transfer_fields...,
+           ε̄, ε, L_K, Ri=Ri_field, S=S_field)
 
 using NCDatasets
 simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"

@@ -63,7 +63,8 @@ parser = argparse.ArgumentParser(description="Compare online vs offline sub-filt
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file (run with --save_sorted)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
 parser.add_argument("--time", type=float, default=None, help="Target time for the snapshot maps (default: midpoint of simulation)")
-parser.add_argument("--z-window", type=float, default=6.0, help="Half-height of the z window shown in the snapshot maps (default: 6h; None for the full domain)")
+parser.add_argument("--z-window", type=float, default=6.0,
+                    help="Half-height of the z window shown in the snapshot maps (default: 6h; None for the full domain)")
 parser.add_argument("--n-workers", type=int, default=1, help="Thread-pool workers for the offline sorts and APE")
 add_tolerance_arg(parser)
 args = parser.parse_args()

@@ -10,9 +10,12 @@ from src.aux03_plotting import run_label
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Two-panel sweep figure: cross-scale transfer & SFS APE->KE exchange spectra (top); ℓ-derivative of the SFS exchange (bottom)")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
+parser = argparse.ArgumentParser(description="Two-panel sweep figure: cross-scale transfer & SFS APE->KE exchange spectra (top); "
+                                             "ℓ-derivative of the SFS exchange (bottom)")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
+                    help="Path to simulation NetCDF file (used to derive energy transfer filename)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load output produced with the fixed-in-time reference profile")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 def str2bool(s):
@@ -20,8 +23,10 @@ def str2bool(s):
     if s.lower() in ("false", "0", "no"):  return False
     raise argparse.ArgumentTypeError(f"Expected boolean, got {s!r}")
 parser.add_argument("--time", type=float, default=40, help="Snapshot time (nearest available will be used; ignored if --time-average true)")
-parser.add_argument("--time-average", type=str2bool, default=True, metavar="BOOL", help="Average transfer terms over the whole time range (true/false)")
-parser.add_argument("--max-average-time", type=float, default=140.0, help="Latest time included when averaging (only used if --time-average true)")
+parser.add_argument("--time-average", type=str2bool, default=True, metavar="BOOL",
+                    help="Average transfer terms over the whole time range (true/false)")
+parser.add_argument("--max-average-time", type=float, default=140.0,
+                    help="Latest time included when averaging (only used if --time-average true)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -117,6 +122,8 @@ ax_bot.set_title("Filter-scale derivative of the SFS APE↔KE exchange")
 ax_bot.legend(loc="best", fontsize=9, framealpha=0.9)
 #---
 
-plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "S3_sweep").replace(".nc", ".pdf"))
+plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename)
+                    .replace("energy_transfer_sweep", "S3_sweep").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
+#---

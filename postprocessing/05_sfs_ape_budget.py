@@ -32,7 +32,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS APE budget from Kelvin-Helmholtz simulation output")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved reservoir is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, the scale decomposition valid for a kernel with vertical "
@@ -246,7 +247,8 @@ for ℓ in filter_scales:
 
     Π_A_ℓ     = energy_transfer["Π_A"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
     int_Π_A_ℓ = energy_transfer["∫Π_A dV"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
-    residual  = -int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_A_ℓ.reindex(time=dAPE_dt.time) - int_sfs_ape_dissipation + int_R_s
+    residual  = (-int_dAPE_dt - int_ape_to_ke_exchange.reindex(time=dAPE_dt.time) + int_Π_A_ℓ.reindex(time=dAPE_dt.time)
+                 - int_sfs_ape_dissipation + int_R_s)
 
     budget_ℓ = xr.Dataset({
         # Density fields

@@ -17,10 +17,13 @@ print = logging.info
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Time-evolution snapshots: buoyancy b (top row) and relative buoyancy b_r (bottom row), one column per time")
+parser = argparse.ArgumentParser(description="Time-evolution snapshots: buoyancy b (top row) and relative buoyancy b_r (bottom row), one "
+                                             "column per time")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--times", type=float, nargs="+", default=[20, 50, 80], help="Snapshot times, one column each (nearest available is used)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Use the fixed-in-time reference profile produced by 02 with --fixed-reference")
+parser.add_argument("--times", type=float, nargs="+", default=[20, 50, 80],
+                    help="Snapshot times, one column each (nearest available is used)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Use the fixed-in-time reference profile produced by 02 with --fixed-reference")
 parser.add_argument("--zlim", type=float, default=4.0, help="Half-height of the plotted z window")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()

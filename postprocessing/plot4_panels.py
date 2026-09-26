@@ -127,7 +127,8 @@ for ax, (field, title) in zip(axes.flat, panels):
     ax.contour(bx, bz, bdata, levels=blevels, colors=contour_color, linewidths=0.6, alpha=0.5)
 
     title_color = "white" if is_dissipation else "black"
-    ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=11, ha="center", va="top", color=title_color, bbox=dict(facecolor="black" if is_dissipation else "white", edgecolor="none", pad=2, alpha=0.6))
+    ax.text(0.5, 0.97, title, transform=ax.transAxes, fontsize=11, ha="center", va="top", color=title_color,
+            bbox=dict(facecolor="black" if is_dissipation else "white", edgecolor="none", pad=2, alpha=0.6))
     ax.set_title("")
     ax.set_ylim(-4, +4)
     ax.set_aspect("equal")

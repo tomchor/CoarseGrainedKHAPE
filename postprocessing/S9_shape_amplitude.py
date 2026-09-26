@@ -35,7 +35,8 @@ ext_suffix = "" if args.extension == "edge" else f"_{args.extension}"
 
 #+++ Load
 input_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}{ext_suffix}.nc"))
-et = collapse_time_pairs(xr.open_dataset(input_filename, decode_timedelta=False)).sel(time=slice(None, args.max_time)).sortby("filter_scale")
+et = (collapse_time_pairs(xr.open_dataset(input_filename, decode_timedelta=False))
+      .sel(time=slice(None, args.max_time)).sortby("filter_scale"))
 inv = 1.0 / et.filter_scale.values
 t = et.time.values
 fields = {r"$\Pi_K$": et["∫Π_K dV"].transpose("time", "filter_scale").values,

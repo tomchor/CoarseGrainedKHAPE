@@ -12,12 +12,14 @@ from src.aux03_plotting import budget_colors, run_label
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
+                    help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
-parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive", help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
+parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive",
+                    help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -128,7 +130,8 @@ if label:
 if fixed_reference:
     info_parts.append("(fixed reference)")
 if info_parts:
-    axes[0, 0].text(0.98, 0.97, "  ".join(info_parts), transform=axes[0, 0].transAxes, fontsize=11, ha="right", va="top", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
+    axes[0, 0].text(0.98, 0.97, "  ".join(info_parts), transform=axes[0, 0].transAxes, fontsize=11, ha="right", va="top",
+                    bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
 #---
 
 #+++ Save

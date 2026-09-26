@@ -12,7 +12,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Sort density and compute reference state for APE calculation")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for density sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Use the t=0 density field as a fixed-in-time reference profile")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Use the t=0 density field as a fixed-in-time reference profile")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
