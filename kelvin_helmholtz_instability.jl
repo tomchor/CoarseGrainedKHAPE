@@ -352,12 +352,20 @@ end
 # longer quantised to Lz/M. Mapping in index space rather than in z avoids depending on M*n == N, which
 # `fld` does not guarantee. Outside the range this clamps, matching the edge extension either side and
 # numpy's interp, which the offline `filtered_reference_profile` ends with.
+#
+# The result must be non-decreasing, because ProfileLookup rejects any step down. (1 - w)c₀ + w c₁ is not
+# monotone in floating point: near the walls ⟨b✶⟩ rises by less than an ulp per slot (at ℓ = 1, from about
+# Nz = 4700), and its rounding then steps down. c₀ + w(c₁ - c₀) is monotone in w, and clamping it to [c₀, c₁]
+# keeps each segment within its end values, so the joined profile is non-decreasing wherever the coarse one is.
+# The two forms differ by at most an ulp. The offline twin clamps too (`np.minimum.accumulate` in _fft_gaussian).
 @inline function _interp_from_coarse_ccc(i, j, k, column_grid, coarse, n, M)
     FT = eltype(column_grid)
     t  = (k - FT(0.5)) / n + FT(0.5)
     κ  = clamp(floor(Int, t), 1, M - 1)
     w  = clamp(t - κ, zero(FT), one(FT))
-    @inbounds return (one(FT) - w) * coarse[1, 1, κ] + w * coarse[1, 1, κ + 1]
+    c₀ = @inbounds coarse[1, 1, κ]
+    c₁ = @inbounds coarse[1, 1, κ + 1]
+    return clamp(c₀ + w * (c₁ - c₀), min(c₀, c₁), max(c₀, c₁))
 end
 
 """Coarse 1×1×M column and the block size that maps the sorted column onto it, for filter scale ℓ."""
