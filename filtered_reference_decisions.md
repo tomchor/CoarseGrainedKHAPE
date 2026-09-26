@@ -41,6 +41,12 @@ against `ref_rho_sorted` and no Python script reads the online `wb_rs` except `i
 fully-online cross-check by design — so `plot4_panels` and `anim1_panels` are correct as they stand. Keep
 it that way: the online `wb_rs` is a validation output, not a plottable field.
 
+Update: the simulation now builds the online conversion on this split, filter(w(b − b✶)) − w̄(b̄ − ⟨b✶⟩), as the
+sub-filter conversion against b✶ plus the filtered conversion against b✶ minus the filtered conversion against
+⟨b✶⟩. Passing `method=lookup_flt` to the sub-filter conversion alone, the fix proposed at first, would not have
+worked: upstream reads one profile for both halves, so that is off by filter(wδ) instead of w̄δ. The online `wb_rs`
+field now matches `04`'s pointwise and can be plotted.
+
 This was not the original design — §2 — and the reason it changed is §6.
 
 ---

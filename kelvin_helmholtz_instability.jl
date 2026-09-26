@@ -15,7 +15,8 @@ using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
 using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
-      FilteredAvailablePotentialEnergyDisplacementPotential, FilteredAvailablePotentialEnergyDissipationRate
+      FilteredAvailablePotentialEnergyDisplacementPotential, FilteredAvailablePotentialEnergyDissipationRate,
+      FilteredAvailablePotentialToKineticEnergyConversion
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
@@ -514,6 +515,14 @@ if save_sorted
     _ape_pairs = Pair{Symbol, Any}[]
     for ℓ in filter_ℓs
         gf = matched_filter(ℓ)
+        coarse_ℓ, n_ℓ, M_ℓ = coarse_column(ℓ)
+        _blk(f) = Field(KernelFunctionOperation{Center, Center, Center}(_block_mean_ccc, coarse_ℓ, f, n_ℓ))
+        b✶_crs  = Field(coarse_filter(ℓ, coarse_ℓ)(_blk(reference_buoyancy(z✶_1dsort))))  # ⟨b✶⟩ on M levels
+        b✶_flt  = Field(KernelFunctionOperation{Center, Center, Center}(_interp_from_coarse_ccc,
+                                                z✶_1dsort.grid, b✶_crs, n_ℓ, M_ℓ))        # ...back onto the N slots
+        lookup_flt = ProfileLookup(b✶_flt, z✶_1dsort)                         # heights unchanged; only b✶ filtered
+        z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
+
         # τˡ(w, b_r) = filter(w b_r) - w̄ b_rˡ, the sub-filter half of the APE↔KE conversion. Load-bearing,
         # in three separate ways, so do not drop it because the offline pipeline ignores it (04 builds its
         # own exchange term and 05 reads 04's):
@@ -531,28 +540,17 @@ if save_sorted
         # construction against ⟨b✶⟩), τˡ admits no positivity check — a negative value here is physics, not
         # a symptom, and test_positivity.py deliberately says nothing about it.
         #
-        # KNOWN ISSUE — reference profile. Every other APE term below is built against ⟨b✶⟩ (`lookup_flt`);
-        # this one still passes the unfiltered `lookup`. Upstream takes b✶ from whatever `method` carries
-        # (`b✶ᶻ = reference_buoyancy_at_height(grid, lookup.profile)`) and its docstring is explicit that
-        # "the reference profile is **not** filtered in either half ... the two choices differ once the
-        # filter acts in the vertical" — and this filter is dims=(1,3). So the two are *not* interchangeable
-        # here, contrary to what this comment used to claim.
-        # What saves the budgets is narrower than reference-independence: writing δ(z) = b✶ - ⟨b✶⟩, the
-        # change is Δτ = filter(wδ) - w̄δ, and ∫Δτ dV = 0 exactly, because ∫w dx dy vanishes at every height
-        # (incompressible, periodic in x, w = 0 at the walls) and filtering preserves that. Measured: the
-        # integrals agree to 6e-11 while the pointwise fields differ by 13x. So every budget number is
-        # right and only the *plotted field* is wrong — which matters, because it is drawn as a heatmap
-        # beside the filtered-reference panels and CI publishes it as `animation-online`.
-        # Fix is `method=lookup_flt`, moving this statement below where lookup_flt is built.
-        wb_rs = SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup)
-
-        coarse_ℓ, n_ℓ, M_ℓ = coarse_column(ℓ)
-        _blk(f) = Field(KernelFunctionOperation{Center, Center, Center}(_block_mean_ccc, coarse_ℓ, f, n_ℓ))
-        b✶_crs  = Field(coarse_filter(ℓ, coarse_ℓ)(_blk(reference_buoyancy(z✶_1dsort))))  # ⟨b✶⟩ on M levels
-        b✶_flt  = Field(KernelFunctionOperation{Center, Center, Center}(_interp_from_coarse_ccc,
-                                                z✶_1dsort.grid, b✶_crs, n_ℓ, M_ℓ))        # ...back onto the N slots
-        lookup_flt = ProfileLookup(b✶_flt, z✶_1dsort)                         # heights unchanged; only b✶ filtered
-        z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
+        # Reference profile. S̃ is measured against ⟨b✶⟩, so the resolved half must be too:
+        # τˡ = filter(w(b - b✶)) - w̄(b̄ - ⟨b✶⟩), the split 04 computes offline. Upstream's
+        # SubFilterAvailablePotentialToKineticEnergyConversion reads one profile, from `method`, for *both* halves,
+        # so no single call gives it: `method=lookup` is off by w̄δ and `method=lookup_flt` by filter(wδ), with
+        # δ = b✶ - ⟨b✶⟩. Adding the filtered conversion w̄(b̄ - b✶) and subtracting w̄(b̄ - ⟨b✶⟩) moves the resolved
+        # half onto ⟨b✶⟩ and leaves the filtered product alone. It changes the field, not the integral:
+        # ∫w̄ f(z) dV = 0 for any f(z), since ∫w dx dy vanishes at every height and filtering preserves that. Each
+        # filtered conversion builds its own w̄ and b̄, so this costs a few extra filter passes per output.
+        wb_rs = flatten(SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup) +
+                        FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup) -
+                        FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup_flt))
 
         L    = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)                          # L̃ = Ẽ_A(b̄, z)
         E_as = flatten(Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup)))) - L)   # S̃ = Ē_A - L̃

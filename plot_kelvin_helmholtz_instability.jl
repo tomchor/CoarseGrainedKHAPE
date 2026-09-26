@@ -123,11 +123,8 @@ else
     # it swings through zero as the billow converts and restores — and E_as (S̃) is only non-negative where
     # the ⟨b✶⟩ construction holds. Neither is a dissipation; blue is not an error.
     #
-    # Caveat on the τ panel specifically: it is the one field here still built against the unfiltered b✶
-    # while its neighbours use ⟨b✶⟩ (see the KNOWN ISSUE in kelvin_helmholtz_instability.jl). The integral
-    # in the timeseries below is unaffected — ∫Δτ dV = 0 exactly — but this heatmap is, by rms(diff)/rms
-    # = 0.68 against the correct field, so do not compare it pointwise with the offline animation until
-    # that one-word fix lands.
+    # The τ panel's resolved half is measured against ⟨b✶⟩ like its neighbours (see `wb_rs` in
+    # kelvin_helmholtz_instability.jl), so it compares pointwise with the offline animation.
     for ℓ in panel_ℓs
         panel_names = ["ω"          "w"          "b"          "b_r";
                        "K_s_ℓ$ℓ"    "Π_K_ℓ$ℓ"    "ε_Ks_ℓ$ℓ"   "wb_rs_ℓ$ℓ";
