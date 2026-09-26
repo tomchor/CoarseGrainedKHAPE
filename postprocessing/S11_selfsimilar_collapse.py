@@ -95,18 +95,19 @@ S_GRID = np.linspace(-0.5, 2.0, 120)
 quality = {}
 for name, M in terms.items():
     ts, tau, pk = stats[name]
-    rows = []
+    rows, kept = [], []                  # kept[j] is the scale row j came from, for its colour
     for i in range(len(L)):
         if not np.isfinite(ts[i]) or not np.isfinite(tau[i]) or tau[i] <= 0:
             continue
         s = (t - ts[i]) / tau[i]
         rows.append(np.interp(S_GRID, s, curves[name][i], left=np.nan, right=np.nan))
-    R = np.array(rows)
+        kept.append(i)
+    R = np.array(rows).reshape(len(rows), S_GRID.size)   # stays 2-D when no scale has an onset
     n_valid = np.sum(np.isfinite(R), axis=0)
     with np.errstate(invalid="ignore"):
         spread = np.where(n_valid >= 2, np.nanstd(np.where(np.isfinite(R), R, np.nan), axis=0), np.nan)
     core = (S_GRID > -0.2) & (S_GRID < 1.2)
-    quality[name] = (R, float(np.nanmedian(spread[core])))
+    quality[name] = (R, float(np.nanmedian(spread[core])) if R.shape[0] else np.nan, kept)
     print(f"  {name}: {R.shape[0]} scales collapsed, median spread over the event = {quality[name][1]:.3f}"
           f"   (0 = perfect collapse, ~0.5 = none)")
 #---
@@ -139,13 +140,18 @@ for col, (name, M) in enumerate(terms.items()):
     ax1.set_title("before: amplitude normalised only", fontsize=10); ax1.grid(True, alpha=0.3)
 
     # (row 3) after: rescaled time
-    R, q = quality[name]
-    for i, row in enumerate(R):
-        ax2.plot(S_GRID, row, color=cmap(norm_l[min(i, len(norm_l)-1)]), lw=1, alpha=0.8)
-    ax2.plot(S_GRID, np.nanmean(R, axis=0), "k-", lw=2.2, label="mean")
+    R, q, kept = quality[name]
+    for i, row in zip(kept, R):
+        ax2.plot(S_GRID, row, color=cmap(norm_l[i]), lw=1, alpha=0.8)
+    if kept:
+        ax2.plot(S_GRID, np.nanmean(R, axis=0), "k-", lw=2.2, label="mean")
+    else:
+        ax2.text(0.5, 0.5, "no scale has a finite onset", transform=ax2.transAxes, ha="center")
     ax2.set_xlabel(r"$(t - t^*(\ell))\,/\,\tau(\ell)$"); ax2.set_ylabel(r"$\Pi\,/\,\max_t|\Pi|$")
     ax2.set_title(f"after: rescaled  (spread {q:.3f})", fontsize=10)
-    ax2.legend(fontsize=8); ax2.grid(True, alpha=0.3)
+    if kept:
+        ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
 
 sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(np.log10(L).min(), np.log10(L).max()))
 cb = fig.colorbar(sm, ax=axes[:, :].ravel().tolist(), fraction=0.02, pad=0.01)

@@ -46,15 +46,18 @@ print(f"  Loaded: {input_filename}\n  {len(t)} times, {len(ℓ)} scales")
 # That is one number per time per term, so plotting it directly says the same thing as a Hovmoller with far
 # less ink -- and it shows whether the crossover migrates as the billow grows, which an average cannot.
 # Crossings are found by linear interpolation in log(l), since the scales are log-spaced.
+# Only nonzero values carry a sign. A scale whose kernel is the identity (σ under an eighth of a cell, where
+# scipy's truncated stencil is a single point) transfers exactly nothing, and counting that 0 as a sign of its
+# own put a crossover at the last such scale at every time.
 def crossings(row):
-    s = np.sign(row)
+    nz = np.flatnonzero(np.isfinite(row) & (row != 0))
     out = []
-    for i in np.where(np.diff(s) != 0)[0]:
-        y0, y1 = row[i], row[i + 1]
-        if y1 == y0:
+    for i, j in zip(nz[:-1], nz[1:]):
+        y0, y1 = row[i], row[j]
+        if np.sign(y0) == np.sign(y1):
             continue
         w = y0 / (y0 - y1)                      # fraction of the interval to the zero
-        out.append(np.exp(np.log(ℓ[i]) + w * (np.log(ℓ[i + 1]) - np.log(ℓ[i]))))
+        out.append(np.exp(np.log(ℓ[i]) + w * (np.log(ℓ[j]) - np.log(ℓ[i]))))
     return out
 
 fig, ax = plt.subplots(figsize=(7.0, 4.2), constrained_layout=True)

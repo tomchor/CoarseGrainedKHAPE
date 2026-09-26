@@ -45,6 +45,9 @@ ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn,
 t_sel = [float(ds.time.sel(time=t, method="nearest").values) for t in args.times]
 for want, got in zip(args.times, t_sel):
     print(f"  t = {got:.3f}  (requested {want})")
+if len(set(t_sel)) < len(t_sel):     # two requests on one record would duplicate the time axis
+    t_sel = list(dict.fromkeys(t_sel))
+    print(f"  note: some requested times share a record; plotting {len(t_sel)} distinct times")
 ds = ds.sel(time=t_sel)
 
 ds_b = ds[["b", "dV", "LxLy"]].copy()
@@ -127,7 +130,9 @@ for row, (fields, row_label, cmap, vmin, vmax) in enumerate(rows):
 
         ax.set_ylim(-args.zlim, +args.zlim)
         ax.set_aspect("equal")
-        ax.set_yticks([-3, -1, 1, 3])
+        yticks = [v for v in (-3, -1, 1, 3) if abs(v) <= args.zlim]   # ticks past --zlim would widen the axis
+        if yticks:
+            ax.set_yticks(yticks)
 
     # One vertical bar per row, off the end of the row. Outside the panels it needs no backing patch and
     # cannot cover data, and spanning the row states plainly that the scale is shared along it.

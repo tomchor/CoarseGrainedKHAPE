@@ -79,7 +79,7 @@ n = len(edges) - 1
 for ax, M, key, name in [(ax_K, K, "K", r"$\Pi_K$"), (ax_A, A, "A", r"$\Pi_A$"),
                          (ax_T, K + A, "T", r"$\Pi_K + \Pi_A$")]:
     for i, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
-        sel = (t >= a) & (t <= b)
+        sel = (t >= a) & ((t < b) if i < n - 1 else (t <= b))   # half-open, so a boundary record counts once
         if not sel.any():
             continue
         lo, hi = spans[key]

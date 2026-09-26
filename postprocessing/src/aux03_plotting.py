@@ -283,7 +283,7 @@ def plot_dataset_variables(ds, time_stride=None, figsize=None, **kwargs):
 #---
 
 
-def collapse_time_pairs(ds, rtol=0.1):
+def collapse_time_pairs(ds, rtol=0.5):
     """Keep one record per group of near-coincident times.
 
     The simulation writes with `ConsecutiveIterations(TimeInterval(2))`, so output arrives in pairs a
@@ -293,6 +293,9 @@ def collapse_time_pairs(ds, rtol=0.1):
     full-height row, alternating up the panel. That banding is manufactured by the axis, not the flow.
 
     Drops any record whose gap from the previous kept one is below `rtol` times the 75th-percentile gap.
+    The gaps are either about one timestep (within a pair) or about the output interval, so half the
+    upper-quartile gap separates them at any resolution; 0.1 did not on coarse runs, where one timestep
+    exceeds a tenth of the interval and whole pairs survived, double-weighting those times.
     Scaled by an upper percentile, not the median: with paired output roughly half the gaps are the tiny
     within-pair ones, so the median sits inside that group and the test never fires. With no pairing the
     gaps are uniform, the threshold lands at `rtol` of them, and nothing is dropped. The pairs exist for
