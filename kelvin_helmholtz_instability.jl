@@ -308,8 +308,8 @@ end
 # deep BinaryOperation nest. Handing a writer several of those sent LLVM's instruction selector quadratic
 # (DAGCombiner::CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation for >45 min
 # at Nz=32. Wrapping collapses each term to one flat KernelFunctionOperation, as the built-in ones already are.
-# Levels per σ on the grid ⟨b✶⟩ is filtered on; see `coarse_column`. Matches the offline
-# REFERENCE_FILTER_K in src/aux01_pe_functions.py.
+# Levels per σ on the coarse grid the online ⟨b✶⟩ is filtered on; see `coarse_column`. The offline profile has no
+# such parameter: `filtered_reference_profile` filters the whole column by FFT, so the two constructions differ.
 const REFERENCE_FILTER_K = 1000
 
 @inline _passthrough_ccc(i, j, k, grid, a) = @inbounds a[i, j, k]
@@ -454,7 +454,7 @@ ke_transfer_fields = (; _ke_pairs...)
 #   VerticalSort          the sorted column itself, on a 1×1×N grid → the reference profile b✶(z✶)
 # All three are emitted so postprocessing/validation/inv06_compare_sorted_profiles.py can compare them
 # against each other and against the offline sort. Note the offline pipeline sorts the *z-padded* domain
-# (load_dataset_and_grid doubles the height with edge values), so the two do not sort the same field
+# (load_dataset_and_grid pads it with edge values, at least Nz//2 cells each side), so the two do not sort the same field
 # near the top and bottom boundaries — quantifying that is part of what inv06 checks.
 #
 # Only the column is a reference *profile* as written. For the two model-grid methods `reference_buoyancy`

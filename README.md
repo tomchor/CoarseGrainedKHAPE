@@ -97,7 +97,7 @@ bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_t
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
-Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
+Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting job loads the frozen sorted density that `02` wrote, and the sweep transfer job builds its own frozen column (see Run sweep only).
 
 `SAVE_SORTED` defaults to `1`, so the simulation writes the sorted reference state and the online APE budget terms. The validation job (`inv06`–`inv10`) and the online panels animation use them; the offline budget does not, since `03` and `05` compute `Π_A` and `ε_Aˢ` offline against the exact ⟨ρ_*⟩. `SAVE_SORTED=0` gives smaller output and changes no budget number, and `VALIDATE=1` turns it back on.
 

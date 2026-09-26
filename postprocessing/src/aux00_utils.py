@@ -321,7 +321,7 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge"):
     ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
     ds["LxLy"] = ds.Lx * ds.Ly
 
-    # Pad domain in z (double height using boundary values of each field)
+    # Pad domain in z: at least Nz//2 cells each side, more when a filter needs it (see _pad_domain_in_z)
     ds = _pad_domain_in_z(ds, min_margin=min_margin, extension=extension)
 
     return ds

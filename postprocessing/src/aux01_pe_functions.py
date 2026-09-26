@@ -909,17 +909,6 @@ def calculate_cross_scale_ape_flux(rho, u_i, upsilon, filter, filter_dims=["x_ca
 # is raised rather than silently smoothed with the wrong width.
 SLOT_SPACING_RTOL = 1e-10
 
-# Levels per σ on the grid ⟨ρ_*⟩ is filtered on. The sorted column carries one slot per grid cell, which
-# is far finer than a Gaussian-filtered profile can resolve: a convolution of width σ is smooth on scale
-# σ, so sampling it below that stores information it cannot contain. Filtering on the column therefore
-# costs O(N²) -- N slots against a stencil that itself grows with N -- which at Nz=2048 is ~400 hours
-# over the sweep's 30 scales. Resampling to K levels per σ, filtering there, and interpolating back onto
-# the column keeps the full z̃_* lookup resolution while making the filter cost independent of N.
-#
-# K trades accuracy against cost as δz̃_* ≈ σ/(8K²) and cost ≈ K², so the *wide* filters bind, not the
-# narrow ones. Matching the column's own lookup granularity (Lz/2N) needs K ≈ 79 at Nz=512 and ≈ 317 at
-# Nz=2048; K=1000 is deliberately generous, costing ~1.6 h at Nz=2048 against 402 h for the column. Lower
-# it if that becomes the bottleneck -- K=300 is ~6x cheaper and still meets the granularity criterion.
 # Gaussian convolution of the sorted column, by FFT. scipy's gaussian_filter1d convolves directly, so it
 # costs O(N · stencil) with a stencil of 8σ/Δz slots -- at Nz=1024 that is 29 s per record at ℓ=1 and
 # 600 s at ℓ=20, which is what the old block-averaging path existed to avoid. By FFT the same convolution

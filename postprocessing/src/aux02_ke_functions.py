@@ -366,11 +366,10 @@ def calculate_energy_transfer(ds, filter_scales,
                                                                filtered_w=w_bar,
                                                                filtered_b=b_r_l)
 
-        # Resolved conversion w̄·b_rˡ, the filtered-scale half of the same split. It uses b_r_l, the
-        # *unfiltered* reference profile, exactly as the sub-filter half above does, so the two sum to
-        # filter(w·b_r) and the decomposition is exact. Using w̄·filter(b_r) here instead would leave a
-        # residual of w̄·[filter(b✶(z)) - b✶(z)] between the halves. This matches Oceanostics'
-        # `FilteredAvailablePotentialToKineticEnergyConversion`, which the simulation computes online.
+        # Resolved conversion w̄·b_rˡ, the filtered-scale half of the same split. It uses the same b_r_l as the
+        # sub-filter half above, measured against the resolved reservoir's reference (⟨ρ_*⟩, or ρ_* under
+        # --reference true), so the two halves sum to filter(w·b_r) and the decomposition is exact. Against
+        # ⟨ρ_*⟩, b_r_l is exactly filter(b_r). The simulation's online wb_rs is split the same way.
         wbar_b_r_l = (w_bar * b_r_l).rename("w̄·b_rˡ")
 
         # --- APE cross-scale transfer ---
