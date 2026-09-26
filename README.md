@@ -186,7 +186,23 @@ bash submit_sweep.sh                          # default Nz=2048, FIXED_REF=0
 bash submit_sweep.sh NZ=4096
 bash submit_sweep.sh NZ=2048 FIXED_REF=1     # fixed-in-time reference profile
 bash submit_sweep.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs only once
+bash submit_sweep.sh NZ=2048 EXTENSION=odd   # the whole sweep with b oddly reflected past the walls
 ```
+
+`submit_sweep.sh` refuses any argument it does not know, so a misspelled key cannot silently rerun the default sweep over the production files.
+
+#### Wall-extension test
+
+The manuscript leaves the extension of b and b✶ past the walls free (§2) and uses the wall values (§4). `EXTENSION=odd` reflects b oddly about the wall value instead; every other field keeps the wall value, so the comparison changes the buoyancy rule alone. Its files carry an `_odd` tag. `extension_test.pbs` runs the odd rule at one scale, snapped to the nearest of the production sweep's 30, and `compare_extension.py` sets it against the production (edge) sweep:
+
+```bash
+cd postprocessing
+qsub -v NZ=2048,SCALE=20 extension_test.pbs                               # odd rule at l=20 only (no wrapper yet)
+python compare_extension.py --filename output/khi_Nz2048_Ri0.10.nc --filter-scale 20
+python compare_extension.py --filename output/khi_Nz2048_Ri0.10.nc --all   # every scale, after EXTENSION=odd
+```
+
+A run over a subset of scales (`sweep1 --filter-scales`, as `extension_test.pbs` does) tags its files with the scales, e.g. `_sweep_l20_odd.nc`, so it never replaces a full sweep; `sweep2` takes the same `--filter-scales` to find it, and `compare_extension.py` prefers it for a single-scale comparison.
 
 `FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job.
 

@@ -2,11 +2,12 @@
 #+++ Imports
 import os
 from pathlib import Path
+import tempfile
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, extension_for_run, extension_suffix, reference_suffix,
-                            load_dataset_and_grid)
+                            load_dataset_and_grid, scale_subset_tag)
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
@@ -21,6 +22,9 @@ parser.add_argument("--extension", choices=["edge", "odd"], default="edge",
                     help="Which sweep1 run to read: the one filtered with wall-value extension ('edge', the "
                          "default) or with odd reflection ('odd'). Comparing the two measures how much the "
                          "extension choice moves the spectrum at large filter scale.")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=None,
+                    help="The scales sweep1 was given with --filter-scales, if any: selects that run's tagged file "
+                         "(e.g. _l20) and tags this output the same way. Omit for the full sweep.")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
@@ -36,11 +40,12 @@ filtered_reference = args.reference == "filtered"
 n_workers = args.n_workers
 chunks = dict(time=1)
 ref_suffix = "_fixed_ref" if fixed_reference else ""
+scale_tag = scale_subset_tag(args.filter_scales)   # "" for the full sweep
 # --extension picks *which* sweep1 run to read. The extension actually used is then taken from that file's
 # own attributes, so the raw field here is extended exactly as sweep1 extended it -- the same contract
 # `pad_margin` already has, and it catches a flag that disagrees with the file it names.
 filtered_filename = str(PP_OUTPUT / (Path(filename).stem
-                                     + f"_filtered_velocities_sweep{extension_suffix(args.extension)}.nc"))
+                                     + f"_filtered_velocities_sweep{scale_tag}{extension_suffix(args.extension)}.nc"))
 extension  = extension_for_run(filtered_filename)
 ext_suffix = extension_suffix(extension)
 if extension != args.extension:
@@ -123,9 +128,10 @@ print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
 energy_transfer.attrs["ape_reference"] = args.reference
 output_filename = str(PP_OUTPUT / (Path(filename).stem
-                                   + f"_energy_transfer_sweep{ref_suffix}{reference_suffix(args.reference)}{ext_suffix}.nc"))
-tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
-tmp_dir.mkdir(exist_ok=True)
+                                   + f"_energy_transfer_sweep{ref_suffix}{reference_suffix(args.reference)}{scale_tag}{ext_suffix}.nc"))
+# A fresh directory per run: a shared one let concurrent runs delete each other's records, and a file left
+# by an interrupted run made the final rmdir fail after the output had been written.
+tmp_dir = Path(tempfile.mkdtemp(prefix=Path(output_filename).stem + "_tmp_", dir=PP_OUTPUT))
 tmp_files = []
 with ProgressBar(minimum=5, dt=5):
     for i in range(energy_transfer.sizes["time"]):

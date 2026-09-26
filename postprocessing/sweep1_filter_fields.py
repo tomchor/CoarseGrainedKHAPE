@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 import numpy as np
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields, extension_suffix
+from src.aux00_utils import (PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields, extension_suffix,
+                             scale_subset_tag)
 #---
 
 #+++ Configuration
@@ -14,7 +15,8 @@ parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="P
 parser.add_argument("--n-time-skip", type=int, default=1, help="Keep every n-th (consecutive) time step")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=None,
                     help="Filter scales to sweep (default: 30 points log-spaced over 0.02-20). Give a single "
-                         "value to test one scale, e.g. --filter-scales 20")
+                         "value to test one scale, e.g. --filter-scales 20; the output is then tagged with the "
+                         "scales (_l20) so it cannot replace the full sweep.")
 parser.add_argument("--extension", choices=["edge", "odd"], default="edge",
                     help="How b and b_* are extended past the walls: 'edge' repeats the wall value (the "
                          "paper's section 4 choice), 'odd' reflects oddly about it. Both are admissible, so "
@@ -27,6 +29,7 @@ filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) el
 filter_scales = (np.asarray(args.filter_scales, dtype=float) if args.filter_scales
                  else np.geomspace(0.02, 20, 30))  # Length scales for filtering
 ext_suffix = extension_suffix(args.extension)
+scale_tag = scale_subset_tag(args.filter_scales)   # a subset run must not overwrite the full sweep's file
 #---
 
 #+++ Load data and grid
@@ -57,7 +60,7 @@ print("Done!")
 print("\n" + "="*60)
 print("Saving filtered fields...")
 
-output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_filtered_velocities_sweep{ext_suffix}.nc"))
+output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_filtered_velocities_sweep{scale_tag}{ext_suffix}.nc"))
 with ProgressBar(minimum=5, dt=5):
     ds_filt.to_netcdf(output_filename)
 os.sync()

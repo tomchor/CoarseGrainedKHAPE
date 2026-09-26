@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
-from src.aux00_utils import PP_OUTPUT, reference_suffix
+from src.aux00_utils import PP_OUTPUT, reference_suffix, scale_subset_tag
 
 parser = argparse.ArgumentParser(description="Compare sweep transfer terms between two wall extensions")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
@@ -27,8 +27,11 @@ args = parser.parse_args()
 stem = Path(args.filename).stem
 ref_suffix = ("_fixed_ref" if args.fixed_reference else "") + reference_suffix(args.reference)   # adds _trueref for --reference true
 
-def load(suffix):
-    path = PP_OUTPUT / f"{stem}_energy_transfer_sweep{ref_suffix}{suffix}.nc"
+def sweep_path(suffix, scale_tag=""):
+    return PP_OUTPUT / f"{stem}_energy_transfer_sweep{ref_suffix}{scale_tag}{suffix}.nc"
+
+def load(suffix, scale_tag=""):
+    path = sweep_path(suffix, scale_tag)
     if not path.exists():
         raise SystemExit(f"missing {path}\nRun extension_test.pbs first (and the production sweep for 'edge').")
     print(f"  loading {path.name}")
@@ -41,7 +44,10 @@ def load(suffix):
     return ds
 
 a = load("")                      # edge: the production sweep
-b = load(f"_{args.extension}")    # the alternative rule
+# The alternative rule comes from extension_test.pbs, one scale tagged with it (_l20), or from a full sweep run
+# with EXTENSION=odd. A single-scale comparison prefers the tagged run and falls back to the full one.
+odd_tags = ([] if args.all else [scale_subset_tag([args.filter_scale])]) + [""]
+b = load(f"_{args.extension}", next((t for t in odd_tags if sweep_path(f"_{args.extension}", t).exists()), ""))
 
 if args.all:
     # Scales present in both runs. Matched by value rather than by index: a single-scale odd run and the

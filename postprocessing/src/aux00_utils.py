@@ -245,6 +245,16 @@ def extension_suffix(extension):
     return "" if extension == "edge" else f"_{extension}"
 
 
+def scale_subset_tag(filter_scales):
+    """Filename tag for a sweep run over a chosen subset of scales, so it never replaces the full sweep.
+
+    The full sweep (sweep1's default 30 scales) carries no tag; a run given --filter-scales carries `_l` and
+    its scales, e.g. `_l20` or `_l1-7`, ahead of the extension tag. sweep2 and compare_extension rebuild it
+    from the same scales to find that run's files.
+    """
+    return "" if filter_scales is None else "_l" + "-".join(f"{float(s):g}" for s in filter_scales)
+
+
 def reference_suffix(reference):
     """Filename tag for `--reference true`, so its output never overwrites the default (filtered) run's.
 
