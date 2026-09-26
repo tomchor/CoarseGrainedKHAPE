@@ -5,6 +5,7 @@ Calculate SFS APE budget from Kelvin-Helmholtz simulation output
 
 #+++ Imports
 import gc
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -84,6 +85,37 @@ check_same_padded_grid(ds, ds_sorted, Path(sorted_density_filename).name)   # so
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
+#+++ Checkpoints
+# A checkpoint is reused only if it was written for this run: the same simulation output (its global
+# attributes carry the run's parameters and creation date), the same time axis, and the same padded grid
+# (n_pad_z and z_extension, which load_dataset_and_grid adds to the same attributes). Anything else is
+# discarded and recomputed. Without this, a job resumed after 01 was rerun with other filter scales, or after
+# the simulation was rerun under the same name, reloaded the old full_local_pes -- whose sorted column feeds
+# ⟨ρ_*⟩, the filtered lookup and Rˢ at every scale -- and mixed old per-scale budgets with new ones.
+CHECKPOINT_ID = hashlib.sha1((repr(sorted((k, str(v)) for k, v in ds.attrs.items()))
+                              + repr(ds.time.values.tolist())).encode()).hexdigest()
+
+
+def load_checkpoint(path):
+    """Open `path` if it was written for this run; otherwise delete it and return None, so it is recomputed."""
+    if not path.exists():
+        return None
+    ckpt = xr.open_dataset(str(path), decode_times=False)
+    if ckpt.attrs.get("checkpoint_id") == CHECKPOINT_ID:
+        return ckpt.chunk({"time": 1})
+    ckpt.close()
+    print(f"  Discarding {path.name}: written for a different run, time axis or padded grid")
+    path.unlink()
+    return None
+
+
+def save_checkpoint(dset, path):
+    """Write `dset` to `path`, stamped with this run's identity and padded grid."""
+    dset.attrs.update(checkpoint_id=CHECKPOINT_ID, n_pad_z=ds.attrs["n_pad_z"], z_extension=ds.attrs["z_extension"])
+    with ProgressBar(minimum=5, dt=5):
+        dset.to_netcdf(str(path))
+#---
+
 #+++ Calculate scale-independent fields
 print("\n" + "="*60)
 print("Calculating scale-independent fields...")
@@ -94,11 +126,9 @@ print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
 # full_local_pes is the full field against ρ_*, the same under either --reference, so both share it.
 full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + f"_full_local_pes_checkpoint{ref_suffix}.nc")
-if full_local_pes_checkpoint.exists():
-    print(f"  Loading full_local_pes from checkpoint: {full_local_pes_checkpoint.name}")
-    t0 = time.time()
-    full_local_pes = xr.open_dataset(str(full_local_pes_checkpoint), decode_times=False).chunk({"time": 1})
-    print(f"  full_local_pes loaded  ({time.time()-t0:.1f}s)")
+full_local_pes = load_checkpoint(full_local_pes_checkpoint)
+if full_local_pes is not None:
+    print(f"  full_local_pes loaded from checkpoint: {full_local_pes_checkpoint.name}")
 else:
     t0 = time.time()
     full_local_pes = local_potential_energies_timeseries(ds_full, ds_sorted.rho_sorted, ds_sorted.dz_sorted,
@@ -106,8 +136,7 @@ else:
     print(f"  full_local_pes calculated  ({time.time()-t0:.1f}s)")
     print(f"  Saving full_local_pes checkpoint...")
     t0 = time.time()
-    with ProgressBar(minimum=5, dt=5):
-        full_local_pes.to_netcdf(str(full_local_pes_checkpoint))
+    save_checkpoint(full_local_pes, full_local_pes_checkpoint)
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
     del full_local_pes
     gc.collect()
@@ -144,9 +173,10 @@ for ℓ in filter_scales:
     checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{out_suffix}.nc")
     checkpoint_files.append(checkpoint_path)
 
-    if checkpoint_path.exists():
+    checkpoint = load_checkpoint(checkpoint_path)
+    if checkpoint is not None:
         print(f"\n--- filter_scale = {ℓ:.4f} (loading from checkpoint) ---")
-        budget_list.append(xr.open_dataset(str(checkpoint_path), decode_times=False).chunk({"time": 1}))
+        budget_list.append(checkpoint)
         continue
 
     print(f"\n--- filter_scale = {ℓ:.4f} ---")
@@ -248,8 +278,7 @@ for ℓ in filter_scales:
 
     print(f"  Saving checkpoint...")
     t0 = time.time()
-    with ProgressBar(minimum=5, dt=5):
-        budget_ℓ.to_netcdf(str(checkpoint_path))
+    save_checkpoint(budget_ℓ, checkpoint_path)
     print(f"  Checkpoint saved  ({time.time()-t0:.1f}s)")
 
     # Free memory before the next iteration
