@@ -224,7 +224,8 @@ for ℓ in filter_scales:
         ds_full.ρ, full_local_pes.upsilon, filt_local_pes.upsilon, ds.κ, gaussian_filter,
         filter_dims=filtered_dimensions,
         filtered_density=ds_filt_ℓ.ρ̄,)
-    print(f"  sfs_ape_dissipation: offline, against the exact (FFT) reference profile  ({time.time()-t0:.1f}s)")
+    print(f"  sfs_ape_dissipation: offline, against {'⟨ρ_*⟩' if filtered_reference else 'the unfiltered ρ_*'}  "
+      f"({time.time()-t0:.1f}s)")
 
     # Read APE->KE exchange term from KE budget (avoid redundant recalculation)
     ape_to_ke_exchange     = ke_budget["SFS APE->KE exchange"].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6)
