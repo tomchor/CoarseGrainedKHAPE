@@ -70,12 +70,14 @@ Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files direc
 
 Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are optional and fall back to their defaults if omitted.
 
-### Output locations
+### Environment
 
-Two environment variables move the output off the repository, for example to scratch. Set them in the login environment, since PBS jobs do not inherit the submitting shell's variables, and give absolute paths.
+The submit wrappers need two variables that belong to whoever submits, and two more move the output off the repository, for example to scratch. Set them in the login environment (e.g. `~/.bashrc`): the jobs run in a login shell, and PBS does not otherwise pass on the submitting shell's variables. Give absolute paths. No job script names an account, a mail address or a Python environment; PBS mails its reports to whoever submitted the job.
 
 | Variable | Default | Read by |
 |----------|---------|---------|
+| `KHAPE_ACCOUNT` | none, required | every submit wrapper, which charges each job to it with `qsub -A` |
+| `KHAPE_PYTHON` | none, required for post-processing | the wrappers, which pass it to every Python job (the path to your `py313` environment's `python`) |
 | `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
 | `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
 

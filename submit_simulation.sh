@@ -14,8 +14,11 @@ for arg in "$@"; do case $arg in
   SAVE_SORTED=*)  SAVE_SORTED="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, SAVE_TENSORS= or SAVE_SORTED=)" >&2; exit 2;;
 esac; done
+# The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
+: "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
 NAME="kelvin_helmholtz_${NZ}"
 qsub -N "$NAME" \
+     -A "$KHAPE_ACCOUNT" \
      -o "logs/${NAME}.log" \
      -e "logs/${NAME}.log" \
      -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED \

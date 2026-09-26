@@ -23,7 +23,7 @@ Jobs are chained via PBS `afterok` dependencies. Always use `submit_*.sh` wrappe
 ```bash
 bash submit_simulation.sh NZ=2048
 ```
-Account: `UMCP0023`, queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
+Account: `$KHAPE_ACCOUNT`, which every submit wrapper passes with `qsub -A` (and `$KHAPE_PYTHON` for the Python jobs; see README, Environment); queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
 
 The Julia simulation accepts CLI args: `--Nz`, `--Ri`, `--stop_time`, `--Re0`, `--Pr`, `--U`, `--h`, `--perturbation_amplitude`, `--filter_ls` (one or more online filter length scales ℓ; default `1 7`), `--save_tensors` (flag; also writes the per-scale strain/stress tensor components for online-vs-offline validation), and `--save_sorted` (flag; also writes the Winters (1995) sorted reference state under all three Oceanostics sorting methods). For local CPU development:
 ```bash
@@ -220,5 +220,6 @@ Every term of both sub-filter budgets is now written by the simulation, so closu
 
 - Output files are excluded from git (`.nc`, `.mp4`, `.pdf`, `.png`, `.jld2`).
 - Simulation output can reach 650 GB; scratch directory is `/glade/derecho/scratch/tomasc/khape/output/`.
+- The submit wrappers require `$KHAPE_ACCOUNT` (the project to charge) and, for Python jobs, `$KHAPE_PYTHON` (the `py313` interpreter), and stop at submission if either is missing; no `.pbs` file names an account, a mail address or an environment, so the scripts work for whoever submits them.
 - `$KHAPE_OUTPUT_DIR` moves the simulation output (default `output/`) and `$KHAPE_PP_OUTPUT` the post-processing output (default `postprocessing/output/`). Every post-processing script takes `PP_OUTPUT` from `src/aux00_utils.py` rather than defining its own, the PBS jobs read the run from `${KHAPE_OUTPUT_DIR:-output}`, and `tests/conftest.py` honours both. Keep it that way: a script with its own `PP_OUTPUT` writes somewhere the next step does not read.
 - Logs: `logs/<job_name>.log` (PBS), `logs/<job_name>.out` (Python stdout via tee). Job names follow `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`.

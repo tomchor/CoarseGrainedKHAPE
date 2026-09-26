@@ -27,6 +27,9 @@ for arg in "$@"; do case $arg in
   PLOTS=*)       PLOTS="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, FIXED_REF=, VALIDATE=, PLOTS= or SAVE_SORTED=)" >&2; exit 2;;
 esac; done
+# The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
+: "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
+: "${KHAPE_PYTHON:?set KHAPE_PYTHON to the python of your py313 environment; see the README, Environment}"
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 # --save_sorted is on by default. It writes the sorted reference state and the online APE budget terms, the
 # cross-check that the validation job (inv06-inv10) and the online panels animation use. The offline budget
@@ -37,6 +40,7 @@ if [ "$VALIDATE" = "1" ]; then SAVE_SORTED=1; fi          # inv06-inv10 read the
 [ "$VALIDATE" = "1" ] && SAVE_TENSORS=1 || SAVE_TENSORS=0   # inv03 reads the per-scale tensors
 
 SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
+               -A "$KHAPE_ACCOUNT" \
                -o logs/kelvin_helmholtz_${NZ}.log \
                -e logs/kelvin_helmholtz_${NZ}.log \
                -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED simulation.pbs)
@@ -48,9 +52,10 @@ if [ "$VALIDATE" = "1" ]; then
     mkdir -p logs
     VAL_NAME="validation_Nz${NZ}_Ri0.10"
     VAL_JOB=$(qsub -N "$VAL_NAME" \
+                   -A "$KHAPE_ACCOUNT" \
                    -o "logs/${VAL_NAME}.log" \
                    -e "logs/${VAL_NAME}.log" \
-                   -v NZ=$NZ \
+                   -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
                    -W depend=afterok:$SIM_JOB \
                    validation.pbs)
     echo "Submitted validation (depends on $SIM_JOB): $VAL_JOB"
@@ -61,36 +66,40 @@ cd postprocessing
 
 BF_NAME="budgeting_filter_Nz${NZ}_Ri0.10"
 BF_JOB=$(qsub -N "$BF_NAME" \
+              -A "$KHAPE_ACCOUNT" \
               -o "logs/${BF_NAME}.log" \
               -e "logs/${BF_NAME}.log" \
-              -v NZ=$NZ \
+              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
               -W depend=afterok:$SIM_JOB \
               budgeting_filter.pbs)
 echo "Submitted budgeting filter (depends on $SIM_JOB): $BF_JOB"
 
 PP_NAME="budgeting_Nz${NZ}_Ri0.10${REF_SUFFIX}"
 PP_JOB=$(qsub -N "$PP_NAME" \
+              -A "$KHAPE_ACCOUNT" \
               -o "logs/${PP_NAME}.log" \
               -e "logs/${PP_NAME}.log" \
-              -v NZ=$NZ,FIXED_REF=$FIXED_REF \
+              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON \
               -W depend=afterok:$BF_JOB \
               budgeting.pbs)
 echo "Submitted budgeting (depends on $BF_JOB): $PP_JOB"
 
 SF_NAME="sweep_filter_Nz${NZ}_Ri0.10"
 SF_JOB=$(qsub -N "$SF_NAME" \
+              -A "$KHAPE_ACCOUNT" \
               -o "logs/${SF_NAME}.log" \
               -e "logs/${SF_NAME}.log" \
-              -v NZ=$NZ \
+              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
               -W depend=afterok:$PP_JOB \
               sweep_filter.pbs)
 echo "Submitted sweep filter (depends on $PP_JOB): $SF_JOB"
 
 ST_NAME="sweep_transfer_Nz${NZ}_Ri0.10${REF_SUFFIX}"
 ST_JOB=$(qsub -N "$ST_NAME" \
+              -A "$KHAPE_ACCOUNT" \
               -o "logs/${ST_NAME}.log" \
               -e "logs/${ST_NAME}.log" \
-              -v NZ=$NZ,FIXED_REF=$FIXED_REF \
+              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON \
               -W depend=afterok:$SF_JOB \
               sweep_transfer.pbs)
 echo "Submitted sweep transfer (depends on $SF_JOB): $ST_JOB"
@@ -99,9 +108,10 @@ echo "Submitted sweep transfer (depends on $SF_JOB): $ST_JOB"
 if [ "$PLOTS" = "1" ]; then
     PLOTS_NAME="plots_Nz${NZ}_Ri0.10"
     PLOTS_JOB=$(qsub -N "$PLOTS_NAME" \
+                     -A "$KHAPE_ACCOUNT" \
                      -o "logs/${PLOTS_NAME}.log" \
                      -e "logs/${PLOTS_NAME}.log" \
-                     -v NZ=$NZ \
+                     -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
                      -W depend=afterok:$ST_JOB \
                      plots.pbs)
     echo "Submitted final plots (depends on $ST_JOB): $PLOTS_JOB"

@@ -1,11 +1,9 @@
 #!/bin/bash -l
-#PBS -A UMCP0023
 #PBS -N kelvin_helmholtz_1024
 #PBS -o logs/kelvin_helmholtz_1024.log
 #PBS -e logs/kelvin_helmholtz_1024.log
 #PBS -l walltime=23:59:00
 #PBS -q casper
-#PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
 #PBS -l select=1:ncpus=8:ngpus=1:gpu_type=a100:mem=64GB

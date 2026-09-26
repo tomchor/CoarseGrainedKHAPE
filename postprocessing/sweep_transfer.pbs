@@ -1,5 +1,4 @@
 #!/bin/bash -l
-#PBS -A UMCP0023
 #PBS -N sweep_transfer_Nz4096_Ri0.10
 #PBS -o logs/sweep_transfer_Nz4096_Ri0.10.log
 #PBS -e logs/sweep_transfer_Nz4096_Ri0.10.log
@@ -7,7 +6,6 @@
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
 #PBS -l walltime=23:59:00
 #PBS -q casper
-#PBS -M wenegrat@umd.edu
 #PBS -m ae
 #PBS -r n
 #PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
@@ -18,7 +16,7 @@ set -eo pipefail
 NZ=${NZ:-4096}
 SIM=khi_Nz${NZ}_Ri0.10
 OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where simulation.pbs wrote the run; kelvin_helmholtz_instability.jl reads the same variable
-PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
+PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}
 FIXED_REF=${FIXED_REF:-0}
 EXTENSION=${EXTENSION:-edge}   # must match the sweep_filter run this reads; see sweep_filter.pbs
 [ "$EXTENSION" = "edge" ] && EXT_TAG="" || EXT_TAG="_${EXTENSION}"
