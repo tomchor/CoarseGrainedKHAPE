@@ -23,12 +23,9 @@ of either sign. Both halves are checked here, on a stratification displaced by a
     nothing else, and it would fail if the filter were ever narrowed to the horizontal — which would
     change what the sub-filter budget means and should not pass quietly.
 
-The synthetic tests need no simulation or post-processing output. The last test does: it applies the
-same bound to the simulation's own Eₐˢ (`E_as_ℓ<ℓ>`, written under --save_sorted with the x-z filter of
-`matched_filter`) and asserts that no cell is negative at any time. By the argument above it is
-expected to fail, and it is marked xfail (strict) so that CI stays green while it does, still prints how
-far below zero the online field goes and over what fraction of the domain, and turns red if the test
-ever passes, at which point the mark should come off. It skips when the output is absent.
+The synthetic tests need no simulation or post-processing output. The last one does: the simulation's
+`E_as_ℓ<ℓ>` is now S̃ = Ē_A - L̃, built against the filtered reference ⟨b✶⟩, so it asserts the positivity
+that construction delivers rather than documenting its absence. It skips when the output is absent.
 """
 
 import sys
@@ -41,6 +38,7 @@ import xarray as xr
 sys.path.insert(0, str(Path(__file__).parent.parent / "postprocessing"))
 from src.aux00_utils import GaussianFilter
 from src.aux01_pe_functions import local_potential_energies_timeseries, sorted_timeseries
+from conftest import SIM_OUTPUT
 
 #+++ Thresholds
 # Horizontal filter: Jensen is exact, so only roundoff is allowed. The discrete z✶ lookup does not
@@ -143,12 +141,13 @@ def test_vertical_filtering_breaks_the_jensen_bound(synthetic, cells):
 #---
 
 #+++ Online sub-filter APE (simulation output, --save_sorted)
-# The simulation's Eₐˢ at each online filter scale: `E_as_ℓ<ℓ>`, Oceanostics' SubFilterAvailablePotentialEnergy
-# built with `matched_filter`, which acts in x and z (dims=(1, 3)). By the argument in the module docstring the
-# field therefore has no fixed sign, and the assertion below is expected to fail, hence the xfail mark. It is held to the same
-# roundoff tolerance as the horizontal-filter test because the claim under test is the strict one: not one
-# cell, at any time, sits below zero. `report` prints max and frac(>0) as well, so the log shows both sides.
-SIM_OUTPUT = Path(__file__).resolve().parent.parent / "output" / "khi_Nz512_Ri0.10.nc"
+# `E_as_ℓ<ℓ>` is now S̃ = Ē_A - L̃, the filtered-reference sub-filter APE: the simulation builds the resolved
+# reservoir against ⟨b✶⟩ and writes no unfiltered counterpart. So the field this once expected to be
+# sign-indefinite is now the one the construction makes non-negative, and the xfail is gone with it.
+#
+# It is held to the same bound `test_positivity.py` uses for the offline S̃ rather than to roundoff: S̃
+# inherits the nearest-slot z✶ lookup, on both of the profiles it involves, and online also carries the
+# M-level lookup granularity of the coarse column ⟨b✶⟩ is filtered on. `report` prints max and frac(>0) too.
 ONLINE_FILTER_SCALES = [1, 7]   # the simulation's --filter_ls, which CI leaves at its default
 
 
@@ -159,15 +158,19 @@ def sim_output():
     return xr.open_dataset(SIM_OUTPUT, decode_times=False, chunks={"time": 1})
 
 
-@pytest.mark.xfail(strict=True, reason="Eₐˢ has no fixed sign under a filter that acts in z (module docstring); drop the mark once it does")
+ONLINE_SFS_APE_TOL = 1e-3   # as test_positivity.py's APE_TOL; see the note above
+
+
 @pytest.mark.parametrize("ell", ONLINE_FILTER_SCALES)
-def test_online_sfs_ape_has_no_negative_values(sim_output, ell):
-    """The simulation's own Eₐˢ is nowhere negative. Expected to fail: its filter also acts in z."""
+def test_online_sfs_ape_is_non_negative(sim_output, ell):
+    """The simulation's own S̃ is non-negative, which is what the filtered reference is for."""
     var = f"E_as_ℓ{ell}"
     if var not in sim_output:
         pytest.skip(f"'{var}' not in simulation output: the run did not use --save_sorted, or ℓ={ell} is not among its --filter_ls")
-    print(f"\nJensen bound, online x-z filter  (l={ell})")
+    print(f"\nOnline S̃ positivity, x-z filter  (l={ell})")
     relative = report(sim_output[var], f"{var} (online)")
-    assert relative > -JENSEN_TOL, (f"The online Eₐˢ at ℓ={ell} has negative values: min = {relative:.3e} x rms, tolerance is "
-                                    f"{-JENSEN_TOL:.0e} x rms. The module docstring explains why this is expected.")
+    assert relative > -ONLINE_SFS_APE_TOL, (
+        f"The online S̃ at ℓ={ell} goes negative beyond the lookup tolerance: min = {relative:.3e} x rms, "
+        f"tolerance is {-ONLINE_SFS_APE_TOL:.0e} x rms. S̃ is non-negative by construction for any kernel, "
+        f"so this is either a bug in ⟨b✶⟩ or a discretisation error larger than the tolerance allows.")
 #---

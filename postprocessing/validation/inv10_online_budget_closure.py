@@ -32,7 +32,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
-from src.aux00_utils import model_grid_suffix, strip_grid_suffix
+from src.aux00_utils import PP_OUTPUT, model_grid_suffix, strip_grid_suffix
 from src.aux03_plotting import run_label
 #---
 
@@ -45,7 +45,8 @@ parser = argparse.ArgumentParser(description="Check that the online SFS KE and A
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Simulation NetCDF file (run with --save_sorted)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
 parser.add_argument("--skip", type=int, default=2, help="Leading outputs to drop (default 2: the first ConsecutiveIterations pair)")
-parser.add_argument("--offline-stem", default=None, help="Stem of the offline budget files in postprocessing/output/, for a side-by-side residual")
+parser.add_argument("--offline-stem", default=None,
+                    help="Stem of the offline budget files in postprocessing/output/, for a side-by-side residual")
 add_tolerance_arg(parser)
 args = parser.parse_args()
 set_tolerance(args.tolerance)
@@ -54,7 +55,6 @@ print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" fo
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FIGURES = REPO_ROOT / "figures" / "validation"
 FIGURES.mkdir(parents=True, exist_ok=True)
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 
@@ -86,6 +86,17 @@ ds = strip_grid_suffix(ds, model_grid_suffix(ds))
 # there, their differencing window never having completed before the run ended.
 ds = ds.isel(time=slice(args.skip, -1))
 
+# τ(w,b_r) is the one term the two budgets share, with opposite signs: it is a reversible exchange
+# between the reservoirs, so whatever the sub-filter KE gains the sub-filter APE loses. That also means
+# it is **not sign-definite** — the filtered/sub-filter separation of the conversion puts no bound on
+# either half, and τ swings through zero as the billow alternately converts and restores. Do not read a
+# negative ∫τ dV as a failure; only the residuals are held to a threshold here.
+#
+# It is also the *largest* term in the KE budget at the resolutions measured (Nz=128/Re=262: rms 5.1e-02
+# at ℓ=1, 100% of the next largest; 86% of the largest at ℓ=7), so this is where the online closure check
+# is most sensitive to it. This is the only Python that reads the simulation's `wb_rs_ℓ<ℓ>_int` — the
+# offline pipeline builds its own exchange in 04 — which makes it easy to assume the online field is
+# unused and drop it. It is not: delete it and both residuals below lose a dominant term.
 BUDGETS = {
     "KE": dict(
         tendency = "dKs_dt_ℓ{}_int",
@@ -101,6 +112,10 @@ BUDGETS = {
                  "∫Rˢ dV": ("R_s_ℓ{}_int", +1)},
     ),
 }
+# Only the *integral* is read, and that is what makes this check insensitive to which reference profile
+# τ was built against: with δ(z) = b✶ - ⟨b✶⟩ the difference is Δτ = filter(wδ) - w̄δ, whose volume integral
+# is exactly zero. The pointwise field is not insensitive — see the KNOWN ISSUE at the construction site
+# in kelvin_helmholtz_instability.jl. A green result here therefore says nothing about that.
 #---
 
 #+++ Residuals

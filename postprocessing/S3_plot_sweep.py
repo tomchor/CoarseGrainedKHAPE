@@ -4,28 +4,35 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
+from src.aux00_utils import PP_OUTPUT, reference_suffix
 from src.aux03_plotting import run_label
 #---
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Two-panel sweep figure: cross-scale transfer & SFS APE->KE exchange spectra (top); ℓ-derivative of the SFS exchange (bottom)")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
+parser = argparse.ArgumentParser(description="Two-panel sweep figure: cross-scale transfer & SFS APE->KE exchange spectra (top); "
+                                             "ℓ-derivative of the SFS exchange (bottom)")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
+                    help="Path to simulation NetCDF file (used to derive energy transfer filename)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load output produced with the fixed-in-time reference profile")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 def str2bool(s):
     if s.lower() in ("true", "1", "yes"):  return True
     if s.lower() in ("false", "0", "no"):  return False
     raise argparse.ArgumentTypeError(f"Expected boolean, got {s!r}")
 parser.add_argument("--time", type=float, default=40, help="Snapshot time (nearest available will be used; ignored if --time-average true)")
-parser.add_argument("--time-average", type=str2bool, default=True, metavar="BOOL", help="Average transfer terms over the whole time range (true/false)")
-parser.add_argument("--max-average-time", type=float, default=140.0, help="Latest time included when averaging (only used if --time-average true)")
+parser.add_argument("--time-average", type=str2bool, default=True, metavar="BOOL",
+                    help="Average transfer terms over the whole time range (true/false)")
+parser.add_argument("--max-average-time", type=float, default=140.0,
+                    help="Latest time included when averaging (only used if --time-average true)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-ref_suffix = "_fixed_ref" if args.fixed_reference else ""
+ref_suffix = ("_fixed_ref" if args.fixed_reference else "") + reference_suffix(args.reference)   # adds _trueref for --reference true
 #---
 
 #+++ Load energy transfer data
@@ -51,6 +58,7 @@ print(f"  Filter scales: {et.filter_scale.values}")
 C_PI_K   = "#2166ac"  # blue
 C_PI_A   = "#d6604d"  # red
 C_SFS    = "#1b7837"  # green
+C_SUM    = "#000000"  # black — a derived total, not a fourth measured term, so neutral rather than a new hue
 LW       = 1.8
 MK       = "o"
 MS       = 4
@@ -66,6 +74,14 @@ for var, color, label_str in [
     ("∫(SFS APE->KE) dV", C_SFS,   r"SFS APE$\to$KE exchange: $\overline{w\,b_r} - \bar w\,b_r^\ell$"),
 ]:
     ax_top.plot(et.inv_scale, et[var].values, color=color, lw=LW, label=label_str)
+
+# Total cross-scale flux. Π_K and Π_A are the two halves of the energy that crosses the filter scale, so
+# their sum is the net cascade -- the quantity that has to be signed consistently if the scale is to be
+# called forward or inverse, and which individual terms of opposite sign can hide. Drawn heavier and
+# semi-transparent so the components stay readable where it runs over them, and neutral so it does not
+# read as a fourth independent measurement.
+ax_top.plot(et.inv_scale, (et["∫Π_K dV"] + et["∫Π_A dV"]).values, color=C_SUM, lw=2.4, alpha=0.7,
+            label=r"$\Pi_K + \Pi_A$  (total cross-scale flux)")
 
 ax_top.axhline(0, color="k", lw=0.8, ls="--")
 for ℓ in [1, 7]:
@@ -106,6 +122,8 @@ ax_bot.set_title("Filter-scale derivative of the SFS APE↔KE exchange")
 ax_bot.legend(loc="best", fontsize=9, framealpha=0.9)
 #---
 
-plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename).replace("energy_transfer_sweep", "S3_sweep").replace(".nc", ".pdf"))
+plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename)
+                    .replace("energy_transfer_sweep", "S3_sweep").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
+#---

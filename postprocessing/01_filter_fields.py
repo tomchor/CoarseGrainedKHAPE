@@ -3,19 +3,20 @@
 import os
 from pathlib import Path
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid, filter_fields
+from src.aux00_utils import PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields
 #---
 
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for SFS budgets")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter length scales (must match the simulation's online filter_ℓs, since the SFS KE budget reads Π_K from the online output)")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7],
+                    help="Filter length scales (must match the simulation's online filter_ℓs, since the SFS KE budget reads Π_K from the "
+                         "online output)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 filter_scales = args.filter_scales
 #---
@@ -23,7 +24,7 @@ filter_scales = args.filter_scales
 #+++ Load data and grid
 print("\n" + "="*60)
 print("Loading data and grid...")
-ds = load_dataset_and_grid(filename)
+ds = load_dataset_and_grid(filename, min_margin=required_pad_margin(filter_scales))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
@@ -32,6 +33,7 @@ print(f"Dataset loaded: {len(ds.time)} time steps")
 print("\n" + "="*60)
 print("Filtering velocity and buoyancy fields in x and z...")
 ds_filt = filter_fields(ds, filter_scales)
+ds_filt.attrs["pad_margin"] = required_pad_margin(filter_scales)
 print("Done!")
 #---
 

@@ -8,10 +8,10 @@ The simulation computes, at each scale ℓ in its online `filter_ℓs` and each 
     ε_Aˢ = filter(ε_A) - ε_Aˡ ,   ε_Aˡ = -q̄ᵢ ∂ᵢΥˡ ,   q̄ᵢ = filter(κ ∂ᵢb) ,   Υˡ = z✶(b̄) - z
 
 (Oceanostics' `SubFilterAvailablePotentialEnergyDissipationRate`), the diffusive sink of the sub-filter
-APE budget of Wenegrat, Chor & Barkan (2026). `05_sfs_ape_budget.py` reads it straight back, the same
-way `04_sfs_ke_budget.py` reads Π_K and ε_Kˢ, so this script is what stands between that budget and a
-silently wrong online field. The offline expression it is checked against is the one the pipeline used
-to call, `calculate_sfs_ape_dissipation`, still kept in `src/aux01_pe_functions.py`.
+APE budget of Wenegrat, Chor & Barkan (2026). The budget does not read it: `05_sfs_ape_budget.py` computes
+ε_Aˢ offline with `calculate_sfs_ape_dissipation` (`src/aux01_pe_functions.py`), the expression this
+script checks the online field against. The online field is the cross-check, and the source of the online
+panels animation.
 
 Three differences between the two, none of them errors, all of them measured here:
 
@@ -50,7 +50,7 @@ from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import (load_dataset_and_grid, integrate, make_gaussian_filter, open_grid_group,
                              model_grid_suffix, strip_grid_suffix)
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, sorted_timeseries,
-                                    local_potential_energies_timeseries, calculate_sfs_ape_dissipation)
+                                    local_potential_energies_timeseries, filtered_reference_profile, calculate_sfs_ape_dissipation)
 from src.aux03_plotting import run_label
 #---
 
@@ -63,7 +63,8 @@ parser = argparse.ArgumentParser(description="Compare online vs offline sub-filt
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file (run with --save_sorted)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
 parser.add_argument("--time", type=float, default=None, help="Target time for the snapshot maps (default: midpoint of simulation)")
-parser.add_argument("--z-window", type=float, default=6.0, help="Half-height of the z window shown in the snapshot maps (default: 6h; None for the full domain)")
+parser.add_argument("--z-window", type=float, default=6.0,
+                    help="Half-height of the z window shown in the snapshot maps (default: 6h; None for the full domain)")
 parser.add_argument("--n-workers", type=int, default=1, help="Thread-pool workers for the offline sorts and APE")
 add_tolerance_arg(parser)
 args = parser.parse_args()
@@ -149,12 +150,15 @@ for row, ℓ in enumerate(args.filter_scales):
 
     gf = make_gaussian_filter(ℓ, ds_raw)
 
-    # ρ̄ from the filtered buoyancy, exactly as the budget pipeline builds it (01 filters b, then 05
-    # converts), and Υˡ from looking that filtered density up in the *full* field's sorted profile.
+    # ρ̄ from the filtered buoyancy, exactly as the budget pipeline builds it (01 filters b, then 05 converts).
+    # Υ̃ comes from looking the filtered density up in ⟨ρ_*⟩ -- the *vertically filtered* reference --
+    # matching the construction the simulation now uses. Against the unfiltered ρ_* this would be the
+    # g_z = δ(z) horizontal limit, which is not what the online field computes.
     ds_filt = xr.Dataset({"b̄": gf.apply(ds_rho["b"], dims=FILTER_DIMS)})
     ds_filt.attrs.update(ds_raw.attrs)
     ds_filt = calculate_density_fields_from_buoyancy(ds_filt, buoyancy_name="b̄", density_name="ρ̄")
-    filt_local_pes = local_potential_energies_timeseries(ds_filt, sorted_state.rho_sorted, sorted_state.dz_sorted,
+    ref_rho_sorted = filtered_reference_profile(sorted_state.rho_sorted, sorted_state.dz_sorted, ℓ)
+    filt_local_pes = local_potential_energies_timeseries(ds_filt, ref_rho_sorted, sorted_state.dz_sorted,
                                                          density_name="ρ̄", n_workers=args.n_workers, verbose_level=0)
 
     offline = calculate_sfs_ape_dissipation(ds_rho["ρ"], full_local_pes.upsilon, filt_local_pes.upsilon,

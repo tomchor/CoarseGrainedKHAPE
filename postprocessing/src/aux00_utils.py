@@ -4,7 +4,8 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-PP_OUTPUT = Path(__file__).resolve().parent.parent / "output"
+# $KHAPE_PP_OUTPUT redirects the derived budget files, as $KHAPE_OUTPUT_DIR does the simulation output.
+PP_OUTPUT = Path(os.environ.get("KHAPE_PP_OUTPUT") or Path(__file__).resolve().parent.parent / "output")
 
 #+++ Multi-grid output files
 # A NetCDFWriter holding outputs on more than one grid disambiguates by suffixing every dimension name
@@ -65,17 +66,125 @@ def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
 #---
 
 #+++ Load data
-def _pad_domain_in_z(ds):
-    """Extend the z domain to twice its original height using edge-value padding.
+def required_pad_margin(filter_scales):
+    """Physical z margin the padding must provide for the widest filter in `filter_scales`.
 
-    Adds Nz//2 cells at the bottom (each filled with that field's bottom boundary
-    value) and Nz//2 cells at the top (each filled with the top boundary value),
-    doubling the domain height. Assumes a uniform z grid. Δz_aac is extended with
-    the same constant dz; dV and z-extent attributes are recomputed.
+    The sub-filter decomposition S̃ = Ē_A - L̃ is an identity only where filter(z) = z, which fails
+    within one stencil of an array boundary: the truncated, asymmetric stencil no longer reproduces a
+    linear coordinate. Padding restores it, provided the physical domain sits at least a full stencil
+    half-width — 4σ, matching scipy's truncate=4 — inside the padded array.
+
+    The default Nz//2 padding gives a margin of Lz/2, which is 12.5 for this setup: enough for ℓ = 7
+    (4σ = 11.89) and not for anything larger. The sweep spans ℓ up to 20 (4σ = 33.97), so it needs
+    roughly 3.7x the domain height in padding.
     """
+    σ_max = max(float(ℓ) for ℓ in filter_scales) * _FWHM_TO_SIGMA
+    return 4.0 * σ_max
+
+
+def pad_margin_of(ds_filt):
+    """The padding margin the filtering step recorded, so every later step pads identically.
+
+    The sort in 02 and the budgets in 03-05 must see the same padded grid the fields were filtered on,
+    so the margin is written once by 01/sweep1 and read back here rather than recomputed. Returns None
+    for files written before this was recorded, which restores the old Nz//2 default.
+    """
+    m = ds_filt.attrs.get("pad_margin")
+    return None if m is None else float(m)
+
+
+def pad_margin_for_run(filtered_filename, required=False):
+    """Read the recorded margin off a run's filtered-fields file, or None if it has none.
+
+    Every step after 01 must pad exactly as 01 did -- the sort in 02 and the budgets in 03-05 all have
+    to see the same padded grid -- so each reads the margin from the file 01 wrote rather than deriving
+    it again. A file without the attribute returns None, which restores the Nz//2 default and keeps
+    output written before it existed readable. A missing file does the same unless `required`, in which
+    case it raises: the steps that follow 01 would otherwise pad to Nz//2 whatever 01 went on to use.
+    """
+    import xarray as _xr
+    try:
+        with _xr.open_dataset(filtered_filename, decode_times=False) as d:
+            return pad_margin_of(d)
+    except (FileNotFoundError, OSError):
+        if required:
+            raise FileNotFoundError(f"{filtered_filename} is missing or unreadable. Run the filtering step "
+                                    f"(01, or sweep1 for the sweep) first: its recorded margin is what every "
+                                    f"later step pads to.") from None
+        return None
+
+
+def check_same_padded_grid(ds, other, other_name):
+    """Raise unless `other` (e.g. 02's sorted density) was built on the padded grid `ds` was loaded on.
+
+    The sorted column's heights are the padded grid's own, so a column sorted on a different padding shifts
+    every z✶ with nothing downstream to reveal it. 02 copies the loaded dataset's attributes onto its output,
+    so the padding each side recorded can be compared directly. Output written before these attributes
+    existed carries none and is refused too: it cannot be shown to match.
+    """
+    for key in ("n_pad_z", "z_extension"):
+        mine, theirs = ds.attrs.get(key), other.attrs.get(key)
+        if theirs is None or theirs != mine:
+            raise ValueError(f"{other_name} was built on a padded grid with {key}={theirs}, but this step loaded "
+                             f"{key}={mine}. Rerun 02 (after 01, if the filter scales changed).")
+
+
+# Admissible ways to extend b and b✶ past a wall (Wenegrat, Chor & Barkan §2): the extended profile must
+# stay monotonic, and extending a fluid at rest must add no APE. Both of these qualify, and the paper
+# requires b and b✶ be treated the same way -- which padding b and *then* sorting does automatically,
+# since for a saturated profile the wall values are the global density extremes and the padded fluid
+# sorts to the ends of the column. Anything that changes between the two is a choice artifact, not
+# physics, which is what makes running both a test of §4's "does not affect results".
+_EXTENSIONS = {
+    "edge": dict(mode="edge"),                            # repeat the wall value (§4, the default)
+    "odd":  dict(mode="reflect", reflect_type="odd"),     # odd reflection about the wall value
+}
+
+# The fields the extension rule applies to. The rule is a choice about the buoyancy (§2), so every other
+# field keeps the wall-value extension and an edge-vs-odd comparison changes b alone. Reflecting u too puts
+# ±3U in the padding at ℓ=20 and moved ∫Π_K, which never involves b, by ~30% at Nz=192. Recorded on the
+# padded dataset as `z_extension_vars`, so output padded before this restriction can be told apart.
+EXTENSION_VARS = ("b",)
+
+
+def _pad_along_z(da, n, kw, z_name="z_aac"):
+    """np.pad along z alone, for pad widths that may exceed the axis length (ℓ=20 needs 2784 of 2048)."""
+    def _p(a):                       # apply_ufunc puts the core dim last
+        return np.pad(a, [(0, 0)] * (a.ndim - 1) + [(n, n)], **kw)
+    # Padding needs the whole column: an edge value comes from one end of z and a reflection reaches an
+    # arbitrary depth into it, so z cannot be split across chunks. The production files are chunked in z
+    # (a 128-cell test file is not, which is why this only shows up at Nz=2048), so rechunk rather than
+    # pass allow_rechunk -- this way the single chunk is along z alone, and time and x stay as they were.
+    if da.chunks is not None:
+        da = da.chunk({z_name: -1})
+    return xr.apply_ufunc(
+        _p, da,
+        input_core_dims=[[z_name]], output_core_dims=[[z_name]],
+        exclude_dims={z_name},        # the core dim changes length; apply_ufunc requires this to be declared
+        dask="parallelized", output_dtypes=[da.dtype],
+        dask_gufunc_kwargs={"output_sizes": {z_name: da.sizes[z_name] + 2 * n}},
+    )
+
+
+def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
+    """Extend the z domain past both walls, by `extension` (see `_EXTENSIONS`).
+
+    Adds cells at the bottom and the top. The fields in `EXTENSION_VARS` (the buoyancy) are extended by
+    `extension`; every other field repeats its wall value, whatever `extension` is. By default it adds
+    Nz//2 each side, doubling the domain height; `min_margin` (a physical z distance, e.g. from
+    `required_pad_margin`) widens that when a filter needs more room, and never narrows it. Assumes a
+    uniform z grid. Δz_aac is extended with the same constant dz; dV and z-extent attributes are recomputed.
+    """
+    if extension not in _EXTENSIONS:
+        raise ValueError(f"unknown extension {extension!r}; expected one of {sorted(_EXTENSIONS)}")
+    pad_kw  = _EXTENSIONS[extension]
+    edge_kw = _EXTENSIONS["edge"]
+
     Nz     = ds.sizes["z_aac"]
-    Nz_pad = Nz // 2
     dz     = float(ds.Δz_aac.isel(z_aac=0))
+    Nz_pad = Nz // 2
+    if min_margin is not None:
+        Nz_pad = max(Nz_pad, int(np.ceil(float(min_margin) / dz)))
 
     z_orig = ds.z_aac.values
     z_bot  = z_orig[0]  - np.arange(Nz_pad, 0, -1) * dz
@@ -87,12 +196,12 @@ def _pad_domain_in_z(ds):
         if name in {"Δz_aac", "dV"} or "z_aac" not in da.dims:
             new_vars[name] = da
             continue
-        # Use actual boundary values: multiply a zero slab by 0 then add boundary scalar
-        bot_slab = (da.isel(z_aac=slice(None, Nz_pad)) * 0
-                    + da.isel(z_aac=0)).assign_coords(z_aac=z_bot)
-        top_slab = (da.isel(z_aac=slice(-Nz_pad, None)) * 0
-                    + da.isel(z_aac=-1)).assign_coords(z_aac=z_top)
-        new_vars[name] = xr.concat([bot_slab, da, top_slab], dim="z_aac")
+        # np.pad rather than building slabs by hand: it is the one formulation that covers every mode
+        # and, importantly, pad widths larger than the axis itself (ℓ=20 needs 2784 cells of a 2048 grid),
+        # which a single mirrored slab cannot express.
+        kw = pad_kw if name in EXTENSION_VARS else edge_kw
+        new_vars[name] = (_pad_along_z(da, Nz_pad, kw)
+                          .assign_coords(z_aac=z_new).transpose(*da.dims))
 
     new_vars["Δz_aac"] = xr.DataArray(
         np.full(len(z_new), dz), dims=["z_aac"],
@@ -103,6 +212,27 @@ def _pad_domain_in_z(ds):
     ds_new = xr.Dataset(new_vars, coords={**other_coords, "z_aac": z_new}, attrs=ds.attrs)
     ds_new["dV"] = ds_new.Δx_caa * ds_new.Δy_aca * ds_new.Δz_aac
 
+    # The padding carries no volume, so every `integrate(·, dV)` covers the physical domain alone and
+    # no call site has to know the padding exists. It is not merely that padded cells are unphysical:
+    # they are edge-valued, so ⟨ρ_*⟩ is exactly constant there and inverting it for z̃_* is degenerate.
+    # Π_A = -τ(uᵢ,b) ∂ᵢΥ̃ is then pure noise rather than ~0, and re-randomises under perturbations as
+    # small as round-off -- measured at Nz=256, two computations of ⟨ρ_*⟩ agreeing to 2.4e-15 gave Π_A
+    # fields that were bit-identical across the interface and fully decorrelated in the padding
+    # (rms(diff) ≈ rms(Π_A)), moving ∫Π_A dV by 76% at ℓ=1. Fields keep the padding, since the budget
+    # needs filter(z) = z a stencil deep and `drop_padding` in the tests cuts it there.
+    # dV stays the true cell volume: `sorted_timeseries` builds the sorted column's slot heights from
+    # dV/(Lx·Ly), so zeroing it there collapses those slots to zero height and the z_1d_sorted coordinate
+    # repeats. `dV_physical` is the integration weight instead — the same volumes with the padding set to
+    # zero — and every `integrate(·, ·)` in the budget uses it.
+    physical = (ds_new.z_aac >= z_orig[0] - dz/2) & (ds_new.z_aac <= z_orig[-1] + dz/2)
+    ds_new["dV_physical"] = ds_new["dV"].where(physical, 0.0)
+
+    ds_new.attrs["n_pad_z"]        = int(Nz_pad)
+    ds_new.attrs["z_extension"]      = extension
+    ds_new.attrs["z_extension_vars"] = ",".join(EXTENSION_VARS)
+    ds_new.attrs["z_min_physical"] = float(z_orig[0])  - dz / 2
+    ds_new.attrs["z_max_physical"] = float(z_orig[-1]) + dz / 2
+
     ds_new.attrs["z_min"] = float(z_new[0])  - dz / 2
     ds_new.attrs["z_max"] = float(z_new[-1]) + dz / 2
     ds_new.attrs["Lz"]    = ds_new.attrs["z_max"] - ds_new.attrs["z_min"]
@@ -110,7 +240,45 @@ def _pad_domain_in_z(ds):
     return ds_new
 
 
-def load_dataset_and_grid(filename):
+def extension_suffix(extension):
+    """Filename tag for a non-default extension, so the two runs can sit side by side."""
+    return "" if extension == "edge" else f"_{extension}"
+
+
+def scale_subset_tag(filter_scales):
+    """Filename tag for a sweep run over a chosen subset of scales, so it never replaces the full sweep.
+
+    The full sweep (sweep1's default 30 scales) carries no tag; a run given --filter-scales carries `_l` and
+    its scales, e.g. `_l20` or `_l1-7`, ahead of the extension tag. sweep2 and compare_extension rebuild it
+    from the same scales to find that run's files.
+    """
+    return "" if filter_scales is None else "_l" + "-".join(f"{float(s):g}" for s in filter_scales)
+
+
+def reference_suffix(reference):
+    """Filename tag for `--reference true`, so its output never overwrites the default (filtered) run's.
+
+    02's sorted density does not depend on the reference and carries no tag; the outputs of 03-06 and
+    sweep2 do, and 03/04 also record the reference as the `ape_reference` attribute that 05 checks.
+    """
+    return "" if reference == "filtered" else f"_{reference}ref"
+
+
+def extension_of(ds_filt):
+    """The wall extension the filtering step used, so every later step extends identically."""
+    return ds_filt.attrs.get("z_extension", "edge")
+
+
+def extension_for_run(filtered_filename):
+    """Read the extension off a run's filtered-fields file; 'edge' for files written before it existed."""
+    try:
+        with xr.open_dataset(filtered_filename, decode_times=False) as d:
+            return extension_of(d)
+    except (FileNotFoundError, OSError):
+        return "edge"
+
+
+def load_dataset_and_grid(filename, min_margin=None, extension="edge"):
     """
     Load the simulation output and grid information
 
@@ -153,8 +321,8 @@ def load_dataset_and_grid(filename):
     ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
     ds["LxLy"] = ds.Lx * ds.Ly
 
-    # Pad domain in z (double height using boundary values of each field)
-    ds = _pad_domain_in_z(ds)
+    # Pad domain in z: at least Nz//2 cells each side, more when a filter needs it (see _pad_domain_in_z)
+    ds = _pad_domain_in_z(ds, min_margin=min_margin, extension=extension)
 
     return ds
 #---

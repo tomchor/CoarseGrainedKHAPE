@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid
+from src.aux00_utils import PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 #---
 
@@ -12,12 +12,12 @@ import argparse
 parser = argparse.ArgumentParser(description="Sort density and compute reference state for APE calculation")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for density sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Use the t=0 density field as a fixed-in-time reference profile")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Use the t=0 density field as a fixed-in-time reference profile")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 n_workers = args.n_workers
 fixed_reference = args.fixed_reference
@@ -26,7 +26,9 @@ fixed_reference = args.fixed_reference
 #+++ Load data and grid
 print("\n" + "="*60)
 print("Loading data and grid...")
-ds = load_dataset_and_grid(filename)
+# Pad exactly as 01 did, so the sort and the budgets see the grid the fields were filtered on.
+_filtered_fn = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn, required=True))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---

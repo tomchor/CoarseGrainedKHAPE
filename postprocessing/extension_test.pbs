@@ -1,0 +1,60 @@
+#!/bin/bash -l
+#PBS -N extension_test_Nz2048_Ri0.10
+#PBS -o logs/extension_test_Nz2048_Ri0.10.log
+#PBS -e logs/extension_test_Nz2048_Ri0.10.log
+# Note: job name above is a default; qalter below updates it at runtime based on NZ
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
+#PBS -l walltime=23:59:00
+#PBS -q casper
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=18:mem=730GB:ngpus=0
+#PBS -l job_priority=premium
+
+# Sensitivity of the sweep to how b and b_* are extended past the walls (manuscript section 2 leaves the
+# rule free; section 4 uses wall values and claims it does not affect results). This runs the *other*
+# admissible rule -- odd reflection about the wall value -- at a single filter scale. The edge-extension
+# half of the comparison is already in the production sweep output, so it is not recomputed here.
+#
+# N_TIME_SKIP must match the production sweep or the two are averaged over different times. The single-scale
+# run is tagged with its scale (_l20_odd), so it sits beside a full odd sweep rather than replacing it.
+# EXTENSION=edge is refused below: its half of the comparison is the production sweep.
+
+set -eo pipefail
+
+NZ=${NZ:-2048}
+SCALE=${SCALE:-20}
+EXTENSION=${EXTENSION:-odd}
+N_TIME_SKIP=${N_TIME_SKIP:-2}
+SIM=khi_Nz${NZ}_Ri0.10
+OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where simulation.pbs wrote the run; kelvin_helmholtz_instability.jl reads the same variable
+PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}
+JOB_NAME="extension_test_Nz${NZ}_l${SCALE}_${EXTENSION}"
+qalter -N "$JOB_NAME" "$PBS_JOBID"
+
+if [ "$EXTENSION" = "edge" ]; then
+    echo "refusing EXTENSION=edge: the edge half of the comparison is the production sweep," >&2
+    echo "output/${SIM}_energy_transfer_sweep.nc, which already has filter_scale=${SCALE}." >&2
+    exit 2
+fi
+
+# The comparison is against the production sweep, so filter at exactly one of its scales: snap SCALE to the
+# nearest (in log) of sweep1's geomspace(0.02, 20, 30). Otherwise SCALE=10 filters at 10.0 while the edge
+# sweep only has 9.7878, and compare_extension has no common scale to compare at.
+SCALE=$($PYTHON -c "import numpy as np, sys; g = np.geomspace(0.02, 20, 30); s = float(sys.argv[1]); \
+print(repr(float(g[np.abs(np.log(g / s)).argmin()])))" "$SCALE")
+echo "filter scale: $SCALE (the production sweep's nearest)"
+
+# Clear the environment from any previously loaded modules
+module li
+module --force purge
+module load ncarenv/25.10
+module li
+
+time $PYTHON -u sweep1_filter_fields.py  --filename $OUT_DIR/${SIM}.nc \
+     --filter-scales $SCALE --extension $EXTENSION --n-time-skip $N_TIME_SKIP 2>&1 | tee    logs/${JOB_NAME}.out
+time $PYTHON -u sweep2_energy_transfer.py --filename $OUT_DIR/${SIM}.nc \
+     --filter-scales $SCALE --extension $EXTENSION --n-workers 18 2>&1 | tee -a logs/${JOB_NAME}.out
+
+echo "compare with:"
+echo "  $PYTHON compare_extension.py --filename $OUT_DIR/${SIM}.nc --filter-scale $SCALE"
