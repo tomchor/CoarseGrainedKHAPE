@@ -106,7 +106,7 @@ else
     z  = ds_nc["z_aac"][:]
     kz = searchsortedfirst(z, -zlim):searchsortedlast(z, zlim)
     t  = ds_nc["time"][:]
-    nt = length(t) - 1   # the final record holds NaN for every deferred output (tendencies, Rˢ)
+    nt = length(t)
 
     slab(name, n)  = ds_nc[name][:, 1, kz, n]
     series(name)   = Float64.(ds_nc[name][1:nt])

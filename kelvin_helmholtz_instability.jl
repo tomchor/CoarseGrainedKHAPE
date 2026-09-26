@@ -13,6 +13,8 @@ using Oceanostics: AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
+using Oceananigans.Utils: PrecedingIterations
+import Oceananigans.Utils: actuates_next_iteration
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral,
       VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
@@ -474,6 +476,7 @@ ke_transfer_fields = (; _ke_pairs...)
 # and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
 sorted_fields = NamedTuple()
 twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
+profile_derivatives = Any[] # time derivatives inside R, which get their callbacks with the writers below
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
@@ -508,13 +511,13 @@ if save_sorted
     # The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides along: it is measured against the same
     # filtered reference state ε_Aˢ uses, so it shares the filter and the column and adds no sort. Both
     # are 2D x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K.
-    # The reference profile's own time derivative, shared by every R below. A TimeDerivative advances
-    # whenever it is evaluated, and R is evaluated only when the writer fetches it, so ∂ₜb✶ follows the
-    # writer's schedule with no callback: the R outputs are deferred (see online_diagnostics.jl), so the
-    # writer evaluates them when a record opens and once more on the following iteration, and the
-    # difference written spans that single timestep, like the other tendencies.
+    # The reference profile's own time derivative, shared by every R below. A TimeDerivative advances only
+    # through a callback, and a writer registers one only for the derivatives among its own outputs. R is
+    # the output here, so ∂ₜb✶ and each scale's ∂ₜ⟨b✶⟩ go into `profile_derivatives`, whose callbacks are
+    # registered with the writers below.
     lookup = ProfileLookup(z✶_1dsort)
     ∂ₜb✶ = TimeDerivative(reference_buoyancy(z✶_1dsort), model)
+    push!(profile_derivatives, ∂ₜb✶)
 
     # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
     z✶_lookup = reference_height(model, method=lookup)
@@ -578,7 +581,9 @@ if save_sorted
         ε_As = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
                        FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
         # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
-        R_l  = ReferenceTendencyCorrection(model, TimeDerivative(b✶_flt, model), z✶ˡ_flt)
+        ∂ₜb✶_flt = TimeDerivative(b✶_flt, model)
+        push!(profile_derivatives, ∂ₜb✶_flt)
+        R_l  = ReferenceTendencyCorrection(model, ∂ₜb✶_flt, z✶ˡ_flt)
         R_s  = flatten(Field(gf(R_full)) - R_l)
 
         push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
@@ -622,6 +627,13 @@ if !(model.closure isa ScalarDiffusivity)
     outputs = (; outputs..., ν, κ)
 end
 
+# Each writer updates the TimeDerivatives among its outputs through callbacks on PrecedingIterations of its
+# schedule, which falls back to every iteration for a schedule it cannot anticipate. ConsecutiveIterations is
+# one, and updating every tendency every time step would multiply the cost of the run. Its actuations are
+# the parent's plus the iterations right after, whose preceding iteration is already an actuation, so only
+# the parent's next actuation needs anticipating. This belongs upstream in Oceananigans.
+actuates_next_iteration(schedule::ConsecutiveIterations, clock, growth) = actuates_next_iteration(schedule.parent, clock, growth)
+
 # The model-grid z✶ fields go in the 3D file only; the 2D writer below slices with `indices` for a
 # lightweight x–z animation and has no use for them.
 simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_fields...),
@@ -639,6 +651,12 @@ simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., two
                                                        indices = (:, 1, :),
                                                        global_attributes = params,
                                                        overwrite_files = true)
+
+# The derivatives inside R are not outputs, so no writer registers their callbacks. They go on the 3D
+# writer's schedule, whose actuations include every one of the 2D writer's.
+for (n, ∂ₜ) in enumerate(profile_derivatives)
+    simulation.callbacks[Symbol(:∂ₜb✶_, n)] = Callback(∂ₜ, PrecedingIterations(simulation.output_writers[:fields].schedule))
+end
 
 @info "Output will be saved to: $(output_filename)"
 #---
