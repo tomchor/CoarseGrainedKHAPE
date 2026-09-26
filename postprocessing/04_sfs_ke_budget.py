@@ -110,7 +110,7 @@ for ℓ in filter_scales:
     # vertical marginal there — which makes the sub-filter half τ(w, b_r) of Eq. (2.21) and the resolved
     # half w̄b̄_r of Eq. (2.19). Against the unfiltered ρ_* it is not, which is the horizontal-limit split.
     # This term is read back by 05, so the two must be run with the same --reference.
-    ref_rho_sorted = (filtered_reference_profile(ds_sorted.rho_sorted, ds_sorted.dz_sorted, ℓ)
+    ref_rho_sorted = (filtered_reference_profile(ds_sorted.rho_sorted, ds_sorted.dz_sorted, ℓ, frozen=fixed_reference)
                       if filtered_reference else ds_sorted.rho_sorted)
     b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), ref_rho_sorted)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(

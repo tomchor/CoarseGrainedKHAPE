@@ -123,7 +123,8 @@ energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             rho_sorted=rho_sorted,
                                             dz_sorted=dz_sorted,
                                             n_workers=n_workers,
-                                            filtered_reference=filtered_reference)
+                                            filtered_reference=filtered_reference,
+                                            frozen_reference=fixed_reference)
 print("\nDone!")
 #---
 

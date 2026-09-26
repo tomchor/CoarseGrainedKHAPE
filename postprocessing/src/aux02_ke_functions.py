@@ -256,7 +256,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18,
-                              include_pi_k=True, filtered_reference=False):
+                              include_pi_k=True, filtered_reference=False, frozen_reference=False):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -282,6 +282,9 @@ def calculate_energy_transfer(ds, filter_scales,
         If True (default) also compute the cross-scale KE flux Π_K. The KH budget
         pipeline computes Π_K online and passes include_pi_k=False to skip the
         offline recompute (the sweep keeps the default and still gets Π_K).
+    frozen_reference : bool
+        True when `rho_sorted` repeats one profile at every time (--fixed-reference), so
+        ⟨ρ_*⟩ is filtered once per scale and broadcast. See filtered_reference_profile.
 
     Returns
     -------
@@ -329,7 +332,8 @@ def calculate_energy_transfer(ds, filter_scales,
 
         # The reference the resolved scale is measured against: ⟨ρ_*⟩ for a kernel with vertical extent,
         # the unfiltered ρ_* in the horizontal-filter limit. Scale-dependent, hence rebuilt here.
-        ref_rho_sorted = filtered_reference_profile(rho_sorted, dz_sorted, ℓ) if filtered_reference else rho_sorted
+        ref_rho_sorted = (filtered_reference_profile(rho_sorted, dz_sorted, ℓ, frozen=frozen_reference)
+                          if filtered_reference else rho_sorted)
 
         # --- KE cross-scale transfer (Π_K) ---
         # Computed online by the simulation; skipped here when include_pi_k=False so the offline

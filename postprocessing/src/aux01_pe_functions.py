@@ -937,7 +937,7 @@ def _fft_gaussian(row, σ_slots, truncate=4.0):
     return np.minimum.accumulate(out)
 
 
-def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted"):
+def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_sorted", frozen=False):
     """
     Vertically filter the reference density profile:  ⟨ρ_*⟩(z) = ∫ g_z(s) ρ_*(z + s) ds.
 
@@ -967,6 +967,10 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
         Filter length scale (FWHM) in physical units, matching make_gaussian_filter().
     z_sorted_name : str
         Name of the sorted column's vertical coordinate.
+    frozen : bool
+        True when every row of `rho_sorted` is the same profile, as `sorted_timeseries(fixed_reference=True)`
+        writes it for --fixed-reference. The one row is then filtered once and broadcast. Callers know this, so
+        they say so; detecting it meant comparing every row with the first, a full pass per call.
 
     Returns
     -------
@@ -975,7 +979,8 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
     """
     from src.aux00_utils import _FWHM_TO_SIGMA
 
-    Δz = dz_sorted.values
+    # The slot heights are the same cell volumes at every time, only reordered, so one row settles uniformity.
+    Δz = (dz_sorted.isel(time=0) if "time" in dz_sorted.dims else dz_sorted).values
     Δz0 = float(Δz.flat[0])
     if not np.allclose(Δz, Δz0, rtol=SLOT_SPACING_RTOL, atol=0.0):   # atol=0: the slots are ~1e-5 thick
         raise ValueError(f"filtered_reference_profile needs a uniformly spaced sorted column, but the slot "
@@ -987,16 +992,17 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
 
     # A frozen reference is the same profile at every output: `sorted_timeseries(fixed_reference=True)`
     # sorts t=0 once and repeats that row, so filter the one distinct row and broadcast it back.
-    if rho_sorted.sizes.get("time", 1) > 1:
+    if frozen and rho_sorted.sizes.get("time", 1) > 1:
         first = rho_sorted.isel(time=0)
-        if bool((rho_sorted == first).all()):
-            one = _fft_gaussian(first.values, σ_slots)
-            filtered = xr.zeros_like(rho_sorted) + xr.DataArray(one, dims=[z_sorted_name],
-                                                                coords={z_sorted_name: first[z_sorted_name]})
-            filtered.name = "⟨ρ_*⟩"
-            filtered.attrs.update(long_name="vertically filtered reference density profile",
-                                  filter_scale=float(ℓ), time_invariant=1)
-            return filtered
+        if not np.array_equal(first.values, rho_sorted.isel(time=-1).values):   # a cheap check of the claim
+            raise ValueError("filtered_reference_profile(frozen=True), but the first and last rows differ")
+        one = _fft_gaussian(first.values, σ_slots)
+        filtered = xr.zeros_like(rho_sorted) + xr.DataArray(one, dims=[z_sorted_name],
+                                                            coords={z_sorted_name: first[z_sorted_name]})
+        filtered.name = "⟨ρ_*⟩"
+        filtered.attrs.update(long_name="vertically filtered reference density profile",
+                              filter_scale=float(ℓ), time_invariant=1)
+        return filtered
 
     filtered = xr.apply_ufunc(
         _fft_gaussian, rho_sorted, σ_slots,

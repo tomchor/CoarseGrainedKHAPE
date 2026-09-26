@@ -199,7 +199,8 @@ for ℓ in filter_scales:
     # scale-dependent, hence built inside this loop. `--reference true` restores the horizontal-limit path.
     if filtered_reference:
         t0 = time.time()
-        ref_rho_sorted = filtered_reference_profile(full_local_pes.rho_sorted, full_local_pes.dz_sorted, ℓ)
+        ref_rho_sorted = filtered_reference_profile(full_local_pes.rho_sorted, full_local_pes.dz_sorted, ℓ,
+                                                    frozen=fixed_reference)
         print(f"  ⟨ρ_*⟩ built (filtered reference)  ({time.time()-t0:.1f}s)")
     else:
         ref_rho_sorted = full_local_pes.rho_sorted
