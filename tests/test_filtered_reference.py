@@ -52,20 +52,22 @@ POSITIVITY_TOL = 1e-3
 # S̃ is measured as Ē_A - L̃, which is exact — but only where filter(z) = z. `GaussianFilter` extends the
 # bounded z axis with its edge value (mode="nearest"), so within a stencil of a wall the kernel is
 # effectively one-sided, filter(z) is pulled toward the wall, and the τ(z, b) that the identity carries
-# picks up a spurious contribution. Measured on this field the whole violation lives in the first and last
-# cell: interior minima are +0.003, +0.026 and +0.25 x rms at ℓ = 2, 4 and 8 cells, against -0.11, -0.14
-# and -0.07 in the edge cells. The production pipeline does not run into this — `_pad_domain_in_z` doubles
-# the domain height with edge values at load time, precisely so the physical domain sits a long way from
-# the filter's edge — so the band is excluded here rather than tested. `test_edge_cells_are_the_only_...`
-# below pins the exclusion to the edge so it cannot quietly widen into a way of passing.
+# picks up a spurious contribution. On test_jensen.py's shorter column (the `near_wall` fixture below) the
+# whole violation lives in the outermost cells: min/rms is -0.11, -0.14 and -0.07 at ℓ = 2, 4 and 8 cells,
+# all of it in levels 0, 30 and 31. The production pipeline does not run into this — `_pad_domain_in_z`
+# pads the domain with edge values at load time, precisely so the physical domain sits a long way from the
+# filter's edge — so the band is excluded here rather than tested.
 #
-# The band is the filter's own stencil half-width: scipy truncates the Gaussian at 4σ, which the online
-# filter matches (see CLAUDE.md on `matched_filter`).
+# The band is the filter's own stencil half-width, and may not exceed it: a wider band would exclude cells
+# the filter's edge cannot reach, which is a way of passing the positivity tests rather than a reason.
+# `test_edge_cells_are_the_only_place_the_identity_fails` checks both.
+KERNEL_TRUNCATE = 4.0    # scipy's gaussian_filter1d truncation, used by GaussianFilter and matched online
 EDGE_BAND_SIGMAS = 4.0
 
-# L̃ + S̃ = Ē_A holds identically — S̃ is *defined* as the difference here — so this checks only that the
-# reassembly carries no NaNs and loses nothing to float64 cancellation.
-CLOSURE_TOL = 1e-12
+# At rest L̃ and S̃ vanish against ⟨ρ✶⟩ up to the discrete column: ~2e-8 on this field, against a max|L| of
+# 7e-6, 2.6e-5 and 1.2e-4 measured against ρ✶ at 2, 4 and 8 cells (ratios 3.3e-3, 8.7e-4 and 1.7e-4).
+# 1e-2 of the unfiltered value keeps a threefold margin at the narrowest filter.
+REST_TOL = 1e-2
 
 # The remainder construction's failure, reproduced here so the contrast is measured in one place rather
 # than inferred across files. test_jensen.py uses the same floor.
@@ -82,14 +84,32 @@ FILTER_DIMS_XZ = ["x_caa", "z_aac"]
 DOMAIN = dict(Nx=64, Nz=64, Lx=4.0, Lz=4.0)
 
 
-@pytest.fixture(scope="module")
-def synthetic():
+def sorted_field(**kwargs):
     """The field, its sorted reference state, and the local APE of the full field — sorted once."""
-    ds, dx, dz = make_dataset(**DOMAIN)
+    ds, dx, dz = make_dataset(**kwargs)
     sorted_state = sorted_timeseries(ds, field_to_sort="ρ", n_workers=1, verbose_level=0)
     full = local_potential_energies_timeseries(ds, sorted_state.rho_sorted, sorted_state.dz_sorted,
                                                density_name="ρ", verbose_level=0, n_workers=1)
     return ds, dx, dz, sorted_state, full
+
+
+@pytest.fixture(scope="module")
+def synthetic():
+    """The wave-displaced column on the tall domain, whose walls sit in saturated stratification."""
+    return sorted_field(**DOMAIN)
+
+
+@pytest.fixture(scope="module")
+def at_rest():
+    """The same tall column with no wave and no noise: horizontally uniform and stable, a fluid at rest."""
+    return sorted_field(**DOMAIN, amplitude=0.0, noise=0.0)
+
+
+@pytest.fixture(scope="module")
+def near_wall():
+    """test_jensen.py's default column, half the height, whose stratification still varies within a stencil
+    of the walls, so the filter's one-sided edge treatment does break Ē_A = L̃ + S̃ there."""
+    return sorted_field()
 
 
 def decompose(synthetic, ell, dims, filtered_reference):
@@ -105,6 +125,8 @@ def decompose(synthetic, ell, dims, filtered_reference):
     resolved = local_potential_energies_timeseries(ds_filtered, reference, sorted_state.dz_sorted,
                                                    density_name="ρ̄", verbose_level=0, n_workers=1)
     total = gf.apply(full.ape, dims=dims)
+    for name, da in (("L̃", resolved.ape), ("Ē_A", total)):   # the min/max/rms reductions below skip NaN
+        assert bool(np.isfinite(da).all()), f"{name} has non-finite values at l={ell:.4f}"
     return resolved.ape, total - resolved.ape, total
 
 
@@ -150,15 +172,25 @@ def test_resolved_ape_nonnegative_under_filtered_reference(synthetic, cells):
 
 
 @pytest.mark.parametrize("cells", FILTER_SCALES_IN_CELLS)
-def test_decomposition_is_exact(synthetic, cells):
-    """L̃ + S̃ = Ē_A, so the split moves energy between reservoirs without creating or destroying any."""
-    _, dx, _, _, _ = synthetic
+def test_both_reservoirs_vanish_at_rest(at_rest, cells):
+    """At rest, L̃ and S̃ vanish against ⟨ρ✶⟩, while L measured against the unfiltered ρ✶ does not.
+
+    This is the property the construction exists for (Eq. 2.3). A fluid at rest filters to ⟨ρ✶⟩(z) itself, so
+    the resolved reservoir measured against ⟨ρ✶⟩ is empty, and S̃ = Ē_A - L̃ with Ē_A = 0 is empty too. Measured
+    against ρ✶ the filtered column still carries APE, which sets the scale: a ⟨ρ✶⟩ that is not the profile
+    the filter makes of the resting column fails here. (L̃ + S̃ = Ē_A is not tested: S̃ is defined that way.)"""
+    _, dx, _, _, _ = at_rest
     ell = cells * dx
-    L, S, total = decompose(synthetic, ell, FILTER_DIMS_XZ, filtered_reference=True)
-    residual = float(np.abs((L + S - total)).max())
-    scale = float(np.sqrt((total**2).mean()))
-    print(f"\nClosure  (l={ell:.4f})   max|L~ + S~ - Ea_bar| = {residual:.3e}   rms(Ea_bar) = {scale:.3e}")
-    assert residual < CLOSURE_TOL * scale, f"L̃ + S̃ does not reassemble Ē_A: {residual:.3e} vs rms {scale:.3e}"
+    L, S, total = decompose(at_rest, ell, FILTER_DIMS_XZ, filtered_reference=True)
+    L_unfiltered, _, _ = decompose(at_rest, ell, FILTER_DIMS_XZ, filtered_reference=False)
+    size = lambda da: float(np.abs(da).max())
+    print(f"\nAt rest  (l={ell:.4f} = {cells} cells)   max|Ea_bar| = {size(total):.2e}   max|L~| = {size(L):.2e}   "
+          f"max|S~| = {size(S):.2e}   max|L| against rho* = {size(L_unfiltered):.2e}")
+    assert size(L_unfiltered) > 0, "against the unfiltered ρ✶ a filtered column at rest should still carry APE"
+    for name, da in (("L̃", L), ("S̃", S)):
+        assert size(da) <= REST_TOL * size(L_unfiltered), (
+            f"{name} does not vanish at rest: max|{name}| = {size(da):.3e} against {size(L_unfiltered):.3e} for L "
+            f"measured against ρ✶. ⟨ρ✶⟩ is not the profile the filter makes of the resting column.")
 
 
 @pytest.mark.parametrize("cells", FILTER_SCALES_IN_CELLS)
@@ -179,27 +211,33 @@ def test_unfiltered_reference_still_breaks(synthetic, cells):
 
 
 @pytest.mark.parametrize("cells", FILTER_SCALES_IN_CELLS)
-def test_edge_cells_are_the_only_place_the_identity_fails(synthetic, cells):
+def test_edge_cells_are_the_only_place_the_identity_fails(near_wall, cells):
     """The excluded band is the filter's edge and nothing more.
 
     S̃ ≥ 0 is guaranteed wherever S̃ = Ē_A - L̃ holds, and that identity needs filter(z) = z, which edge
-    extension breaks within a stencil of a wall. This checks the failure really is confined there: every
-    negative cell must lie in the excluded band. Without it, widening EDGE_BAND_SIGMAS would be a way to
-    make the positivity tests pass by excluding genuine interior violations."""
-    _, dx, dz, _, _ = synthetic
+    extension breaks within a stencil of a wall. On a column whose stratification reaches its walls the
+    identity does fail there, so this checks three things: that it does (otherwise the test is vacuous),
+    that every negative cell lies within the kernel's own reach of a wall, and that EDGE_BAND_SIGMAS is no
+    wider than that reach, so it cannot become a way of excluding genuine interior violations."""
+    assert EDGE_BAND_SIGMAS <= KERNEL_TRUNCATE, (f"EDGE_BAND_SIGMAS = {EDGE_BAND_SIGMAS} excludes cells beyond "
+                                                f"the kernel's {KERNEL_TRUNCATE}σ reach, which its edge cannot affect")
+    _, dx, dz, _, _ = near_wall
     ell = cells * dx
-    _, S, _ = decompose(synthetic, ell, FILTER_DIMS_XZ, filtered_reference=True)
-    S0 = S.isel(time=0, y_aca=0)
+    _, S, _ = decompose(near_wall, ell, FILTER_DIMS_XZ, filtered_reference=True)
+    S0 = S.isel(time=0, y_aca=0).transpose("x_caa", "z_aac")
     rms = float(np.sqrt((S0**2).mean()))
     negative_k = np.where((S0.values < -POSITIVITY_TOL * rms).any(axis=0))[0]
 
     from src.aux00_utils import _FWHM_TO_SIGMA
-    band = int(np.ceil(EDGE_BAND_SIGMAS * ell * _FWHM_TO_SIGMA / dz))
+    band = int(np.ceil(KERNEL_TRUNCATE * ell * _FWHM_TO_SIGMA / dz))
     n = S0.sizes["z_aac"]
+    in_band = [int(k) for k in negative_k if k < band or k >= n - band]
     stray = [int(k) for k in negative_k if band <= k < n - band]
     print(f"\nEdge confinement  (l={ell:.4f} = {cells} cells)   band = {band} cells of {n}   "
           f"negative levels = {negative_k.tolist()}")
-    assert not stray, (f"S̃ is negative at z-levels {stray}, which lie outside the {band}-cell edge band. "
-                       f"The identity Ē_A = L̃ + S̃ should hold there, so this is a real violation rather "
-                       f"than the filter's edge treatment.")
+    assert in_band, (f"S̃ has no negative cell near the walls of the near-wall column at l={ell:.4f}, so this "
+                     f"test no longer exercises the edge failure it exists to confine.")
+    assert not stray, (f"S̃ is negative at z-levels {stray}, which lie outside the {band}-cell reach of the "
+                       f"kernel. The identity Ē_A = L̃ + S̃ should hold there, so this is a real violation "
+                       f"rather than the filter's edge treatment.")
 #---
