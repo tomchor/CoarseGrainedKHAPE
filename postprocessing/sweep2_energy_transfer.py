@@ -26,6 +26,10 @@ parser.add_argument("--extension", choices=["edge", "odd"], default="edge",
 parser.add_argument("--filter-scales", type=float, nargs="+", default=None,
                     help="The scales sweep1 was given with --filter-scales, if any: selects that run's tagged file "
                          "(e.g. _l20) and tags this output the same way. Omit for the full sweep.")
+parser.add_argument("--keep-fields", action="store_true", default=False,
+                    help="Also write the 4D fields (Π_K, Π_A, the SFS APE->KE exchange and w̄·b_rˡ), not just their "
+                         "volume integrals. Every reader of the sweep uses only the integrals, and the fields are "
+                         "about 860 GB at Nz=2048.")
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
@@ -126,6 +130,10 @@ print("\nDone!")
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
+# Every reader of the sweep (sweep3, plot2, compare_extension and the S scripts) uses only the ∫ integrals, so the 4D
+# fields behind them are written only when asked for: they are about 860 GB at Nz=2048 and 3.4 TB at Nz=4096.
+if not args.keep_fields:
+    energy_transfer = energy_transfer[[v for v in energy_transfer.data_vars if v.startswith("∫")]]
 energy_transfer.attrs.update(ds.attrs)
 energy_transfer.attrs["ape_reference"] = args.reference
 output_filename = str(PP_OUTPUT / (Path(filename).stem

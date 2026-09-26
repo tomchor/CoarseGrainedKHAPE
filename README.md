@@ -204,7 +204,7 @@ python compare_extension.py --filename output/khi_Nz2048_Ri0.10.nc --all   # eve
 
 A run over a subset of scales (`sweep1 --filter-scales`, as `extension_test.pbs` does) tags its files with the scales, e.g. `_sweep_l20_odd.nc`, so it never replaces a full sweep; `sweep2` takes the same `--filter-scales` to find it, and `compare_extension.py` prefers it for a single-scale comparison.
 
-`FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job.
+`FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job. The transfer step writes only the volume integrals (`∫Π_K dV`, `∫Π_A dV`, ...), which is all the sweep plots read; `sweep2_energy_transfer.py --keep-fields` also writes the 4D fields, about 860 GB at Nz=2048.
 
 When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it sorts t=0 on the grid it loaded and broadcasts that row over the time axis. **The sweep does not need the budgeting pipeline to have run**, and does not read `_sorted_density_fixed_ref.nc`. It cannot: the column's z✶ are the padded grid's own heights, and the sweep pads to 4σ of its widest scale (ℓ=20) while `02_sort_density.py` pads to the budget scales — at Nz=2048, 2784 cells per side against 1024 — so the budgeting pipeline's column belongs to a different grid. Sorting t=0 costs one sort, and is bit-identical to `02`'s output whenever the two paddings do coincide.
 
