@@ -629,7 +629,7 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_f
                                                   filename = output_filename,
                                                   array_type = Array{Float64},
                                                   global_attributes = params,
-                                                  overwrite_existing = true)
+                                                  overwrite_files = true)
 
 output_filename_2d = joinpath(output_dir, "$(simulation_name)_2d.nc")
 simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
@@ -638,7 +638,7 @@ simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., two
                                                        array_type = Array{Float32},
                                                        indices = (:, 1, :),
                                                        global_attributes = params,
-                                                       overwrite_existing = true)
+                                                       overwrite_files = true)
 
 @info "Output will be saved to: $(output_filename)"
 #---
