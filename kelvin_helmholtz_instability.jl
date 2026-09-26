@@ -12,8 +12,6 @@ using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnosti
 using Oceanostics: AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
-using Oceananigans.OutputWriters: TimeDerivative
-using Oceananigans.Utils: PrecedingIterations
 import Oceananigans.Utils: actuates_next_iteration
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral,
       VerticalSort, ProfileLookup
@@ -437,8 +435,8 @@ for ℓ in filter_ℓs
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")        => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
                      Symbol("ε_Ks_ℓ$(ℓ)")       => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks),
                      Symbol("K_s_ℓ$(ℓ)")        => K_s,  Symbol("K_s_ℓ$(ℓ)_int")  => Integral(K_s),
-                     Symbol("dKs_dt_ℓ$(ℓ)")     => TimeDerivative(K_s, model),
-                     Symbol("dKs_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(K_s), model))
+                     Symbol("dKs_dt_ℓ$(ℓ)")     => TimeDerivative(K_s),
+                     Symbol("dKs_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(K_s)))
 
     # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
     # online-vs-offline validation in postprocessing/validation/. Full 3D fields → gated behind
@@ -474,9 +472,12 @@ ke_transfer_fields = (; _ke_pairs...)
 # Only the column is a reference *profile* as written. For the two model-grid methods `reference_buoyancy`
 # is the model's own `b`, which is already an output, so their profiles are recovered by pairing z✶ with b
 # and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
+# The 3D writer's schedule, defined here so the time derivatives inside R below can update on the iterations
+# around its outputs, which include every one of the 2D writer's.
+output_schedule = ConsecutiveIterations(TimeInterval(2))
+
 sorted_fields = NamedTuple()
 twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
-profile_derivatives = Any[] # time derivatives inside R, which get their callbacks with the writers below
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
@@ -511,17 +512,15 @@ if save_sorted
     # The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides along: it is measured against the same
     # filtered reference state ε_Aˢ uses, so it shares the filter and the column and adds no sort. Both
     # are 2D x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K.
-    # The reference profile's own time derivative, shared by every R below. A TimeDerivative advances only
-    # through a callback, and a writer registers one only for the derivatives among its own outputs. R is
-    # the output here, so ∂ₜb✶ and each scale's ∂ₜ⟨b✶⟩ go into `profile_derivatives`, whose callbacks are
-    # registered with the writers below.
+    # The reference profile's own time derivative, shared by every R below. R is the output, not ∂ₜb✶, so
+    # no writer advances it: a TimeDerivativeCallback does, around each output, as does each scale's ∂ₜ⟨b✶⟩.
     lookup = ProfileLookup(z✶_1dsort)
-    ∂ₜb✶ = TimeDerivative(reference_buoyancy(z✶_1dsort), model)
-    push!(profile_derivatives, ∂ₜb✶)
+    ∂ₜb✶ = TimeDerivativeCallback(reference_buoyancy(z✶_1dsort), schedule=PrecedingIterations(output_schedule))
+    simulation.callbacks[:∂ₜb✶] = ∂ₜb✶
 
     # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
     z✶_lookup = reference_height(model, method=lookup)
-    R_full = ReferenceTendencyCorrection(model, ∂ₜb✶, z✶_lookup)
+    R_full = ReferenceTendencyCorrection(model, ∂ₜb✶.func, z✶_lookup)
 
     # The sub-filter APE terms use the filtered-reference scale decomposition (Wenegrat, Chor & Barkan
     # Eqs. 2.3-2.5, 2.19-2.22). Measuring the resolved reservoir against the unfiltered b✶ instead is the
@@ -581,9 +580,9 @@ if save_sorted
         ε_As = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
                        FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
         # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
-        ∂ₜb✶_flt = TimeDerivative(b✶_flt, model)
-        push!(profile_derivatives, ∂ₜb✶_flt)
-        R_l  = ReferenceTendencyCorrection(model, ∂ₜb✶_flt, z✶ˡ_flt)
+        ∂ₜb✶_flt = TimeDerivativeCallback(b✶_flt, schedule=PrecedingIterations(output_schedule))
+        simulation.callbacks[Symbol("∂ₜb✶_flt_ℓ$(ℓ)")] = ∂ₜb✶_flt
+        R_l  = ReferenceTendencyCorrection(model, ∂ₜb✶_flt.func, z✶ˡ_flt)
         R_s  = flatten(Field(gf(R_full)) - R_l)
 
         push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
@@ -591,8 +590,8 @@ if save_sorted
                           Symbol("E_as_ℓ$(ℓ)")  => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
                           Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
                           Symbol("R_s_ℓ$(ℓ)")   => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
-                          Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as, model),
-                          Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as), model))
+                          Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as),
+                          Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as)))
     end
     sfs_ape_fields = (; _ape_pairs...)
 
@@ -627,17 +626,17 @@ if !(model.closure isa ScalarDiffusivity)
     outputs = (; outputs..., ν, κ)
 end
 
-# Each writer updates the TimeDerivatives among its outputs through callbacks on PrecedingIterations of its
-# schedule, which falls back to every iteration for a schedule it cannot anticipate. ConsecutiveIterations is
-# one, and updating every tendency every time step would multiply the cost of the run. Its actuations are
-# the parent's plus the iterations right after, whose preceding iteration is already an actuation, so only
-# the parent's next actuation needs anticipating. This belongs upstream in Oceananigans.
+# The 3D writer updates the TimeDerivatives among its outputs, and R's callbacks theirs, on PrecedingIterations
+# of `output_schedule`, which falls back to every iteration for a schedule it cannot anticipate, as
+# ConsecutiveIterations is upstream: the writer would filter Kˢ and S̃, and the callbacks sort the column, on
+# every time step. Its actuations are the parent's plus the iterations right after, whose preceding iteration
+# is already an actuation, so only the parent's next actuation needs anticipating. This belongs upstream.
 actuates_next_iteration(schedule::ConsecutiveIterations, clock, growth) = actuates_next_iteration(schedule.parent, clock, growth)
 
 # The model-grid z✶ fields go in the 3D file only; the 2D writer below slices with `indices` for a
 # lightweight x–z animation and has no use for them.
 simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_fields...),
-                                                  schedule = ConsecutiveIterations(TimeInterval(2)),
+                                                  schedule = output_schedule,
                                                   filename = output_filename,
                                                   array_type = Array{Float64},
                                                   global_attributes = params,
@@ -651,12 +650,6 @@ simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., two
                                                        indices = (:, 1, :),
                                                        global_attributes = params,
                                                        overwrite_files = true)
-
-# The derivatives inside R are not outputs, so no writer registers their callbacks. They go on the 3D
-# writer's schedule, whose actuations include every one of the 2D writer's.
-for (n, ∂ₜ) in enumerate(profile_derivatives)
-    simulation.callbacks[Symbol(:∂ₜb✶_, n)] = Callback(∂ₜ, PrecedingIterations(simulation.output_writers[:fields].schedule))
-end
 
 @info "Output will be saved to: $(output_filename)"
 #---

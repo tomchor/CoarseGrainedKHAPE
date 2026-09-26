@@ -16,8 +16,8 @@ budget is worth having only if it closes at least as well as the offline one.
 Every term is evaluated at the output time except the tendencies, which Oceananigans' `TimeDerivative`
 writes as the backward difference over the single timestep before the output, (aⁿ - aⁿ⁻¹)/Δt labelled
 tⁿ: a callback evaluates the operand on the iteration before the writer actuates and again when it does.
-Over one step the Δt/2 offset is negligible against the output interval. The same machinery covers Rˢ,
-whose ∂ₜb✶ is a TimeDerivative the simulation registers a callback for on the writer's schedule.
+Over one step the Δt/2 offset is negligible against the output interval. Rˢ is built on the same
+difference: its ∂ₜb✶ is a TimeDerivative that a callback updates on the same iterations.
 
 The first output pair spans the initialisation transient and is skipped.
 """

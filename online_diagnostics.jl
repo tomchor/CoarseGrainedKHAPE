@@ -41,9 +41,8 @@ end
 
 const ReferenceTendencyField = Field{<:Any, <:Any, <:Any, <:ReferenceTendencyState}
 
-# R holds a TimeDerivative, which only a callback advances: reading it, including through `compute!`,
-# returns whatever the callback last computed. A writer registers a callback for each TimeDerivative
-# among its own outputs, but this one sits inside R, so the simulation registers its callback itself.
+# R holds a TimeDerivative, and reading one, `compute!` included, does not advance it: R sees whatever the
+# TimeDerivativeCallback the simulation keeps for it last computed.
 
 "Ψ̇(ζ) = ∫_bottom^ζ ∂ₜb✶ dz̃, evaluated by locating ζ's slot in a uniformly spaced column."
 @inline function psi_dot(ζ, Ψface, ∂ₜb✶, z_bottom, Δz✶, N)
@@ -88,7 +87,8 @@ itself is evolving, with the parcel and its buoyancy held fixed. It is the expli
 appears in the local APE budget as `+R`.
 
 `∂ₜb✶` is an Oceananigans `TimeDerivative` of the sorted reference profile — the `reference_buoyancy` of
-a column built with `VerticalSort` — and `z✶` is the model-grid reference height the correction is
+a column built with `VerticalSort` — kept current by a `TimeDerivativeCallback` in `simulation.callbacks`,
+since evaluating `R` does not advance it; `z✶` is the model-grid reference height the correction is
 measured from: the full field's for `R`, the filtered field's for `Rˡ`. The sub-filter correction is
 then `Rˢ = filter(R) - Rˡ`.
 
