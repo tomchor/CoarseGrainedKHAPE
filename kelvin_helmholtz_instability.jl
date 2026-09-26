@@ -513,8 +513,8 @@ if save_sorted
     # g_z = δ(z) horizontal-filter limit: with a kernel that has vertical extent a fluid at rest still
     # carries APE against b✶, so that reservoir does not vanish at rest and the remainder goes negative.
     # This filter acts in x *and* z, so only ⟨b✶⟩ gives a decomposition into two non-negative reservoirs,
-    # and the unfiltered form is not written at all. The offline pipeline keeps `--reference true` for
-    # reproducing earlier results; it recomputes those terms itself.
+    # and the unfiltered form is not written at all. The offline pipeline keeps `--reference true`, the
+    # earlier formulation, for comparison; it computes those terms itself.
     #
     # Nothing here needs a new Oceanostics diagnostic: ProfileLookup takes an external (b✶, z✶) pair,
     # refreshes it on every compute! when it is a Field, and skips the O(N log N) sort; and the

@@ -18,7 +18,8 @@ parser.add_argument("--fixed-reference", action="store_true", default=False, hel
 parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
                     help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
-                         "unfiltered ρ_*, the horizontal-filter limit the pipeline used before.")
+                         "unfiltered ρ_*, the horizontal-filter limit: the formulation the pipeline used before, not "
+                         "its numbers, since integrals now exclude the z padding and Π_A is always computed offline.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)

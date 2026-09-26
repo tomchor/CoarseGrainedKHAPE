@@ -122,7 +122,7 @@ The pipeline filters in x **and** z (`filtered_dimensions = ["x_caa", "z_aac"]`)
 Wenegrat, Chor & Barkan resolve it by measuring the resolved reservoir against the rest state *as the filter sees it* — the vertically filtered profile ⟨ρ_*⟩ (their Eq. 2.3):
 
 - `filtered` (default) — `filtered_reference_profile()` builds ⟨ρ_*⟩ by convolving the sorted column with the vertical marginal of the same Gaussian, on the column's own grid so the z_*(ρ̄) lookup keeps its full N = Nx·Ny·Nz height resolution. Then `L̃ = Ẽ_A(ρ̄, z)` against ⟨ρ_*⟩, `S̃ = Ē_A − L̃`, `Υ̃ = z̃_*(ρ̄) − z`, and `b̄_r = b̄ − ⟨b_*⟩(z)` — which against ⟨ρ_*⟩ is exactly filter(b_r), since ρ_*(z) depends on z alone. Both reservoirs are non-negative and both vanish at rest, for any kernel.
-- `true` — the unfiltered ρ_* for both reservoirs. This is the `g_z = δ(z)` horizontal-filter limit (their Eq. 2.24–2.26), correct only for a horizontal kernel, and is what the pipeline did before. Kept so the published results stay reproducible and so the two can be compared.
+- `true` — the unfiltered ρ_* for both reservoirs. This is the `g_z = δ(z)` horizontal-filter limit (their Eq. 2.24–2.26), correct only for a horizontal kernel, and is the formulation the pipeline used before. Kept so the two can be compared, but it does not reproduce the earlier numbers: every integral now covers the physical domain only (`dV_physical`), and Π_A and ε_Aˢ are computed offline where the earlier pipeline read the online (unfiltered-reference) fields for the time-varying reference. At Nz=128 the ε_Aˢ change alone moves the APE residual from about 2% to about 18% of the dominant term.
 
 Three consequences worth knowing:
 

@@ -61,8 +61,9 @@ synthetic field of `test_jensen.py`, the remainder is negative over 15–48% of 
 rms; against ⟨ρ_*⟩ (Eq. 2.3) the same field is non-negative to +2.0e-03.
 
 **Do not revisit this.** `test_jensen.py` and `test_filtered_reference.py` pin it down on a field that
-needs no simulation output. The `--reference true` path still exists to reproduce earlier results; nothing
-in CI or production uses it.
+needs no simulation output. The `--reference true` path still exists to compare against the earlier formulation,
+though not to reproduce its numbers (the integrals now exclude the padding, and Π_A and ε_Aˢ are computed
+offline); nothing in CI or production uses it.
 
 ## 2. Why Π_A and ε_Aˢ *were* computed online, and why they no longer are
 

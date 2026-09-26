@@ -36,7 +36,8 @@ parser.add_argument("--reference", choices=["filtered", "true"], default="filter
                     help="Reference state the resolved reservoir is measured against. 'filtered' (default) uses the "
                          "vertically filtered profile ⟨ρ_*⟩, the scale decomposition valid for a kernel with vertical "
                          "extent. 'true' uses the unfiltered ρ_* for both reservoirs, the horizontal-filter limit, "
-                         "which is what the pipeline did before and is kept for reproducing those results.")
+                         "the formulation the pipeline used before. It does not reproduce the earlier numbers: "
+                         "integrals now exclude the z padding, and Π_A and ε_Aˢ are always computed offline.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
