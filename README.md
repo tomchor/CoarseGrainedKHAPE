@@ -193,11 +193,11 @@ bash submit_sweep.sh NZ=2048 EXTENSION=odd   # the whole sweep with b oddly refl
 
 #### Wall-extension test
 
-The manuscript leaves the extension of b and b✶ past the walls free (§2) and uses the wall values (§4). `EXTENSION=odd` reflects b oddly about the wall value instead; every other field keeps the wall value, so the comparison changes the buoyancy rule alone. Its files carry an `_odd` tag. `extension_test.pbs` runs the odd rule at one scale, snapped to the nearest of the production sweep's 30, and `compare_extension.py` sets it against the production (edge) sweep:
+The manuscript leaves the extension of b and b✶ past the walls free (§2) and uses the wall values (§4). `EXTENSION=odd` reflects b oddly about the wall value instead; every other field keeps the wall value, so the comparison changes the buoyancy rule alone. Its files carry an `_odd` tag. `submit_extension_test.sh` (which submits `extension_test.pbs`) runs the odd rule at one scale, snapped to the nearest of the production sweep's 30, and `compare_extension.py` sets it against the production (edge) sweep:
 
 ```bash
 cd postprocessing
-qsub -v NZ=2048,SCALE=20 extension_test.pbs                               # odd rule at l=20 only (no wrapper yet)
+bash submit_extension_test.sh NZ=2048 SCALE=20                           # odd rule at l=20 only
 python compare_extension.py --filename output/khi_Nz2048_Ri0.10.nc --filter-scale 20
 python compare_extension.py --filename output/khi_Nz2048_Ri0.10.nc --all   # every scale, after EXTENSION=odd
 ```
