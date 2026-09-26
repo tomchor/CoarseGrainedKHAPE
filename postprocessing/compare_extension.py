@@ -49,7 +49,16 @@ if args.all:
     if not scales:
         raise SystemExit("the two runs share no filter scales")
 else:
-    scales = [float(a.filter_scale.sel(filter_scale=args.filter_scale, method="nearest").values)]
+    # One scale, which both runs must contain. Taking the nearest in each file separately compared edge
+    # l=9.788 with odd l=10.0 and reported the change of scale as extension sensitivity.
+    s = args.filter_scale
+    missing = [name for name, d in (("edge", a), (args.extension, b))
+               if not np.isclose(d.filter_scale.values, s, rtol=1e-6).any()]
+    if missing:
+        listed = lambda d: ", ".join(f"{v:.8g}" for v in d.filter_scale.values)   # enough digits to pass back
+        raise SystemExit(f"l={s:.8g} is not in the {' or the '.join(missing)} run.\n"
+                         f"  edge has: {listed(a)}\n  {args.extension} has: {listed(b)}")
+    scales = [s]
 
 # The two runs must cover the same times, or the comparison is of time sampling rather than of extension.
 t = np.intersect1d(a.time.values, b.time.values)
@@ -69,8 +78,8 @@ if args.all:
     for s in scales:
         row = []
         for v in terms:
-            A = np.asarray(a[v].sel(filter_scale=s, method="nearest").values, float).ravel()
-            B = np.asarray(b[v].sel(filter_scale=s, method="nearest").values, float).ravel()
+            A = np.asarray(a[v].sel(filter_scale=s, method="nearest", tolerance=1e-6 * s).values, float).ravel()
+            B = np.asarray(b[v].sel(filter_scale=s, method="nearest", tolerance=1e-6 * s).values, float).ravel()
             mA, mB = A.mean(), B.mean()
             row.append(f"{abs(mB - mA) / abs(mA):>19.1%} " if abs(mA) > 0 else f"{'--':>20}")
         print(f"{s:8.3f}  " + "  ".join(row))
@@ -80,8 +89,8 @@ else:
     print(f"\nl = {ℓ:.4g},  {t.size} times,  edge vs {args.extension} extension\n")
     print(f"{'term':<24} {'edge (t-mean)':>14} {args.extension + ' (t-mean)':>14} {'rel. diff':>11} {'max|d|/rms':>11}")
     for v in terms:
-        A = np.asarray(a[v].sel(filter_scale=ℓ, method="nearest").values, float).ravel()
-        B = np.asarray(b[v].sel(filter_scale=ℓ, method="nearest").values, float).ravel()
+        A = np.asarray(a[v].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6 * ℓ).values, float).ravel()
+        B = np.asarray(b[v].sel(filter_scale=ℓ, method="nearest", tolerance=1e-6 * ℓ).values, float).ravel()
         mA, mB = A.mean(), B.mean()
         rms = np.sqrt((A ** 2).mean())
         rel = abs(mB - mA) / abs(mA) if abs(mA) > 0 else np.inf

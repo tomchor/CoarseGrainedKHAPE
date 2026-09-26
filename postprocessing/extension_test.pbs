@@ -39,6 +39,13 @@ if [ "$EXTENSION" = "edge" ]; then
     exit 2
 fi
 
+# The comparison is against the production sweep, so filter at exactly one of its scales: snap SCALE to the
+# nearest (in log) of sweep1's geomspace(0.02, 20, 30). Otherwise SCALE=10 filters at 10.0 while the edge
+# sweep only has 9.7878, and compare_extension has no common scale to compare at.
+SCALE=$($PYTHON -c "import numpy as np, sys; g = np.geomspace(0.02, 20, 30); s = float(sys.argv[1]); \
+print(repr(float(g[np.abs(np.log(g / s)).argmin()])))" "$SCALE")
+echo "filter scale: $SCALE (the production sweep's nearest)"
+
 # Clear the environment from any previously loaded modules
 module li
 module --force purge
