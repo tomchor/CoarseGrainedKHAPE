@@ -17,7 +17,7 @@ set -eo pipefail
 
 NZ=${NZ:-2048}
 SIM=Nz${NZ}_Ri0.10
-FILE=output/khi_${SIM}.nc
+FILE=${KHAPE_OUTPUT_DIR:-output}/khi_${SIM}.nc   # where simulation.pbs wrote the run
 PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
 JOB_NAME="validation_Nz${NZ}_Ri0.10"
 qalter -N "$JOB_NAME" "$PBS_JOBID"

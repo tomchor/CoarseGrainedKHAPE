@@ -70,6 +70,15 @@ Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files direc
 
 Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are optional and fall back to their defaults if omitted.
 
+### Output locations
+
+Two environment variables move the output off the repository, for example to scratch. Set them in the login environment, since PBS jobs do not inherit the submitting shell's variables, and give absolute paths.
+
+| Variable | Default | Read by |
+|----------|---------|---------|
+| `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
+| `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
+
 ### Run everything (simulation + post-processing + sweep, with optional validation and plots)
 
 ```bash

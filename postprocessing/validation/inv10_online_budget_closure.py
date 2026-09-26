@@ -32,7 +32,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
-from src.aux00_utils import model_grid_suffix, strip_grid_suffix
+from src.aux00_utils import PP_OUTPUT, model_grid_suffix, strip_grid_suffix
 from src.aux03_plotting import run_label
 #---
 
@@ -54,7 +54,6 @@ print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" fo
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FIGURES = REPO_ROOT / "figures" / "validation"
 FIGURES.mkdir(parents=True, exist_ok=True)
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 

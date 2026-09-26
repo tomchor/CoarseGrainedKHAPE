@@ -17,6 +17,7 @@ set -eo pipefail
 
 NZ=${NZ:-2048}
 SIM=Nz${NZ}_Ri0.10
+OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where simulation.pbs wrote the run; kelvin_helmholtz_instability.jl reads the same variable
 PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
 FIXED_REF=${FIXED_REF:-0}
 [ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
@@ -33,10 +34,10 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-time $PYTHON -u 02_sort_density.py      --filename output/khi_${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
-time $PYTHON -u 03_energy_transfer.py   --filename output/khi_${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u 04_sfs_ke_budget.py     --filename output/khi_${SIM}.nc                $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u 05_sfs_ape_budget.py    --filename output/khi_${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
-time $PYTHON -u 06_plot_budgets.py      --filename output/khi_${SIM}.nc                $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 02_sort_density.py      --filename $OUT_DIR/khi_${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee    logs/${JOB_NAME}.out
+time $PYTHON -u 03_energy_transfer.py   --filename $OUT_DIR/khi_${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 04_sfs_ke_budget.py     --filename $OUT_DIR/khi_${SIM}.nc                $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 05_sfs_ape_budget.py    --filename $OUT_DIR/khi_${SIM}.nc --n-workers 18 $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+time $PYTHON -u 06_plot_budgets.py      --filename $OUT_DIR/khi_${SIM}.nc                $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

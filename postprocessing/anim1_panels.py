@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
 from matplotlib.animation import FuncAnimation, FFMpegWriter
+from src.aux00_utils import PP_OUTPUT
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r
 from src.aux03_plotting import run_label, budget_colors
 #---
@@ -30,7 +31,6 @@ args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 FIGURES   = REPO_ROOT / "figures"
 ANIMATIONS = REPO_ROOT / "animations"
 ANIMATIONS.mkdir(exist_ok=True)

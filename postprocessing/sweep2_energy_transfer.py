@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import (pad_margin_for_run, extension_for_run, extension_suffix, reference_suffix,
+from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, extension_for_run, extension_suffix, reference_suffix,
                             load_dataset_and_grid)
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 from src.aux02_ke_functions import calculate_energy_transfer
@@ -30,7 +30,6 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
 filtered_reference = args.reference == "filtered"

@@ -18,6 +18,7 @@ set -eo pipefail
 
 NZ=${NZ:-2048}
 SIM=khi_Nz${NZ}_Ri0.10
+OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where simulation.pbs wrote the run; kelvin_helmholtz_instability.jl reads the same variable
 PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
 JOB_NAME="plots_Nz${NZ}_Ri0.10"
 qalter -N "$JOB_NAME" "$PBS_JOBID"
@@ -30,8 +31,8 @@ module li
 echo $CUDA_VISIBLE_DEVICES
 
 LOG=logs/${JOB_NAME}.out
-time $PYTHON -u plot2_transfer_spectrum.py --filename output/${SIM}.nc 2>&1 | tee    $LOG  # needs sweep output
-time $PYTHON -u plot3_budgets.py           --filename output/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget integrated
-time $PYTHON -u plot4_panels.py            --filename output/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget fields
+time $PYTHON -u plot2_transfer_spectrum.py --filename $OUT_DIR/${SIM}.nc 2>&1 | tee    $LOG  # needs sweep output
+time $PYTHON -u plot3_budgets.py           --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget integrated
+time $PYTHON -u plot4_panels.py            --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget fields
 
 qstat -f $PBS_JOBID >> $LOG

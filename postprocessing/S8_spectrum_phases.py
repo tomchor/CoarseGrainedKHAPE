@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
+from src.aux00_utils import PP_OUTPUT
 from src.aux03_plotting import run_label, collapse_time_pairs
 #---
 
@@ -23,7 +24,6 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 FIGURES = REPO_ROOT / "figures"; FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 ref_suffix = "_fixed_ref" if args.fixed_reference else ""

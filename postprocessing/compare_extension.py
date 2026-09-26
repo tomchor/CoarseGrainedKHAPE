@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import numpy as np
 import xarray as xr
+from src.aux00_utils import PP_OUTPUT
 
 parser = argparse.ArgumentParser(description="Compare sweep transfer terms between two wall extensions")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
@@ -21,8 +22,6 @@ parser.add_argument("--fixed-reference", action="store_true", default=False)
 parser.add_argument("--extension", default="odd", help="The non-default extension to compare against 'edge'")
 args = parser.parse_args()
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 stem = Path(args.filename).stem
 ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 

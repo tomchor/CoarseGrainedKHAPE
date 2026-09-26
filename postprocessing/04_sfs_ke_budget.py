@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import (pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter,
+from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter,
                              reference_suffix)
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple,
                                    calculate_ape_to_ke_exchange_term, filtered_reference_profile)
@@ -26,7 +26,6 @@ parser.add_argument("--reference", choices=["filtered", "true"], default="filter
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
 filtered_reference = args.reference == "filtered"

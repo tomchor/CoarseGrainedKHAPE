@@ -17,6 +17,7 @@ set -eo pipefail
 
 NZ=${NZ:-4096}
 SIM=khi_Nz${NZ}_Ri0.10
+OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where simulation.pbs wrote the run; kelvin_helmholtz_instability.jl reads the same variable
 PYTHON=/glade/work/wenegrat/conda-envs/py313/bin/python
 FIXED_REF=${FIXED_REF:-0}
 EXTENSION=${EXTENSION:-edge}   # must match the sweep_filter run this reads; see sweep_filter.pbs
@@ -35,11 +36,11 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-time $PYTHON -u sweep2_energy_transfer.py --filename output/${SIM}.nc --n-workers 18 --extension $EXTENSION $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
+time $PYTHON -u sweep2_energy_transfer.py --filename $OUT_DIR/${SIM}.nc --n-workers 18 --extension $EXTENSION $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
 # sweep3 reads the default (edge) transfer file, so it is only meaningful for the edge run. An `if`
 # rather than `cond && cmd`: under `set -e` a false test as the last command would fail the job.
 if [ "$EXTENSION" = "edge" ]; then
-    time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename output/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
+    time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename $OUT_DIR/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 fi
 
 qstat -f $PBS_JOBID >> logs/${JOB_NAME}.out

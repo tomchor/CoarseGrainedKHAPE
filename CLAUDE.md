@@ -220,4 +220,5 @@ Every term of both sub-filter budgets is now written by the simulation, so closu
 
 - Output files are excluded from git (`.nc`, `.mp4`, `.pdf`, `.png`, `.jld2`).
 - Simulation output can reach 650 GB; scratch directory is `/glade/derecho/scratch/tomasc/khape/output/`.
+- `$KHAPE_OUTPUT_DIR` moves the simulation output (default `output/`) and `$KHAPE_PP_OUTPUT` the post-processing output (default `postprocessing/output/`). Every post-processing script takes `PP_OUTPUT` from `src/aux00_utils.py` rather than defining its own, the PBS jobs read the run from `${KHAPE_OUTPUT_DIR:-output}`, and `tests/conftest.py` honours both. Keep it that way: a script with its own `PP_OUTPUT` writes somewhere the next step does not read.
 - Logs: `logs/<job_name>.log` (PBS), `logs/<job_name>.out` (Python stdout via tee). Job names follow `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`.
