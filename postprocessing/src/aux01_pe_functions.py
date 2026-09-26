@@ -988,7 +988,7 @@ def filtered_reference_profile(rho_sorted, dz_sorted, ℓ, z_sorted_name="z_1d_s
 
     Δz = dz_sorted.values
     Δz0 = float(Δz.flat[0])
-    if not np.allclose(Δz, Δz0, rtol=SLOT_SPACING_RTOL):
+    if not np.allclose(Δz, Δz0, rtol=SLOT_SPACING_RTOL, atol=0.0):   # atol=0: the slots are ~1e-5 thick
         raise ValueError(f"filtered_reference_profile needs a uniformly spaced sorted column, but the slot "
                          f"heights vary (min {Δz.min():.6e}, max {Δz.max():.6e}). The column inherits the "
                          f"model's Δz, so this means a stretched vertical grid; filtering the profile with a "
