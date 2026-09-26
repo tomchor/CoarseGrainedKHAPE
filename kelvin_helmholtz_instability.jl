@@ -9,8 +9,8 @@ using Oceananigans.Architectures: on_architecture
 using Oceananigans.Grids: topology, znode
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor,
       SubFilterKineticEnergyEquation
-using Oceanostics: SubFilterAvailablePotentialEnergyDissipationRate, AvailablePotentialEnergyCrossScaleFlux
-using Oceanostics: SubFilterAvailablePotentialEnergy, SubFilterKineticEnergy
+using Oceanostics: AvailablePotentialEnergyCrossScaleFlux
+using Oceanostics: SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
 using Oceananigans.OutputWriters: TimeDerivative
 using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral,
