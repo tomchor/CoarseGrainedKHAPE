@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import (pad_margin_for_run, extension_for_run, extension_suffix,
+from src.aux00_utils import (pad_margin_for_run, extension_for_run, extension_suffix, reference_suffix,
                             load_dataset_and_grid)
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 from src.aux02_ke_functions import calculate_energy_transfer
@@ -122,7 +122,9 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
-output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer_sweep{ref_suffix}{ext_suffix}.nc"))
+energy_transfer.attrs["ape_reference"] = args.reference
+output_filename = str(PP_OUTPUT / (Path(filename).stem
+                                   + f"_energy_transfer_sweep{ref_suffix}{reference_suffix(args.reference)}{ext_suffix}.nc"))
 tmp_dir = PP_OUTPUT / (Path(output_filename).stem + "_tmp")
 tmp_dir.mkdir(exist_ok=True)
 tmp_files = []

@@ -39,7 +39,7 @@ All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--
 
 The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` reproduces the earlier behaviour and is kept for comparison. The simulation's online APE terms (`Π_A_ℓ<ℓ>`, `ε_As_ℓ<ℓ>` and the rest, under `--save_sorted`) are built against ⟨ρ_*⟩, and reading them is what makes the budget close; `true` therefore always recomputes offline. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
 
-`00_get_budgets.sh` forwards the flag:
+`--reference true` tags the outputs of 03–06 and `sweep2` with `_trueref`, so both references can sit side by side; 05 refuses 03/04 output built against the other one. `00_get_budgets.sh` forwards the flag, including to 06:
 
 ```bash
 bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference filtered
@@ -212,6 +212,7 @@ The test suite checks SFS KE and APE budget closure (rms residual / min rms of t
 ```bash
 pytest tests/ -v -s                                  # time-varying reference (default)
 pytest tests/ -v -s --ref-suffix _fixed_ref          # fixed reference variant
+pytest tests/ -v -s --ref-suffix _trueref            # --reference true outputs
 ```
 
 CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=1024) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.

@@ -225,6 +225,15 @@ def extension_suffix(extension):
     return "" if extension == "edge" else f"_{extension}"
 
 
+def reference_suffix(reference):
+    """Filename tag for `--reference true`, so its output never overwrites the default (filtered) run's.
+
+    02's sorted density does not depend on the reference and carries no tag; the outputs of 03-06 and
+    sweep2 do, and 03/04 also record the reference as the `ape_reference` attribute that 05 checks.
+    """
+    return "" if reference == "filtered" else f"_{reference}ref"
+
+
 def extension_of(ds_filt):
     """The wall extension the filtering step used, so every later step extends identically."""
     return ds_filt.attrs.get("z_extension", "edge")

@@ -11,7 +11,8 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter, load_energy_transfer
+from src.aux00_utils import (pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter,
+                             load_energy_transfer, reference_suffix)
 from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
@@ -75,6 +76,7 @@ print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x and z")
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
+out_suffix = ref_suffix + reference_suffix(args.reference)   # 02's sort is shared by both references; this output is not
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 t0 = time.time()
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
@@ -89,6 +91,7 @@ t0 = time.time()
 ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 print(f"  ρ calculated  ({time.time()-t0:.1f}s)")
 
+# full_local_pes is the full field against ρ_*, the same under either --reference, so both share it.
 full_local_pes_checkpoint = PP_OUTPUT / (Path(filename).stem + f"_full_local_pes_checkpoint{ref_suffix}.nc")
 if full_local_pes_checkpoint.exists():
     print(f"  Loading full_local_pes from checkpoint: {full_local_pes_checkpoint.name}")
@@ -115,15 +118,22 @@ else:
 print("\n" + "="*60)
 print("Calculating budget terms for each filter scale...")
 
-energy_transfer = load_energy_transfer(filename, ref_suffix=ref_suffix)
+energy_transfer = load_energy_transfer(filename, ref_suffix=out_suffix)
 
-ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
-ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
+ke_fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{out_suffix}.nc"))
+ke_integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{out_suffix}.nc"))
 ke_budget = xr.merge([
     xr.open_dataset(ke_fields_filename,     decode_times=False).chunk({"time": 1}),
     xr.open_dataset(ke_integrated_filename, decode_times=False).chunk({"time": 1}),
 ])
 print(f"  KE budget loaded from: {ke_fields_filename} + {ke_integrated_filename}")
+
+# Π_A (from 03) and the APE->KE exchange (from 04) must be measured against the reference this step uses,
+# or the budget mixes two reference states. Output written before the attribute existed has none: rerun it.
+for step, d in (("03", energy_transfer), ("04", ke_budget)):
+    if d.attrs.get("ape_reference") != args.reference:
+        raise ValueError(f"{step} output was built with ape_reference={d.attrs.get('ape_reference')!r}, but this run "
+                         f"uses --reference {args.reference}; rerun 03 and 04 with --reference {args.reference}")
 
 # ε_Aˢ is computed online by the simulation, so the budget reads it instead of recomputing — but only
 # for the time-varying reference. Unlike Π_K and ε_Kˢ (built from velocities alone, hence
@@ -138,7 +148,7 @@ budget_list = []
 checkpoint_files = [full_local_pes_checkpoint]
 
 for ℓ in filter_scales:
-    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{ref_suffix}.nc")
+    checkpoint_path = PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_checkpoint_l{ℓ:.4f}{out_suffix}.nc")
     checkpoint_files.append(checkpoint_path)
 
     if checkpoint_path.exists():
@@ -280,8 +290,8 @@ print("Saving results...")
 integrated_vars = [v for v in sfs_ape_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
 local_vars      = [v for v in sfs_ape_budget_terms.data_vars if v not in integrated_vars]
 
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_fields{ref_suffix}.nc"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_fields{out_suffix}.nc"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{out_suffix}.nc"))
 
 print("  Saving local fields...")
 with ProgressBar(minimum=5, dt=5):

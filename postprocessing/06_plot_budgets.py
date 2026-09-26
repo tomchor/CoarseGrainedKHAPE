@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
+from src.aux00_utils import reference_suffix
 from src.aux03_plotting import budget_colors, run_label
 #---
 
@@ -12,13 +13,15 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot SFS KE and APE budget terms from saved budget files")
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive budget filenames)")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Plot the budgets built with this --reference (03-05 tag the 'true' ones _trueref)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
-ref_suffix = "_fixed_ref" if fixed_reference else ""
+ref_suffix = ("_fixed_ref" if fixed_reference else "") + reference_suffix(args.reference)
 #---
 
 #+++ Load budget data

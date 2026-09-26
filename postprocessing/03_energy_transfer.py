@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid
+from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid, reference_suffix
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
 
@@ -54,6 +54,7 @@ print(f"  Filter dimensions: x and z")
 
 t0 = time.time()
 ref_suffix = "_fixed_ref" if fixed_reference else ""
+out_suffix = ref_suffix + reference_suffix(args.reference)   # 02's sort is shared by both references; this output is not
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
@@ -86,7 +87,8 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
-output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{ref_suffix}.nc"))
+energy_transfer.attrs["ape_reference"] = args.reference   # 05 checks this against its own --reference
+output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{out_suffix}.nc"))
 with ProgressBar(minimum=5, dt=5):
     energy_transfer.to_netcdf(output_filename)
 print(f"Results saved to: {output_filename}")

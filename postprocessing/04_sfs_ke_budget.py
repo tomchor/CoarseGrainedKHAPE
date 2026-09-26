@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter
+from src.aux00_utils import (pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter,
+                             reference_suffix)
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple,
                                    calculate_ape_to_ke_exchange_term, filtered_reference_profile)
 from src.aux02_ke_functions import (
@@ -55,6 +56,7 @@ ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "dV_physical", "uᵢ"]].copy()
 
 ref_suffix = "_fixed_ref" if fixed_reference else ""
+out_suffix = ref_suffix + reference_suffix(args.reference)   # 02's sort is shared by both references; this output is not
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
 
@@ -160,6 +162,7 @@ sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
                                                               dims="filter_scale",
                                                               name="filter_scale"))
 sfs_ke_budget_terms.attrs.update(ds.attrs)
+sfs_ke_budget_terms.attrs["ape_reference"] = args.reference   # 05 checks this against its own --reference
 print("\nDone!")
 #---
 
@@ -170,8 +173,8 @@ print("Saving results...")
 integrated_vars = [v for v in sfs_ke_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
 local_vars      = [v for v in sfs_ke_budget_terms.data_vars if v not in integrated_vars]
 
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{ref_suffix}.nc"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{out_suffix}.nc"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{out_suffix}.nc"))
 
 print("  Saving local fields...")
 with ProgressBar(minimum=5, dt=5):
