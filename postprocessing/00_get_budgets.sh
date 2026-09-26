@@ -20,6 +20,8 @@ for arg in "$@"; do
         FIXED_REF_FLAG="--fixed-reference"
     elif [ "$arg" = "--reference" ]; then
         expect_reference=1
+    elif [[ "$arg" == --reference=* ]]; then      # the --reference=true form argparse also accepts
+        REFERENCE_FLAG=(--reference "${arg#--reference=}")
     else
         REMAINING_ARGS+=("$arg")
     fi
