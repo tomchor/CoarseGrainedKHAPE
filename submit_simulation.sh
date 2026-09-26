@@ -7,7 +7,13 @@
 NZ=1024
 SAVE_TENSORS=0
 SAVE_SORTED=1
-for arg in "$@"; do case $arg in NZ=*) NZ="${arg#*=}";; SAVE_TENSORS=*) SAVE_TENSORS="${arg#*=}";; SAVE_SORTED=*) SAVE_SORTED="${arg#*=}";; esac; done
+# An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
+for arg in "$@"; do case $arg in
+  NZ=*)           NZ="${arg#*=}";;
+  SAVE_TENSORS=*) SAVE_TENSORS="${arg#*=}";;
+  SAVE_SORTED=*)  SAVE_SORTED="${arg#*=}";;
+  *) echo "unknown argument: $arg (expected NZ=, SAVE_TENSORS= or SAVE_SORTED=)" >&2; exit 2;;
+esac; done
 NAME="kelvin_helmholtz_${NZ}"
 qsub -N "$NAME" \
      -o "logs/${NAME}.log" \

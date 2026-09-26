@@ -18,12 +18,14 @@
 #   bash postprocessing/submit_budgeting.sh [NZ=2048] [FIXED_REF=0|1|both]
 
 NZ=2048; FIXED_REF=0; VALIDATE=0; PLOTS=0
+# An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
 for arg in "$@"; do case $arg in
-  NZ=*)        NZ="${arg#*=}";;
-  FIXED_REF=*) FIXED_REF="${arg#*=}";;
-  VALIDATE=*)  VALIDATE="${arg#*=}";;
+  NZ=*)          NZ="${arg#*=}";;
+  FIXED_REF=*)   FIXED_REF="${arg#*=}";;
+  VALIDATE=*)    VALIDATE="${arg#*=}";;
   SAVE_SORTED=*) SAVE_SORTED="${arg#*=}";;
-  PLOTS=*)     PLOTS="${arg#*=}";;
+  PLOTS=*)       PLOTS="${arg#*=}";;
+  *) echo "unknown argument: $arg (expected NZ=, FIXED_REF=, VALIDATE=, PLOTS= or SAVE_SORTED=)" >&2; exit 2;;
 esac; done
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 # --save_sorted is on by default. It writes the sorted reference state and the online APE budget terms, the

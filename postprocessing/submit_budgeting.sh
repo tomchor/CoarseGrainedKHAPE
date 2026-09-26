@@ -3,7 +3,12 @@
 # Usage: bash submit_budgeting.sh [NZ=2048] [FIXED_REF=0|1|both]
 #   FIXED_REF=both  submits budget jobs for both 0 and 1 (filter runs only once)
 NZ=2048; FIXED_REF=0
-for arg in "$@"; do case $arg in NZ=*) NZ="${arg#*=}";; FIXED_REF=*) FIXED_REF="${arg#*=}";; esac; done
+# An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
+for arg in "$@"; do case $arg in
+  NZ=*)        NZ="${arg#*=}";;
+  FIXED_REF=*) FIXED_REF="${arg#*=}";;
+  *) echo "unknown argument: $arg (expected NZ= or FIXED_REF=)" >&2; exit 2;;
+esac; done
 
 FILTER_NAME="budgeting_filter_Nz${NZ}_Ri0.10"
 FILTER_JOB=$(qsub -N "$FILTER_NAME" \
