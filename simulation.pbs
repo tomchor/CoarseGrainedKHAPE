@@ -30,23 +30,28 @@ SAVE_SORTED=${SAVE_SORTED:-1}   # on by default: the online APE cross-check that
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
 
-# Julia 1.12.6 has a GPU-codegen regression (InvalidIRError in gpu_fill_kernel!); 1.12.4 works. How you get
-# 1.12.4 is per-user, so find it rather than assume: $JULIA if the caller set one, else juliaup, else a
-# standalone tarball under $WORK. Hard-coding either route means whoever uses the other carries a local
-# edit to this file, and loses it at the next pull -- which has happened.
+# This branch's Manifest is resolved with Julia 1.13, so run it. How you get 1.13 is per-user, so find it
+# rather than assume: $JULIA if the caller set one, else juliaup, else a standalone tarball under $WORK.
+# Hard-coding either route means whoever uses the other carries a local edit to this file, and loses it at
+# the next pull -- which has happened.
 if [ -n "${JULIA:-}" ]; then
     echo "Using \$JULIA = $JULIA"
 elif command -v juliaup >/dev/null 2>&1; then
-    juliaup add 1.12.4
-    JULIA="julia +1.12.4"
-elif [ -x "$WORK/julia-1.12.4/bin/julia" ]; then
-    JULIA="$WORK/julia-1.12.4/bin/julia"
+    juliaup add 1.13
+    JULIA="julia +1.13"
+elif [ -x "$WORK/julia-1.13/bin/julia" ]; then
+    JULIA="$WORK/julia-1.13/bin/julia"
 else
-    echo "error: no Julia 1.12.4 found. Set \$JULIA, install juliaup, or unpack the 1.12.4 tarball to" >&2
-    echo "       \$WORK/julia-1.12.4 (https://julialang-s3.julialang.org/bin/linux/x64/1.12/julia-1.12.4-linux-x86_64.tar.gz)" >&2
+    echo "error: no Julia 1.13 found. Set \$JULIA, install juliaup, or unpack the 1.13 tarball to" >&2
+    echo "       \$WORK/julia-1.13 (https://julialang-s3.julialang.org/bin/linux/x64/1.13/julia-1.13.1-linux-x86_64.tar.gz)" >&2
     exit 1
 fi
 $JULIA --version
+
+# The Julia depot ($WORK/.julia) is shared across branches, so a checkout on a different Manifest can leave
+# this one uninstantiated -- which fails the run at `using Oceananigans`. Instantiate first; idempotent and
+# fast once the packages are present.
+$JULIA --project -e 'using Pkg; Pkg.instantiate()'
 
 time $JULIA --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ $TENSOR_FLAG $SORTED_FLAG 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
 

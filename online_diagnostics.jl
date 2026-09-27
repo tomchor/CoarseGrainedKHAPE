@@ -20,7 +20,6 @@ using Oceananigans.Grids: Center, Face, znode
 using Oceanostics.BackgroundPotentialEnergyEquation: SortedReferenceHeightField
 
 import Oceananigans.Fields: compute!
-import Oceananigans.OutputWriters: deferred_output
 
 #+++ Reference-tendency correction R
 """
@@ -34,19 +33,16 @@ evaluating `Ψ̇` at a height needs a cumulative integral over the whole column,
 struct ReferenceTendencyState{D, Z, S, W, FT}
     ∂ₜb✶ :: D            # TimeDerivative of the column's reference buoyancy
     z✶ :: Z              # model-grid reference height the correction is measured from
-    source_height :: S   # each cell's own height, flattened
-    workspace :: W       # cumulative ∫∂ₜb✶ dz̃ at the slot faces
+    source_height :: S   # each cell's own height, flattened (host array; R is evaluated on the CPU)
+    workspace :: W       # cumulative ∫∂ₜb✶ dz̃ at the slot faces (host array)
     z_bottom :: FT
     Δz✶ :: FT            # the column's slot thickness (VerticalSort gives equal-volume slots)
 end
 
 const ReferenceTendencyField = Field{<:Any, <:Any, <:Any, <:ReferenceTendencyState}
 
-# R holds a TimeDerivative, so like a bare TimeDerivative it is only complete on the iteration after
-# the writer actuates. `deferred_output` recurses through fields and operations down to this operand,
-# so Rˢ = filter(R) - Rˡ and ∫Rˢ dV are deferred too: the writer evaluates them when a record opens
-# (opening the ∂ₜb✶ window) and again on the following iteration, writing the completed difference.
-deferred_output(::ReferenceTendencyState) = true
+# R holds a TimeDerivative, and reading one, `compute!` included, does not advance it: R sees whatever the
+# TimeDerivativeCallback the simulation keeps for it last computed.
 
 "Ψ̇(ζ) = ∫_bottom^ζ ∂ₜb✶ dz̃, evaluated by locating ζ's slot in a uniformly spaced column."
 @inline function psi_dot(ζ, Ψface, ∂ₜb✶, z_bottom, Δz✶, N)
@@ -56,10 +52,14 @@ end
 
 function compute!(R::ReferenceTendencyField, time=nothing)
     s = R.operand
-    compute_at!(s.z✶, time)
-    compute_at!(s.∂ₜb✶, time)   # advances the TimeDerivative (a no-op when already at `time`)
+    compute_at!(s.z✶, time)     # ∂ₜb✶ is advanced by its callback, not here
 
-    ∂ₜb✶ = vec(interior(s.∂ₜb✶))
+    # Ψ̇ is a cumulative integral up the sorted column and R is a per-cell clamped lookup into it — both
+    # sequential over the column, not stencil operations — so R is evaluated on the host and the result
+    # copied back to R (which may live on the GPU). source_height and the workspace are host arrays; ∂ₜb✶
+    # and z✶ are pulled to the host here. This runs only when R's callback/writer actuates, so the host
+    # round-trip is cheap.
+    ∂ₜb✶ = Array(vec(interior(s.∂ₜb✶)))
     N = length(∂ₜb✶)
 
     # Ψ̇ at the slot faces: a cumulative integral up the column, closed off at the bottom by zero
@@ -67,11 +67,11 @@ function compute!(R::ReferenceTendencyField, time=nothing)
     fill!(view(Ψface, 1:1), zero(eltype(Ψface)))   # not Ψface[1] = 0: scalar setindex! is disallowed on a GPU array
     cumsum!(view(Ψface, 2:N+1), ∂ₜb✶ .* s.Δz✶)
 
-    z✶ = vec(interior(s.z✶))
+    z✶ = Array(vec(interior(s.z✶)))
     R_flat = psi_dot.(s.source_height, Ref(Ψface), Ref(∂ₜb✶), s.z_bottom, s.Δz✶, N) .-
              psi_dot.(z✶,              Ref(Ψface), Ref(∂ₜb✶), s.z_bottom, s.Δz✶, N)
 
-    interior(R) .= reshape(R_flat, size(R))
+    interior(R) .= on_architecture(architecture(R.grid), reshape(R_flat, size(R)))
     fill_halo_regions!(R)
     set_status!(R.status, time)
 
@@ -92,7 +92,8 @@ itself is evolving, with the parcel and its buoyancy held fixed. It is the expli
 appears in the local APE budget as `+R`.
 
 `∂ₜb✶` is an Oceananigans `TimeDerivative` of the sorted reference profile — the `reference_buoyancy` of
-a column built with `VerticalSort` — and `z✶` is the model-grid reference height the correction is
+a column built with `VerticalSort` — kept current by a `TimeDerivativeCallback` in `simulation.callbacks`,
+since evaluating `R` does not advance it; `z✶` is the model-grid reference height the correction is
 measured from: the full field's for `R`, the filtered field's for `Rˡ`. The sub-filter correction is
 then `Rˢ = filter(R) - Rˡ`.
 
@@ -112,12 +113,11 @@ function ReferenceTendencyCorrection(model, ∂ₜb✶, z✶::SortedReferenceHei
     z_bottom = convert(FT, znode(1, 1, 1, on_architecture(CPU(), grid), Center(), Center(), Face()))
     Δz✶ = convert(FT, grid.Lz / N)
 
-    source_height = on_architecture(architecture(grid), zeros(FT, prod(size(grid))))
-    reshape(source_height, size(grid)) .= interior(Field(KernelFunctionOperation{Center, Center, Center}(Zᶜᶜᶜ, grid)))
+    # source_height and the Ψ̇ workspace stay on the host: compute! evaluates R there (the cumulative
+    # integral and clamped lookup are sequential over the column) and copies the result back to R.
+    source_height = Array(vec(interior(Field(KernelFunctionOperation{Center, Center, Center}(Zᶜᶜᶜ, grid)))))
 
-    operand = ReferenceTendencyState(∂ₜb✶, z✶, source_height,
-                                     on_architecture(architecture(grid), zeros(FT, N + 1)),
-                                     z_bottom, Δz✶)
+    operand = ReferenceTendencyState(∂ₜb✶, z✶, source_height, zeros(FT, N + 1), z_bottom, Δz✶)
 
     return Field{Center, Center, Center}(grid; operand, status = FieldStatus())
 end
