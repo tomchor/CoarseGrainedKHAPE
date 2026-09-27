@@ -12,9 +12,14 @@ or a broken filter rather than an unusual flow:
     filter's weights are positive and sum to one, so filtering a square is at least the square of the
     filtered field.
 
-The SFS APE Eₐˢ = filter(eₐ) - eₐˡ is deliberately absent. The same Jensen argument would need the
-filter to act on b alone; this one also acts in z, where eₐ(·, z) varies with height, so the bound
-does not carry. Negative Eₐˢ is physical — most of the domain is negative at the wider filter scales.
+The SFS APE Eₐˢ is checked only when the pipeline ran with `--reference filtered`, which the file
+records in its `ape_reference` attribute. Against the *unfiltered* ρ_* it has no fixed sign: the Jensen
+argument would need the filter to act on b alone, and this one also acts in z, where eₐ(·, z) varies
+with height, so the bound does not carry and most of the domain goes negative at the wider filter
+scales. Against the filtered reference ⟨ρ_*⟩ it is S̃ of the two-reservoir decomposition, an average of
+eₐ ≥ 0 over a stencil moved to the coarse field's own resting level, and so is non-negative for any
+kernel. `test_filtered_reference.py` establishes that on a synthetic field; the test here is what
+checks it on real pipeline output.
 
 The total KE ½uᵢuᵢ is absent for the opposite reason: it is a sum of squares, so a test of its sign
 would only be testing numpy.
@@ -27,12 +32,7 @@ so it holds for either.
 import pytest
 import numpy as np
 import xarray as xr
-from pathlib import Path
-
-REPO_ROOT  = Path(__file__).resolve().parent.parent
-PP_OUTPUT  = REPO_ROOT / "postprocessing" / "output"
-SIM_OUTPUT = REPO_ROOT / "output" / "khi_Nz512_Ri0.10.nc"
-STEM       = "khi_Nz512_Ri0.10"
+from conftest import PP_OUTPUT, SIM_OUTPUT, STEM
 
 #+++ Tolerances
 # Worst allowed excursion below zero, as a fraction of the field's own rms: min(field)/rms(field) > -TOL.
@@ -48,6 +48,10 @@ APE_TOL = 1e-3
 # SFS KE: ½τᵢᵢ ≥ 0 is exact in exact arithmetic, so only floating-point roundoff is allowed. The
 # measured minima on the same run are positive at every filter scale, the smallest at +1e-12 of rms.
 KE_TOL = 1e-8
+
+# SFS APE under the filtered reference: S̃ inherits the same nearest-density lookup as Eₐ, on both of the
+# two profiles it now involves, so it is held to the same bound rather than to roundoff.
+SFS_APE_TOL = APE_TOL
 #---
 
 #+++ Helpers
@@ -109,6 +113,45 @@ def test_sfs_ke_is_positive(ke_fields, l_idx):
     l = ke_fields.filter_scale.values[l_idx]
     print(f"\nSFS KE  (l={l:.4f})")
     check_positive(ke_fields["KE_of_sfs_flow"].sel(filter_scale=l), "KE_of_sfs_flow", KE_TOL)
+#---
+
+#+++ SFS APE under the filtered reference
+def drop_padding(da, n_pad, z_name="z_aac"):
+    """Restrict to the physical domain, dropping the `n_pad` z cells `_pad_domain_in_z` adds each side.
+
+    Two reasons to cut it. The padding is manufactured fluid — constant in z by construction — so its
+    Eₐ says nothing about the run. And S̃ is computed as Ē_A - L̃, an identity that needs filter(z) = z;
+    the filter extends the bounded axis with its edge value, so within a stencil of the padded grid's
+    own walls the kernel is one-sided and the identity picks up a spurious τ(z, b). Cutting to the
+    physical domain puts the whole padding between the assertion and that edge, and the padding is
+    sized at 4σ of the widest filter in the run, so the margin is a full stencil by construction.
+
+    `n_pad` comes from the file's own `n_pad_z` attribute rather than being derived from the array. It
+    used to be computed as Nz_padded//4, which holds only while the padding is the default Nz//2 — and
+    `required_pad_margin` widens it past that as soon as a filter needs more than Lz/2 of room, which
+    the sweep's ℓ=20 does. Deriving it would then silently keep padding inside the assertion.
+    """
+    n = da.sizes[z_name]
+    assert 0 <= n_pad < n // 2, f"implausible padding: n_pad={n_pad} on {n} cells"
+    return da.isel({z_name: slice(n_pad, n - n_pad)})
+
+
+def test_sfs_ape_is_positive(ape_fields, l_idx):
+    """S̃ ≥ 0 on real pipeline output — the property the filtered-reference construction exists to give.
+
+    Skipped when the budget was built against the unfiltered ρ_*, where the field genuinely has no sign
+    (see the module docstring, and test_jensen.py for the measurement).
+    """
+    reference = ape_fields.attrs.get("ape_reference")
+    if reference != "filtered":
+        pytest.skip(f"budget built with ape_reference={reference!r}; S̃ ≥ 0 only holds for 'filtered'")
+
+    l = ape_fields.filter_scale.values[l_idx]
+    # Files written before `n_pad_z` was recorded carry the old default, which is Nz_padded//4 per side.
+    n_pad = ape_fields.attrs.get("n_pad_z", ape_fields.sizes["z_aac"] // 4)
+    print(f"\nSFS APE, filtered reference  (l={l:.4f}, dropping {int(n_pad)} padded cells per side)")
+    check_positive(drop_padding(ape_fields["Eaˢ(ρ, z)"].sel(filter_scale=l), int(n_pad)),
+                   "Eaˢ(ρ, z)", SFS_APE_TOL)
 #---
 
 #+++ Local APE (online, --save_sorted)

@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
 from matplotlib.animation import FuncAnimation, FFMpegWriter
+from src.aux00_utils import PP_OUTPUT, reference_suffix
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r
 from src.aux03_plotting import run_label, budget_colors
 #---
@@ -26,18 +27,20 @@ parser.add_argument("--zlim", type=float, default=3.8, help="Vertical extent for
 parser.add_argument("--fps", type=int, default=12, help="Frames per second")
 parser.add_argument("--dpi", type=int, default=150, help="DPI for output video")
 parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 FIGURES   = REPO_ROOT / "figures"
 ANIMATIONS = REPO_ROOT / "animations"
 ANIMATIONS.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 filename_2d = filename.replace(".nc", "_2d.nc")
-ref_suffix = "_fixed_ref" if args.fixed_reference else ""
+fixed_suffix = "_fixed_ref" if args.fixed_reference else ""   # 02's sorted density carries only this tag
+ref_suffix = fixed_suffix + reference_suffix(args.reference)   # adds _trueref for --reference true
 #---
 
 #+++ Load datasets
@@ -45,7 +48,7 @@ print("Loading 2D simulation output...")
 ds_2d = xr.open_dataset(filename_2d, decode_times=False)
 ds_2d = ds_2d.sel(z_aac=slice(-args.zlim, args.zlim), z_aaf=slice(-args.zlim, args.zlim))
 
-print("Loading KE and APE budget fields...")
+print(f"Loading KE and APE budget fields: {stem}_sfs_{{ke,ape}}_budget_fields{ref_suffix}.nc")
 ke_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields{ref_suffix}.nc"), decode_times=False)
 ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_suffix}.nc"), decode_times=False)
 ke_budget = ke_budget.sel(z_aac=slice(-args.zlim, args.zlim))
@@ -63,7 +66,7 @@ ke_int = ke_int.sel(filter_scale=ℓ_sel, method="nearest")
 ape_int = ape_int.sel(filter_scale=ℓ_sel, method="nearest")
 
 print("Loading sorted density and computing b_r...")
-ds_sorted = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sorted_density{ref_suffix}.nc"), decode_times=False)
+ds_sorted = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sorted_density{fixed_suffix}.nc"), decode_times=False)
 _ds_for_rho = calculate_density_fields_from_buoyancy(ds_2d[["b"]].copy(), buoyancy_name="b", density_name="ρ")
 ds_2d["b_r"] = calculate_b_r(_ds_for_rho["ρ"], ds_sorted["rho_sorted"]).transpose(*_ds_for_rho["ρ"].dims)
 #---

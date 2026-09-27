@@ -6,23 +6,27 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.colors import SymLogNorm
+from src.aux00_utils import PP_OUTPUT, reference_suffix
 from src.aux03_plotting import run_label
 #---
 
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Hovmöller plots (time vs filter scale) of Π_K and Π_A")
-parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file (used to derive energy transfer filename)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load output produced with the fixed-in-time reference profile")
+parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
+                    help="Path to simulation NetCDF file (used to derive energy transfer filename)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load output produced with the fixed-in-time reference profile")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 parser.add_argument("--max-time", type=float, default=140.0, help="Latest time included in the hovmöller")
 parser.add_argument("--linthresh", type=float, default=1e-2, help="Linear threshold for symmetric log color scale")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-ref_suffix = "_fixed_ref" if args.fixed_reference else ""
+ref_suffix = ("_fixed_ref" if args.fixed_reference else "") + reference_suffix(args.reference)   # adds _trueref for --reference true
 #---
 
 #+++ Load energy transfer data
@@ -67,7 +71,8 @@ if label:
 #+++ Save
 figures_dir = REPO_ROOT / "figures"
 figures_dir.mkdir(exist_ok=True)
-plot_filename = str(figures_dir / os.path.basename(input_filename).replace("energy_transfer_sweep", "hovmoller_PiK_PiA").replace(".nc", ".pdf"))
+plot_filename = str(figures_dir / os.path.basename(input_filename)
+                    .replace("energy_transfer_sweep", "hovmoller_PiK_PiA").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
 #---

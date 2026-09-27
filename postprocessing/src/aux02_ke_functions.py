@@ -11,6 +11,7 @@ from src.aux00_utils import (integrate, calculate_gradient,
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy,
                                 sorted_timeseries,
                                 local_potential_energies_timeseries,
+                                filtered_reference_profile,
                                 calculate_cross_scale_ape_flux,
                                 calculate_b_r,
                                 calculate_ape_to_ke_exchange_term)
@@ -255,7 +256,7 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18,
-                              include_pi_k=True, online_pi_a=None):
+                              include_pi_k=True, filtered_reference=False, frozen_reference=False):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -277,18 +278,13 @@ def calculate_energy_transfer(ds, filter_scales,
         with ``rho_sorted``.
     n_workers : int
         Number of threads for APE sorting (ThreadPoolExecutor).
-    online_pi_a : dict or None
-        Online Π_A fields keyed by filter scale, as written by the simulation
-        (``Π_A_ℓ<ℓ>``). When given, Π_A is read from there instead of being
-        recomputed, which also skips the sort of the filtered density that Υˡ
-        would otherwise need. Π_A is measured against a reference state, so the
-        caller must only pass this for the time-varying reference; under
-        ``--fixed-reference`` every other term uses the frozen t=0 profile and
-        the online field would be inconsistent with them.
     include_pi_k : bool
         If True (default) also compute the cross-scale KE flux Π_K. The KH budget
         pipeline computes Π_K online and passes include_pi_k=False to skip the
         offline recompute (the sweep keeps the default and still gets Π_K).
+    frozen_reference : bool
+        True when `rho_sorted` repeats one profile at every time (--fixed-reference), so
+        ⟨ρ_*⟩ is filtered once per scale and broadcast. See filtered_reference_profile.
 
     Returns
     -------
@@ -304,7 +300,7 @@ def calculate_energy_transfer(ds, filter_scales,
         ds_filt = filter_fields(ds, filter_scales)
 
     ds = condense_uw_velocities(ds, indices=(1, 3))
-    ds_full = ds[["b", "dV", "LxLy", "uᵢ"]].copy()
+    ds_full = ds[["b", "dV", "dV_physical", "LxLy", "uᵢ"]].copy()
 
     ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")
 
@@ -317,11 +313,13 @@ def calculate_energy_transfer(ds, filter_scales,
         rho_sorted = _full_sorted.rho_sorted
         dz_sorted  = _full_sorted.dz_sorted
 
-    # Relative buoyancy b_r is scale-independent — compute once outside the loop
+    # Relative buoyancy b_r of the *full* field is scale-independent (it uses the unfiltered ρ_*) — compute
+    # once outside the loop. Its resolved counterpart b_rˡ is not, once measured against ⟨ρ_*⟩, so that one
+    # is built per scale below.
     b_r = calculate_b_r(ds_full.ρ, rho_sorted)
     w_full = ds_full["uᵢ"].sel(i=3)
 
-    dV = ds_full.dV
+    dV = ds_full.dV_physical   # padding carries no volume; see _pad_domain_in_z
     transfer_list = []
 
     for ℓ in filter_scales:
@@ -331,6 +329,11 @@ def calculate_energy_transfer(ds, filter_scales,
         ds_filt_ℓ = ds_filt.sel(filter_scale=ℓ).drop_vars("filter_scale")
         ds_filt_ℓ["LxLy"] = ds["LxLy"]
         ds_filt_ℓ.attrs.update(ds.attrs)
+
+        # The reference the resolved scale is measured against: ⟨ρ_*⟩ for a kernel with vertical extent,
+        # the unfiltered ρ_* in the horizontal-filter limit. Scale-dependent, hence rebuilt here.
+        ref_rho_sorted = (filtered_reference_profile(rho_sorted, dz_sorted, ℓ, frozen=frozen_reference)
+                          if filtered_reference else rho_sorted)
 
         # --- KE cross-scale transfer (Π_K) ---
         # Computed online by the simulation; skipped here when include_pi_k=False so the offline
@@ -348,39 +351,35 @@ def calculate_energy_transfer(ds, filter_scales,
         # --- APE->KE conversion term ---
         # SFS exchange: filter(w·b_r) - filter(w)·b_r_l
         w_bar = ds_filt_ℓ["ūᵢ"].sel(i=3)
-        # b_r_l = -(g/ρ₀)(ρ̄ - ρ_ref): filtered density minus the unfiltered reference profile
-        # (cf. filter(b_r) = -(g/ρ₀)(ρ̄ - filter(ρ_ref)), which filters the reference too)
-        b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), rho_sorted)
+        # b_r_l = -(g/ρ₀)(ρ̄ - ρ_ref), the filtered density measured against the resolved scale's own
+        # reference. Against ⟨ρ_*⟩ this is exactly filter(b_r), since ρ_*(z) is a function of z alone and the
+        # separable kernel reduces to its vertical marginal there — so b̄_r = b̄ - ⟨b_*⟩(z) of Eq. (2.19).
+        # Against the unfiltered ρ_* it is not, which is the horizontal-limit convention noted below.
+        b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), ref_rho_sorted)
         ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(w_full, b_r,
                                                                gaussian_filter,
                                                                filter_dims=filtered_dimensions,
                                                                filtered_w=w_bar,
                                                                filtered_b=b_r_l)
 
-        # Resolved conversion w̄·b_rˡ, the filtered-scale half of the same split. It uses b_r_l, the
-        # *unfiltered* reference profile, exactly as the sub-filter half above does, so the two sum to
-        # filter(w·b_r) and the decomposition is exact. Using w̄·filter(b_r) here instead would leave a
-        # residual of w̄·[filter(b✶(z)) - b✶(z)] between the halves. This matches Oceanostics'
-        # `FilteredAvailablePotentialToKineticEnergyConversion`, which the simulation computes online.
+        # Resolved conversion w̄·b_rˡ, the filtered-scale half of the same split. It uses the same b_r_l as the
+        # sub-filter half above, measured against the resolved reservoir's reference (⟨ρ_*⟩, or ρ_* under
+        # --reference true), so the two halves sum to filter(w·b_r) and the decomposition is exact. Against
+        # ⟨ρ_*⟩, b_r_l is exactly filter(b_r). The simulation's online wb_rs is split the same way.
         wbar_b_r_l = (w_bar * b_r_l).rename("w̄·b_rˡ")
 
         # --- APE cross-scale transfer ---
-        # Read the online Π_A when the caller has it; that also skips the sort of the filtered density
-        # that Υˡ would otherwise need, which is the expensive half of this loop. Otherwise recompute
-        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ from the large-scale reference state z₀(ρ̄), passing the
-        # pre-sorted full-field state so the sort is not repeated per scale.
-        if online_pi_a is not None:
-            Π_A = online_pi_a[ℓ]
-        else:
-            ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
-            filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
-                                                                 rho_sorted=rho_sorted,
-                                                                 dz_sorted=dz_sorted,
-                                                                 n_workers=n_workers)
-            Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
-                                                  gaussian_filter, filter_dims=filtered_dimensions,
-                                                  filtered_density=ds_filt_ℓ.ρ̄,
-                                                  filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
+        # Π_A = -(filter(ρuᵢ) - ρ̄ūᵢ) · ∇Υˡ, with Υˡ from the filtered density's reference height z₀(ρ̄) looked up
+        # in ref_rho_sorted, using the pre-sorted full-field state so the sort is not repeated per scale.
+        ds_filt_ℓ = calculate_density_fields_from_buoyancy(ds_filt_ℓ, buoyancy_name="b̄", density_name="ρ̄")
+        filt_local_pes = local_potential_energies_timeseries(ds_filt_ℓ, density_name="ρ̄",
+                                                             rho_sorted=ref_rho_sorted,
+                                                             dz_sorted=dz_sorted,
+                                                             n_workers=n_workers)
+        Π_A = calculate_cross_scale_ape_flux(ds_full.ρ, ds_full["uᵢ"], filt_local_pes.upsilon,
+                                              gaussian_filter, filter_dims=filtered_dimensions,
+                                              filtered_density=ds_filt_ℓ.ρ̄,
+                                              filtered_velocity_vector=ds_filt_ℓ["ūᵢ"])
 
         int_Π_A                = integrate(Π_A, dV)
         int_ape_to_ke_exchange = integrate(ape_to_ke_exchange, dV)

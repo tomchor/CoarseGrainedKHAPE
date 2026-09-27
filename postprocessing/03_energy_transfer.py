@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import load_dataset_and_grid
+from src.aux00_utils import PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, reference_suffix, check_same_padded_grid
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
 
@@ -14,14 +14,20 @@ import argparse
 parser = argparse.ArgumentParser(description="Calculate cross-scale APE transfer (Π_A) and APE↔KE exchange terms (Π_K is computed online)")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--n-workers", type=int, default=18, help="Number of CPU workers for APE sorting (ThreadPoolExecutor)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--fixed-reference", action="store_true", default=False,
+                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
+parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
+                    help="Reference state the resolved scale is measured against. 'filtered' (default) uses the "
+                         "vertically filtered profile ⟨ρ_*⟩, valid for a kernel with vertical extent. 'true' uses the "
+                         "unfiltered ρ_*, the horizontal-filter limit: the formulation the pipeline used before, not "
+                         "its numbers, since integrals now exclude the z padding and Π_A is always computed offline.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PP_OUTPUT = REPO_ROOT / "postprocessing" / "output"
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 fixed_reference = args.fixed_reference
+filtered_reference = args.reference == "filtered"
 n_workers = args.n_workers
 #---
 
@@ -29,7 +35,9 @@ n_workers = args.n_workers
 print("\n" + "="*60)
 print("Loading data and grid...")
 t0 = time.time()
-ds = load_dataset_and_grid(filename)
+# Pad exactly as 01 did, so the sort and the budgets see the grid the fields were filtered on.
+_filtered_fn = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities.nc"))
+ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn, required=True))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
@@ -47,38 +55,23 @@ print(f"  Filter dimensions: x and z")
 
 t0 = time.time()
 ref_suffix = "_fixed_ref" if fixed_reference else ""
+out_suffix = ref_suffix + reference_suffix(args.reference)   # 02's sort is shared by both references; this output is not
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
+check_same_padded_grid(ds, ds_sorted, Path(sorted_density_filename).name)   # sorted on this padded grid?
 print(f"  Sorted density loaded from: {sorted_density_filename}  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Calculate cross-scale transfer terms
 print("\n" + "="*60)
 print("Calculating cross-scale transfer terms...")
-# Π_K (cross-scale KE transfer) is computed online by the simulation, so it is skipped here
-# (include_pi_k=False). Π_A is computed online too, but only usable for the time-varying reference:
-# it is measured against the reference state, and the online one is always the sort of the *current*
-# buoyancy, while --fixed-reference measures every other term against the frozen t=0 profile. So the
-# online field is read there, and recomputed offline here otherwise — the same split
-# `05_sfs_ape_budget.py` makes for ε_Aˢ. Reading it also skips the sort of the filtered density that
-# Υˡ needs, which is the expensive half of this step.
-def online_name(var, ℓ):
-    return f"{var}_ℓ{int(ℓ)}" if float(ℓ) == int(ℓ) else f"{var}_ℓ{ℓ}"
-
-# The online field is an optimisation, not a requirement: --save_sorted is off by default, so a
-# production run may simply not have it, and the offline path has to keep working. Fall back rather
-# than fail, and say which path was taken so a silent switch is visible in the log.
-online_pi_a = None
-if fixed_reference:
-    print("  Π_A: recomputing offline (fixed reference)")
-else:
-    missing = [ℓ for ℓ in filter_scales if online_name("Π_A", ℓ) not in ds]
-    if missing:
-        print(f"  Π_A: recomputing offline (no online field for ℓ={missing}; the simulation was run "
-              f"without --save_sorted, or with a different --filter_ls)")
-    else:
-        online_pi_a = {ℓ: ds[online_name("Π_A", ℓ)] for ℓ in filter_scales}
-        print("  Π_A: reading the online fields (time-varying reference)")
+# Π_A is built on the filtered reference profile ⟨ρ_*⟩, and that profile is exact only here: the
+# simulation still coarsens it onto a block-averaged column (see filtered_reference_decisions.md §3-§6).
+# Two different constructions cannot both feed one budget, so every reference-dependent term -- Π_A, ε_Aˢ,
+# Υ̃, L̃, S̃, Rˢ -- is computed offline against the one exact profile, and the simulation's versions are the
+# independent cross-check that inv08/inv09/inv10 exist to make. Π_K and ε_Kˢ are unaffected: they are built
+# from velocities alone and never touch the reference state, so 04 still reads them online.
+print(f"  Π_A: computing offline, against {'⟨ρ_*⟩, the FFT-filtered sorted profile' if filtered_reference else 'the unfiltered ρ_*'}")
 
 energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             ds_filt=ds_filt,
@@ -86,7 +79,8 @@ energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             dz_sorted=ds_sorted.dz_sorted,
                                             n_workers=n_workers,
                                             include_pi_k=False,
-                                            online_pi_a=online_pi_a)
+                                            filtered_reference=filtered_reference,
+                                            frozen_reference=fixed_reference)
 print("\nDone!")
 #---
 
@@ -94,7 +88,8 @@ print("\nDone!")
 print("\n" + "="*60)
 print("Saving results...")
 energy_transfer.attrs.update(ds.attrs)
-output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{ref_suffix}.nc"))
+energy_transfer.attrs["ape_reference"] = args.reference   # 05 checks this against its own --reference
+output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_energy_transfer{out_suffix}.nc"))
 with ProgressBar(minimum=5, dt=5):
     energy_transfer.to_netcdf(output_filename)
 print(f"Results saved to: {output_filename}")

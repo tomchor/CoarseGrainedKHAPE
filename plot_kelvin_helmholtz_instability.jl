@@ -92,6 +92,10 @@ end
 # drawn entirely from the simulation's own outputs — no offline pipeline. Runs only when the run was
 # made with --save_sorted, which is what puts the sub-filter APE fields and b_r in the 2D file.
 ds_nc = NCDataset(plot_filepath, "r")
+# The set of filter scales is discovered from the `wb_rs_ℓ<ℓ>` field names, so that one output decides
+# whether any animation is drawn at all: drop the 3D field from the 2D writer and `panel_ℓs` is empty and
+# every panels animation silently disappears, rather than one panel going missing. If the per-scale set
+# is ever trimmed, key this off a field the panels cannot do without (`E_as_ℓ<ℓ>`, say) first.
 panel_ℓs = sort([parse(Int, split(name, "_ℓ")[end]) for name in keys(ds_nc) if startswith(name, "wb_rs_ℓ") && !endswith(name, "_int")])
 
 if isempty(panel_ℓs)
@@ -114,6 +118,13 @@ else
         return v > 0 ? v : 1.0
     end
 
+    # Two panels here carry no sign, and a diverging colourmap is the right reading of both. τ(w, b_r) is
+    # a reversible exchange — the filtered/sub-filter separation of the conversion bounds neither half, so
+    # it swings through zero as the billow converts and restores — and E_as (S̃) is only non-negative where
+    # the ⟨b✶⟩ construction holds. Neither is a dissipation; blue is not an error.
+    #
+    # The τ panel's resolved half is measured against ⟨b✶⟩ like its neighbours (see `wb_rs` in
+    # kelvin_helmholtz_instability.jl), so it compares pointwise with the offline animation.
     for ℓ in panel_ℓs
         panel_names = ["ω"          "w"          "b"          "b_r";
                        "K_s_ℓ$ℓ"    "Π_K_ℓ$ℓ"    "ε_Ks_ℓ$ℓ"   "wb_rs_ℓ$ℓ";

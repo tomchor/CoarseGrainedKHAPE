@@ -28,6 +28,24 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 
 All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--filter-scales`, and `--n-workers`. Run any script with `--help` for its full argument list.
 
+### Scale decomposition (`--reference`)
+
+`03_energy_transfer.py`, `05_sfs_ape_budget.py` and `sweep2_energy_transfer.py` take `--reference {filtered,true}`, selecting the reference state the **resolved** reservoir is measured against:
+
+| Value | Reference | Valid for |
+|-------|-----------|-----------|
+| `filtered` (default) | the vertically filtered profile ⟨ρ_*⟩ | any kernel, including one with vertical extent |
+| `true` | the unfiltered ρ_* | horizontal kernels only (the `g_z = δ(z)` limit) |
+
+The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` is the earlier formulation, kept for comparison; it does not reproduce the earlier numbers, since every integral now excludes the z padding and `Π_A` and `ε_Aˢ` are computed offline. The simulation's online APE terms (`Π_A_ℓ<ℓ>`, `ε_As_ℓ<ℓ>` and the rest, under `--save_sorted`) are built against ⟨ρ_*⟩ too, on a coarse column; the budget computes every APE term offline under either value, and the online set is the validation cross-check. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
+
+`--reference true` tags the outputs of 03–06 and `sweep2` with `_trueref`, so both references can sit side by side; 05 refuses 03/04 output built against the other one. The plotting scripts take the same flag to read the tagged files. `00_get_budgets.sh` forwards the flag, including to 06:
+
+```bash
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference filtered
+bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference true
+```
+
 ## Setup
 
 Create the conda environment for Python post-processing:
@@ -52,6 +70,17 @@ Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files direc
 
 Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are optional and fall back to their defaults if omitted.
 
+### Environment
+
+The submit wrappers need two variables that belong to whoever submits, and two more move the output off the repository, for example to scratch. Set them in the login environment (e.g. `~/.bashrc`): the jobs run in a login shell, and PBS does not otherwise pass on the submitting shell's variables. Give absolute paths. No job script names an account, a mail address or a Python environment; PBS mails its reports to whoever submitted the job.
+
+| Variable | Default | Read by |
+|----------|---------|---------|
+| `KHAPE_ACCOUNT` | none, required | every submit wrapper, which charges each job to it with `qsub -A` |
+| `KHAPE_PYTHON` | none, required for post-processing | the wrappers, which pass it to every Python job (the path to your `py313` environment's `python`) |
+| `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
+| `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
+
 ### Run everything (simulation + post-processing + sweep, with optional validation and plots)
 
 ```bash
@@ -65,15 +94,17 @@ bash submit_all_pbs.sh NZ=1024
 bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 
 # Add the online-vs-offline validation and/or the final plots (independently toggleable)
-bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors
+bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors and --save_sorted
 bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_transfer
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
-Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting and sweep transfer jobs load the pre-sorted reference density from the preceding step.
+Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting job loads the frozen sorted density that `02` wrote, and the sweep transfer job builds its own frozen column (see Run sweep only).
+
+`SAVE_SORTED` defaults to `1`, so the simulation writes the sorted reference state and the online APE budget terms. The validation job (`inv06`–`inv10`) and the online panels animation use them; the offline budget does not, since `03` and `05` compute `Π_A` and `ε_Aˢ` offline against the exact ⟨ρ_*⟩. `SAVE_SORTED=0` gives smaller output and changes no budget number, and `VALIDATE=1` turns it back on.
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
-- `VALIDATE=1` runs the simulation with `--save_tensors` and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
+- `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
 - `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
 
 ### Run simulation only
@@ -97,7 +128,7 @@ resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor component
 are full 3D fields (off by default to keep production output lean) and are consumed only by the
 validation scripts in `postprocessing/validation/`.
 
-`SAVE_SORTED=1` passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
+`SAVE_SORTED` (default **1**) passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
 state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
 (`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
 the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It
@@ -157,11 +188,27 @@ bash submit_sweep.sh                          # default Nz=2048, FIXED_REF=0
 bash submit_sweep.sh NZ=4096
 bash submit_sweep.sh NZ=2048 FIXED_REF=1     # fixed-in-time reference profile
 bash submit_sweep.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs only once
+bash submit_sweep.sh NZ=2048 EXTENSION=odd   # the whole sweep with b oddly reflected past the walls
 ```
 
-`FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job.
+`submit_sweep.sh` refuses any argument it does not know, so a misspelled key cannot silently rerun the default sweep over the production files.
 
-When `FIXED_REF=1`, the transfer job loads the pre-sorted reference density from `_sorted_density_fixed_ref.nc` (produced by the budgeting pipeline). Run budgeting with `FIXED_REF=1` before submitting the sweep with `FIXED_REF=1`.
+#### Wall-extension test
+
+The manuscript leaves the extension of b and b✶ past the walls free (§2) and uses the wall values (§4). `EXTENSION=odd` reflects b oddly about the wall value instead; every other field keeps the wall value, so the comparison changes the buoyancy rule alone. Its files carry an `_odd` tag. `submit_extension_test.sh` (which submits `extension_test.pbs`) runs the odd rule at one scale, snapped to the nearest of the production sweep's 30, and `compare_extension.py` sets it against the production (edge) sweep:
+
+```bash
+cd postprocessing
+bash submit_extension_test.sh NZ=2048 SCALE=20                           # odd rule at l=20 only
+python compare_extension.py --filename output/khi_Nz2048_Ri0.10.nc --filter-scale 20
+python compare_extension.py --filename output/khi_Nz2048_Ri0.10.nc --all   # every scale, after EXTENSION=odd
+```
+
+A run over a subset of scales (`sweep1 --filter-scales`, as `extension_test.pbs` does) tags its files with the scales, e.g. `_sweep_l20_odd.nc`, so it never replaces a full sweep; `sweep2` takes the same `--filter-scales` to find it, and `compare_extension.py` prefers it for a single-scale comparison.
+
+`FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job. The transfer step writes only the volume integrals (`∫Π_K dV`, `∫Π_A dV`, ...), which is all the sweep plots read; `sweep2_energy_transfer.py --keep-fields` also writes the 4D fields, about 860 GB at Nz=2048.
+
+When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it sorts t=0 on the grid it loaded and broadcasts that row over the time axis. **The sweep does not need the budgeting pipeline to have run**, and does not read `_sorted_density_fixed_ref.nc`. It cannot: the column's z✶ are the padded grid's own heights, and the sweep pads to 4σ of its widest scale (ℓ=20) while `02_sort_density.py` pads to the budget scales — at Nz=2048, 2784 cells per side against 1024 — so the budgeting pipeline's column belongs to a different grid. Sorting t=0 costs one sort, and is bit-identical to `02`'s output whenever the two paddings do coincide.
 
 ## Running locally (without PBS)
 
@@ -184,14 +231,15 @@ Set `N_WORKERS` to control Dask parallelism (default 1): `N_WORKERS=4 bash 00_ge
 
 ## Tests
 
-The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and expects post-processing output for `khi_Nz512_Ri0.10` in `postprocessing/output/`.
+The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and expects the CI run, `khi_Nz1024_Ri0.10`, in `output/` with its post-processing output in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py`; change it there to test a different run.
 
 ```bash
 pytest tests/ -v -s                                  # time-varying reference (default)
 pytest tests/ -v -s --ref-suffix _fixed_ref          # fixed reference variant
+pytest tests/ -v -s --ref-suffix _trueref            # --reference true outputs
 ```
 
-CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=512) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.
+CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=1024) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 

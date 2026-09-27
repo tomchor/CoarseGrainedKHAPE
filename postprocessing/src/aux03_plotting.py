@@ -282,3 +282,33 @@ def plot_dataset_variables(ds, time_stride=None, figsize=None, **kwargs):
     return figures
 #---
 
+
+def collapse_time_pairs(ds, rtol=0.5):
+    """Keep one record per group of near-coincident times.
+
+    The simulation writes with `ConsecutiveIterations(TimeInterval(2))`, so output arrives in pairs a
+    single timestep apart: at Nz=2048 the gaps alternate ~0.007 and ~4.0, a 550:1 ratio. The data is fine
+    -- the two members differ by exactly the smooth evolution over that interval -- but `pcolormesh` puts
+    cell boundaries at the midpoints between coordinates, so each pair renders as one hairline row and one
+    full-height row, alternating up the panel. That banding is manufactured by the axis, not the flow.
+
+    Drops any record whose gap from the previous kept one is below `rtol` times the 75th-percentile gap.
+    The gaps are either about one timestep (within a pair) or about the output interval, so half the
+    upper-quartile gap separates them at any resolution; 0.1 did not on coarse runs, where one timestep
+    exceeds a tenth of the interval and whole pairs survived, double-weighting those times.
+    Scaled by an upper percentile, not the median: with paired output roughly half the gaps are the tiny
+    within-pair ones, so the median sits inside that group and the test never fires. With no pairing the
+    gaps are uniform, the threshold lands at `rtol` of them, and nothing is dropped. The pairs exist for
+    the online TimeDerivative terms, which the offline pipeline no longer reads.
+    """
+    import numpy as np
+    t = ds.time.values
+    if t.size < 3:
+        return ds
+    gaps = np.diff(t)
+    thresh = rtol * np.percentile(gaps, 75)
+    keep = [0]
+    for i in range(1, t.size):
+        if t[i] - t[keep[-1]] > thresh:
+            keep.append(i)
+    return ds.isel(time=keep) if len(keep) < t.size else ds
