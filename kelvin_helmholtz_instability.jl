@@ -5,20 +5,19 @@ using Printf
 using Random
 using ArgParse
 using CUDA: has_cuda_gpu
+
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Grids: topology, znode
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor,
-      SubFilterKineticEnergyEquation
+import Oceananigans.Utils: actuates_next_iteration
+
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
-import Oceananigans.Utils: actuates_next_iteration
-using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral,
-      VerticalSort, ProfileLookup
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
 using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
-      FilteredAvailablePotentialEnergyDissipationRate,
-      FilteredAvailablePotentialToKineticEnergyConversion
+      FilteredAvailablePotentialEnergyDissipationRate, FilteredAvailablePotentialToKineticEnergyConversion
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
