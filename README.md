@@ -206,16 +206,16 @@ Set `N_WORKERS` to control the offline pipeline's parallelism (default 1).
 
 ## Tests
 
-The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and the sign of the energies that have one, on the budget files `01_online_budgets.py` assembles. It expects the CI run, `khi_Nz1024_Ri0.10`, in `output/` with its budget files in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py` (`$KHAPE_TEST_STEM` overrides it).
+The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and the sign of the energies that have one, on the budget files `01_online_budgets.py` assembles. It expects the CI run, `khi_Nz512_Ri0.10`, in `output/` with its budget files in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py` (`$KHAPE_TEST_STEM` overrides it).
 
 ```bash
 pytest tests/ -v -s                                  # closure, positivity, the synthetic filter and Jensen tests (minutes)
-pytest tests/ -v -s --offline-check                  # + the offline pipeline as a cross-check (about an hour at Nz=1024)
+pytest tests/ -v -s --offline-check                  # + the offline pipeline as a cross-check (about an hour at Nz=1024, less at CI's Nz=512)
 ```
 
 `--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped.
 
-CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=1024) once, then two jobs in parallel: `test-online` (assemble → pytest → animation, minutes) and `test-offline-check` (the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
+CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=512) once, then two jobs in parallel: `test-online` (assemble → pytest → animation, minutes) and `test-offline-check` (the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 
