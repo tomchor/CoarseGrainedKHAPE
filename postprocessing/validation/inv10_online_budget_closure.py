@@ -45,7 +45,8 @@ parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Si
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
 parser.add_argument("--skip", type=int, default=2, help="Leading outputs to drop (default 2: the first ConsecutiveIterations pair)")
 parser.add_argument("--offline-stem", default=None,
-                    help="Stem of the offline budget files in postprocessing/output/, for a side-by-side residual")
+                    help="Stem of the offline pipeline's budget files in postprocessing/output/offline/ (written by "
+                         "offline/run_offline_budgets.sh), for a side-by-side residual")
 add_tolerance_arg(parser)
 args = parser.parse_args()
 set_tolerance(args.tolerance)
@@ -155,9 +156,9 @@ if args.offline_stem:
     OFFLINE = {"KE": ("sfs_ke_budget_integrated", "residual_K",
                       ["∫-∂ₜ SFS KE dV", "∫Π_K dV", "∫-ε_Kˢ dV", "∫(SFS APE->KE) dV"]),
                "APE": ("sfs_ape_budget_integrated", "residual_A",
-                       ["∫-∂ₜ SFS APE dV", "∫Π_A dV", "∫-ε_Aˢ dV", "∫(SFS KE->APE) dV", "∫R_s dV"])}
+                       ["∫-∂ₜ SFS APE dV", "∫Π_A dV", "∫-ε_Aˢ dV", "∫(SFS KE->APE) dV", "∫Rˢ dV"])}
     for name, (suffix, res_var, term_vars) in OFFLINE.items():
-        path = PP_OUTPUT / f"{args.offline_stem}_{suffix}.nc"
+        path = PP_OUTPUT / "offline" / f"{args.offline_stem}_{suffix}.nc"
         if not path.exists():
             print(f"  {name}: offline file not found ({path.name}), skipping")
             continue

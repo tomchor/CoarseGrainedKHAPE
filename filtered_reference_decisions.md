@@ -307,3 +307,35 @@ irrelevant at Nz=1024.
 vs FFT), by 17× (the sweep's per-unit-ℓ cost), and in the opposite direction when "infeasible" turned out
 to be a few node-hours under dask. Timing claims in this project should be measured, not derived, and a
 projection from a single-core laptop measurement to an 18-worker Casper node is worth nothing.
+
+## 9. The online set became the product, and the offline pipeline the check
+
+`2026-09-28`. §6 said the online ⟨b✶⟩ (coarse column) and the offline one (exact FFT) were two
+constructions that could not both feed one budget, so every reference-dependent term was computed offline
+and the online set was the cross-check. Measured on the Nz=1024, Re=524 run of 2026-09-26, against the
+offline files of the same run (physical domain, upper record of each output pair):
+
+| term | rms(on−off)/rms(off), fields | integrals |
+|---|---|---|
+| S̃ | 1e-5 from t ≈ 12 on (1e-3 at t = 2, where S̃ is a 7% residual of two ~4e-6 quantities) | 5 figures |
+| Rˢ | 2e-4 | 2e-4 |
+| τ(w, b_r) | 1e-3 (ℓ=1), 1e-4 (ℓ=7) | 4e-7 |
+| ε_Aˢ | 4e-3 to 6e-3 | 0.5% over the run, 2.7% at single records |
+| Π_A | 1e-3 to 2e-2 | 2e-4 |
+| Kˢ, ∂ₜKˢ | 2e-4, 4e-4 | 3e-3 |
+
+The two panels animations are indistinguishable frame for frame, including the negative lobes S̃ has in
+both pipelines during the small-amplitude phase (t ≲ 6 at ℓ=1: minimum −0.73 of that record's rms at
+t = 2, |values| ~2e-7 against a developed rms of 2e-3), which are a property of S̃ = Ē_A − L̃ under an x–z
+filter and not of either implementation. The negative SFS APE seen earlier was the unfiltered-reference
+remainder both pipelines produced before PR #68 (`ed2eb38`; online in `f447807`).
+
+So the split of §6 is closed the other way round: **the online set is the budget** and the offline pipeline
+is the test. `postprocessing/01_online_budgets.py` reads the online terms into the budget files, every term
+is written unconditionally (`--save_sorted` now gates only the validation-only sorts), and the offline
+pipeline moved to `postprocessing/offline/`, where `pytest --offline-check` runs it and compares each term at
+tolerances of about three times the numbers above (`tests/test_offline_check.py`). The coarse column stays,
+since its measured cost is below every one of those differences; porting the FFT online remains possible
+(§6) and would remove the last construction difference, but nothing now depends on it. The
+`--fixed-reference` budget variant and the `--reference true` comparison were dropped with the offline
+product; the sweep keeps its own frozen column.

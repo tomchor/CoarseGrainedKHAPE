@@ -4,13 +4,18 @@ import os
 from pathlib import Path
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on the path, for `src.*`
 from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter,
-                             reference_suffix, check_same_padded_grid)
+                             check_same_padded_grid)
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, calculate_b_r, calculate_b_r_simple,
                                    calculate_ape_to_ke_exchange_term, filtered_reference_profile)
 from src.aux02_ke_functions import (
     calculate_sfs_stress_tensor,
     calculate_sfs_ke_tendency,
+    calculate_strain_tensor,
+    calculate_cross_scale_ke_flux,
+    calculate_sfs_ke_dissipation,
 )
 #---
 
@@ -18,18 +23,14 @@ from src.aux02_ke_functions import (
 import argparse
 parser = argparse.ArgumentParser(description="Calculate SFS KE budget from Kelvin-Helmholtz simulation output")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load the fixed-in-time reference profile (produced by 01 with --fixed-reference)")
-parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
-                    help="Reference state the resolved scale is measured against, in the APE->KE conversion term. "
-                         "Must match what 03 and 05 are run with: 05 reads this script's exchange term, so a mismatch "
-                         "puts the conversion on a different reference from the rest of the APE budget.")
+parser.add_argument("--recompute-online-terms", action="store_true", default=False,
+                    help="Recompute Π_K and ε_Kˢ offline (strain of the filtered and full flow, scipy filter) instead of reading "
+                         "the simulation's online fields, so that every term of the budget is an independent offline "
+                         "calculation. This is what the CI cross-check runs with.")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-fixed_reference = args.fixed_reference
-filtered_reference = args.reference == "filtered"
 #---
 
 #+++ Load data and grid
@@ -55,9 +56,7 @@ tensor_dimensions = ("x_caa", "z_aac")
 ds = condense_uw_velocities(ds, indices=[1, 3])
 ds_full = ds[["b", "dV", "dV_physical", "uᵢ"]].copy()
 
-ref_suffix = "_fixed_ref" if fixed_reference else ""
-out_suffix = ref_suffix + reference_suffix(args.reference)   # 02's sort is shared by both references; this output is not
-sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sorted_density{ref_suffix}.nc"))
+sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
 ds_sorted = xr.open_dataset(sorted_density_filename, decode_times=False).chunk({"time": 1})
 check_same_padded_grid(ds, ds_sorted, Path(sorted_density_filename).name)   # sorted on this padded grid?
 
@@ -110,8 +109,7 @@ for ℓ in filter_scales:
     # vertical marginal there — which makes the sub-filter half τ(w, b_r) of Eq. (2.21) and the resolved
     # half w̄b̄_r of Eq. (2.19). Against the unfiltered ρ_* it is not, which is the horizontal-limit split.
     # This term is read back by 05, so the two must be run with the same --reference.
-    ref_rho_sorted = (filtered_reference_profile(ds_sorted.rho_sorted, ds_sorted.dz_sorted, ℓ, frozen=fixed_reference)
-                      if filtered_reference else ds_sorted.rho_sorted)
+    ref_rho_sorted = filtered_reference_profile(ds_sorted.rho_sorted, ds_sorted.dz_sorted, ℓ)
     b_r_l = calculate_b_r(gaussian_filter.apply(ds_full.ρ, dims=filtered_dimensions), ref_rho_sorted)
     ape_to_ke_exchange = calculate_ape_to_ke_exchange_term(
         ds_full["uᵢ"].sel(i=3), # full w
@@ -128,14 +126,24 @@ for ℓ in filter_scales:
     int_dKE_dt             = integrate(dKE_dt, dV)
     int_ape_to_ke_exchange = integrate(ape_to_ke_exchange.reindex(time=dKE_dt.time), dV)
 
-    # Π_K and ε_Kˢ from the online sim output, integrated on the budget (padded) grid so they are
-    # consistent with the other terms (the padding region is ≈0 for both).
-    for var in ("Π_K", "ε_Ks"):
-        if online_name(var, ℓ) not in ds:
-            raise KeyError(f"Online field '{online_name(var, ℓ)}' not in sim output; the budget "
-                           f"filter scales must match the simulation's online filter_ℓs (got ℓ={ℓ}).")
-    Π_K_ℓ              = ds[online_name("Π_K", ℓ)]
-    sfs_ke_dissipation = ds[online_name("ε_Ks", ℓ)]
+    if args.recompute_online_terms:
+        # Every term offline: Π_K = -τⁱʲ S̄ⁱʲ from the stress tensor above and the strain of the filtered flow,
+        # ε_Kˢ = 2ν Σ[filter(SⁱʲSⁱʲ) - filter(Sⁱʲ)²] from the strain of the full flow (the expressions inv02 and
+        # inv05 compare against the online fields).
+        print("  Π_K and ε_Kˢ recomputed offline...")
+        S̄ = calculate_strain_tensor(ds_filt_ℓ["ūᵢ"], dimensions=tensor_dimensions)
+        Π_K_ℓ = calculate_cross_scale_ke_flux(sfs_stress_tensor, S̄)
+        S = calculate_strain_tensor(ds_full["uᵢ"], dimensions=tensor_dimensions)
+        sfs_ke_dissipation = calculate_sfs_ke_dissipation(S, ds.ν, gaussian_filter, filter_dims=filtered_dimensions)
+    else:
+        # Π_K and ε_Kˢ from the online output. They sit on the padded grid as edge copies past the walls, which
+        # carry no weight: `dV` is `dV_physical`, zero in the padding.
+        for var in ("Π_K", "ε_Ks"):
+            if online_name(var, ℓ) not in ds:
+                raise KeyError(f"Online field '{online_name(var, ℓ)}' not in sim output; the budget "
+                               f"filter scales must match the simulation's online filter_ℓs (got ℓ={ℓ}).")
+        Π_K_ℓ              = ds[online_name("Π_K", ℓ)]
+        sfs_ke_dissipation = ds[online_name("ε_Ks", ℓ)]
     int_Π_K_ℓ              = integrate(Π_K_ℓ, dV)
     int_sfs_ke_dissipation = integrate(sfs_ke_dissipation, dV)
     residual  = (-int_dKE_dt + int_Π_K_ℓ.reindex(time=dKE_dt.time) + int_ape_to_ke_exchange
@@ -163,7 +171,7 @@ sfs_ke_budget_terms = xr.concat(budget_list, dim=xr.DataArray(filter_scales,
                                                               dims="filter_scale",
                                                               name="filter_scale"))
 sfs_ke_budget_terms.attrs.update(ds.attrs)
-sfs_ke_budget_terms.attrs["ape_reference"] = args.reference   # 05 checks this against its own --reference
+sfs_ke_budget_terms.attrs["ape_reference"] = "filtered"   # 05 checks this
 print("\nDone!")
 #---
 
@@ -174,8 +182,8 @@ print("Saving results...")
 integrated_vars = [v for v in sfs_ke_budget_terms.data_vars if v.startswith("∫") or "residual" in v]
 local_vars      = [v for v in sfs_ke_budget_terms.data_vars if v not in integrated_vars]
 
-fields_filename     = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_fields{out_suffix}.nc"))
-integrated_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{out_suffix}.nc"))
+fields_filename     = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_fields.nc"))
+integrated_filename = str(PP_OUTPUT / (Path(filename).stem + "_sfs_ke_budget_integrated.nc"))
 
 print("  Saving local fields...")
 with ProgressBar(minimum=5, dt=5):

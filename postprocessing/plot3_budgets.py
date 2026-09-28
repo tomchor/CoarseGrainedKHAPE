@@ -5,7 +5,7 @@ from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from src.aux00_utils import PP_OUTPUT, reference_suffix
+from src.aux00_utils import PP_OUTPUT
 from src.aux03_plotting import budget_colors, run_label
 #---
 
@@ -14,9 +14,6 @@ import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
                     help="Path to simulation NetCDF file (used to derive budget filenames)")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
-                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
 parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive",
                     help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
@@ -28,8 +25,7 @@ FIGURES   = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
-fixed_reference = args.fixed_reference
-ref_suffix = ("_fixed_ref" if fixed_reference else "") + reference_suffix(args.reference)   # adds _trueref for --reference true
+ref_suffix = ""
 #---
 
 #+++ Load budget data
@@ -127,8 +123,6 @@ label = run_label(ke_budget.attrs)
 info_parts = []
 if label:
     info_parts.append(label)
-if fixed_reference:
-    info_parts.append("(fixed reference)")
 if info_parts:
     axes[0, 0].text(0.98, 0.97, "  ".join(info_parts), transform=axes[0, 0].transAxes, fontsize=11, ha="right", va="top",
                     bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))

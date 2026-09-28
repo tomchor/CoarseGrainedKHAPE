@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid, reference_suffix
+from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -21,8 +21,6 @@ parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="P
 parser.add_argument("--time", type=float, default=50, help="Target time for snapshot (nearest available will be used)")
 parser.add_argument("--filter-scale", type=float, default=1.0, help="Target filter length scale (nearest available will be used)")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
-parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
-                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -31,7 +29,7 @@ FIGURES   = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
-ref_suffix = reference_suffix(args.reference)   # adds _trueref for --reference true
+ref_suffix = ""
 #---
 
 #+++ Load datasets

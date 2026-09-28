@@ -1,4 +1,5 @@
 import os
+import pytest
 import xarray as xr
 from pathlib import Path
 
@@ -10,29 +11,46 @@ from pathlib import Path
 # kelvin_helmholtz_instability.jl), so the tests look where those wrote.
 REPO_ROOT  = Path(__file__).resolve().parent.parent
 PP_OUTPUT  = Path(os.environ.get("KHAPE_PP_OUTPUT") or REPO_ROOT / "postprocessing" / "output")
-STEM       = "khi_Nz1024_Ri0.10"
+STEM       = os.environ.get("KHAPE_TEST_STEM", "khi_Nz1024_Ri0.10")   # $KHAPE_TEST_STEM points the suite at another run
 SIM_OUTPUT = Path(os.environ.get("KHAPE_OUTPUT_DIR") or REPO_ROOT / "output") / f"{STEM}.nc"
 #---
 
 
+# The budgets the tests read are assembled from the simulation's online terms (postprocessing/01_online_budgets.py).
+# `--offline-check` additionally runs the offline pipeline (postprocessing/offline/) and compares every term
+# against them (tests/test_offline_check.py), and runs the online-vs-offline validation scripts
+# (tests/test_online_vs_offline.py). Off by default: it costs about an hour at the CI resolution, and CI
+# runs it in its own job.
+OFFLINE_PP_OUTPUT = PP_OUTPUT / "offline"   # where offline/run_offline_budgets.sh writes
+
+
 def pytest_addoption(parser):
     parser.addoption(
-        "--ref-suffix",
-        default="",
-        help="Suffix appended to postprocessing output filenames (e.g. '_fixed_ref')",
+        "--offline-check",
+        action="store_true",
+        default=False,
+        help="Run the offline budget pipeline and check that it reproduces the online budgets (slow; CI's offline-check job)",
     )
 
 
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "ref_suffix: parameterise tests by reference-profile suffix",
+        "offline_check: needs --offline-check (runs the offline pipeline, about an hour at the CI resolution)",
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--offline-check"):
+        return
+    skip = pytest.mark.skip(reason="needs --offline-check")
+    for item in items:
+        if "offline_check" in item.keywords:
+            item.add_marker(skip)
 
 
 def pytest_generate_tests(metafunc):
     if "l_idx" in metafunc.fixturenames:
-        ref_suffix = metafunc.config.getoption("--ref-suffix")
-        path = PP_OUTPUT / f"{STEM}_sfs_ke_budget_integrated{ref_suffix}.nc"
+        path = PP_OUTPUT / f"{STEM}_sfs_ke_budget_integrated.nc"
         ds = xr.open_dataset(path, decode_timedelta=False)
         metafunc.parametrize("l_idx", range(len(ds.filter_scale)))

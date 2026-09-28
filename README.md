@@ -5,9 +5,7 @@ Computes Available Potential Energy (APE) from Kelvin-Helmholtz instability simu
 ## Pipeline overview
 
 1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU and writes NetCDF output
-2. **Post-processing** — filters fields, sorts density, computes energy transfer and SFS budgets, split into two jobs:
-   - `postprocessing/budgeting_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
-   - `postprocessing/budgeting.pbs` — sorts density, computes all budget terms and plots (per `FIXED_REF` variant)
+2. **Post-processing** — `postprocessing/budgeting.pbs` assembles the SFS KE and APE budgets from the terms the simulation computed online and plots them (the offline computation of those terms lives in `postprocessing/offline/` and runs only as a CI cross-check)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
    - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant)
@@ -18,33 +16,22 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 
 | Prefix | Purpose |
 |--------|---------|
-| `01_…` – `06_…` | **Numbered post-processing pipeline.** Sequentially filter fields, sort density, compute cross-scale energy transfer, and compute SFS KE/APE budgets from the raw simulation output. Each step reads the previous step's output. |
+| `01_online_budgets.py`, `02_plot_budgets.py` | **Budget pipeline.** Every term of the SFS KE and APE budgets is computed by the simulation itself; `01` assembles the budget files from those online terms (at the simulation's own filter scales, ℓ = 1 and 7 by default) and `02` plots them. |
+| `offline/01_…` – `offline/05_…` | **Offline budget pipeline, kept as a test.** The independent Python implementation of every term (scipy filtering on a z-padded domain, a numpy density sort, an FFT-filtered reference profile). It is no longer a product: `offline/run_offline_budgets.sh` runs it into `output/offline/` and `pytest --offline-check` compares each term against the assembled online budgets (see [Tests](#tests)). |
 | `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
 | `plot2_…`, `plot3_…`, `plot4_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, SFS KE/APE budget time series, local-field snapshot panels). Output goes to `figures/`. |
 | `anim1_…`, `S1_…`, `S2_…`, `S3_…` | **Supplementary material.** Animations (`anim*`, requires `ffmpeg`) and supplementary figures (`S1`–`S3`: Π hovmöllers, snapshot panels, sweep-spectrum figures). |
 | `aux*` (under `src/`) | Shared utilities reused across the pipeline (data loading, Gaussian filtering, spatial derivatives, PE/KE budget terms, plotting helpers). |
-| `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the numbered pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
+| `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the budget pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
 | `*.pbs`, `submit_*.sh` | PBS job scripts and their wrappers (see [Submitting jobs](#submitting-jobs)). |
 
-All Python scripts accept `--filename`, and most accept `--fixed-reference`, `--filter-scales`, and `--n-workers`. Run any script with `--help` for its full argument list.
+All Python scripts accept `--filename`, and most accept `--filter-scales` and `--n-workers`; the sweep scripts also take `--fixed-reference`. Run any script with `--help` for its full argument list.
 
-### Scale decomposition (`--reference`)
+### Where the budgets come from
 
-`03_energy_transfer.py`, `05_sfs_ape_budget.py` and `sweep2_energy_transfer.py` take `--reference {filtered,true}`, selecting the reference state the **resolved** reservoir is measured against:
+The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` reads the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that the plotting scripts and the tests consume, on the simulation's own grid, at the upper record of each consecutive-iteration output pair. See CLAUDE.md for the full account.
 
-| Value | Reference | Valid for |
-|-------|-----------|-----------|
-| `filtered` (default) | the vertically filtered profile ⟨ρ_*⟩ | any kernel, including one with vertical extent |
-| `true` | the unfiltered ρ_* | horizontal kernels only (the `g_z = δ(z)` limit) |
-
-The pipeline filters in x **and** z, so `filtered` is the correct choice: against the unfiltered ρ_* the resolved reservoir does not vanish for a fluid at rest and the sub-filter remainder goes negative over much of the domain. `true` is the earlier formulation, kept for comparison; it does not reproduce the earlier numbers, since every integral now excludes the z padding and `Π_A` and `ε_Aˢ` are computed offline. The simulation's online APE terms (`Π_A_ℓ<ℓ>`, `ε_As_ℓ<ℓ>` and the rest, under `--save_sorted`) are built against ⟨ρ_*⟩ too, on a coarse column; the budget computes every APE term offline under either value, and the online set is the validation cross-check. The z padding is also sized to the widest filter scale in use, rather than fixed at half the domain. See CLAUDE.md for the full account.
-
-`--reference true` tags the outputs of 03–06 and `sweep2` with `_trueref`, so both references can sit side by side; 05 refuses 03/04 output built against the other one. The plotting scripts take the same flag to read the tagged files. `00_get_budgets.sh` forwards the flag, including to 06:
-
-```bash
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference filtered
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --reference true
-```
+The offline pipeline that used to compute these terms (`postprocessing/offline/`) recomputes every one of them independently and runs only as the CI cross-check. There is no fixed-in-time reference variant of the budgets; the sweep keeps its own (`sweep2 --fixed-reference`).
 
 ## Setup
 
@@ -90,7 +77,7 @@ bash submit_all_pbs.sh
 # Custom resolution
 bash submit_all_pbs.sh NZ=1024
 
-# Custom resolution with fixed-in-time reference profile
+# Fixed-in-time reference profile for the sweep transfer (the budgets have no such variant)
 bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 
 # Add the online-vs-offline validation and/or the final plots (independently toggleable)
@@ -99,9 +86,9 @@ bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_t
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
-Jobs are chained: `budgeting_filter` starts after simulation, `budgeting` starts after `budgeting_filter`, `sweep_filter` starts after `budgeting`, and `sweep_transfer` starts after `sweep_filter`. When `FIXED_REF=1`, the budgeting job loads the frozen sorted density that `02` wrote, and the sweep transfer job builds its own frozen column (see Run sweep only).
+Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter`. `budgeting` assembles and plots the budgets from the simulation's online terms (minutes); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
 
-`SAVE_SORTED` defaults to `1`, so the simulation writes the sorted reference state and the online APE budget terms. The validation job (`inv06`–`inv10`) and the online panels animation use them; the offline budget does not, since `03` and `05` compute `Π_A` and `ε_Aˢ` offline against the exact ⟨ρ_*⟩. `SAVE_SORTED=0` gives smaller output and changes no budget number, and `VALIDATE=1` turns it back on.
+`SAVE_SORTED` defaults to `1`, so the simulation also writes the validation-only view of the sorted reference state (the two model-grid z✶ methods, the sorted column, ∫E_b) that `inv06` and `inv07` compare against the offline sort. Every budget term is written regardless, so `SAVE_SORTED=0` gives smaller output and changes no budget number; `VALIDATE=1` turns it back on.
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
@@ -119,7 +106,7 @@ bash submit_simulation.sh NZ=2048
 # Also write the per-scale strain/stress tensor components (for online-vs-offline validation)
 bash submit_simulation.sh NZ=2048 SAVE_TENSORS=1
 
-# Also write the Winters (1995) sorted reference state (for online-vs-offline validation)
+# Also write the validation-only sorted reference state (for inv06/inv07)
 bash submit_simulation.sh NZ=2048 SAVE_SORTED=1
 ```
 
@@ -129,18 +116,13 @@ are full 3D fields (off by default to keep production output lean) and are consu
 validation scripts in `postprocessing/validation/`.
 
 `SAVE_SORTED` (default **1**) passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
-state under each of the three Oceanostics sorting methods: the reference height `z✶_3dsort`
-(`ThreeDimensionalSort`) and `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, and
-the sorted column `z✶_1dsort` / `b✶_1dsort` (`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis. It
-also emits the online local available potential energy `E_a` (and its integral `∫E_a`) and the
-sub-filter APE dissipation `ε_As_ℓ<ℓ>` at each online filter scale, which `05_sfs_ape_budget.py` reads
-back instead of recomputing. All of these
-go into the main output file, since one `NetCDFWriter` holds both grids; the resulting per-grid
-dimension suffixing is undone at load time by the post-processing loader, so the rest of the pipeline
-is unaffected. This is the online counterpart of what `02_sort_density.py` and the offline APE
-computation produce; `inv06_compare_sorted_profiles.py`, `inv07_compare_local_ape.py` and
-`inv08_compare_sfs_ape_dissipation.py` compare the two. Each method carries its own full-domain sort per
-output, so this is off by default.
+state in the forms only the validation reads: the reference height `z✶_3dsort` (`ThreeDimensionalSort`) and
+`z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, the sorted column `z✶_1dsort` / `b✶_1dsort`
+(`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis, and ∫E_b. The column itself is built and used by every
+budget term whether or not it is written; the flag decides only whether the two extra model-grid sorts run and
+whether the column goes to the file. All of these go into the main output file, since one `NetCDFWriter` holds
+both grids; the resulting per-grid dimension suffixing is undone at load time by the post-processing loader.
+`inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare them against the offline sort.
 
 ### Run a simulation + online-vs-offline validation
 
@@ -156,27 +138,18 @@ runs after it (`afterok`). The validation job recomputes the filtered fields, cr
 and the sub-filter APE dissipation ε_Aˢ offline and
 compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv09`),
 writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
-`inv06`, `inv07`, `inv08` and `inv09` need a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
+`inv06` needs a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
 
 ### Run post-processing only
 
-The budgeting pipeline is split into two PBS jobs to avoid race conditions when running both `FIXED_REF` variants simultaneously: the field-filtering step (`01`) runs once and is shared, while the density sort and budget steps (`02`–`06`) run separately per variant.
-
 ```bash
 cd postprocessing
-bash submit_budgeting.sh                          # default Nz=2048, FIXED_REF=0
+bash submit_budgeting.sh                          # default Nz=2048
 bash submit_budgeting.sh NZ=1024
-bash submit_budgeting.sh NZ=2048 FIXED_REF=1     # fixed-in-time reference profile
-bash submit_budgeting.sh NZ=2048 FIXED_REF=both  # submit both variants; filter runs only once
 ```
 
-`FIXED_REF=both` submits the filter job once and two budget jobs (one for each variant) that both depend on the single filter job.
-
-The `FIXED_REF` argument controls how the reference (sorted) density profile is computed:
-- `0` (default) — reference profile is recomputed at every time step
-- `1` — reference profile is fixed to the `t=0` density field
-
-Output files are suffixed with `_fixed_ref` when `FIXED_REF=1`.
+One small job: `01_online_budgets.py` assembles the four budget files from the simulation's online terms and
+`02_plot_budgets.py` plots them.
 
 ### Run sweep only
 
@@ -218,28 +191,31 @@ For development on a workstation (no PBS scheduler), run the simulation and post
 # Julia simulation (CPU, small grid)
 julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70
 
-# Numbered post-processing pipeline (01–06) on an existing NetCDF file
+# Budgets (assembled from the online terms) and their plots, for an existing NetCDF file
 cd postprocessing
 bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
-bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7 --fixed-reference
+
+# The offline pipeline, as the cross-check runs it (writes to postprocessing/output/offline/)
+N_WORKERS=4 bash offline/run_offline_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
 
 # Sweep pipeline (sweep1–sweep3)
 bash inv00_get_sweep.sh output/khi_Nz512_Ri0.10.nc
 ```
 
-Set `N_WORKERS` to control Dask parallelism (default 1): `N_WORKERS=4 bash 00_get_budgets.sh ...`.
+Set `N_WORKERS` to control the offline pipeline's parallelism (default 1).
 
 ## Tests
 
-The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and expects the CI run, `khi_Nz1024_Ri0.10`, in `output/` with its post-processing output in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py`; change it there to test a different run.
+The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and the sign of the energies that have one, on the budget files `01_online_budgets.py` assembles. It expects the CI run, `khi_Nz1024_Ri0.10`, in `output/` with its budget files in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py` (`$KHAPE_TEST_STEM` overrides it).
 
 ```bash
-pytest tests/ -v -s                                  # time-varying reference (default)
-pytest tests/ -v -s --ref-suffix _fixed_ref          # fixed reference variant
-pytest tests/ -v -s --ref-suffix _trueref            # --reference true outputs
+pytest tests/ -v -s                                  # closure, positivity, the synthetic filter and Jensen tests (minutes)
+pytest tests/ -v -s --offline-check                  # + the offline pipeline as a cross-check (about an hour at Nz=1024)
 ```
 
-CI (`.github/workflows/test.yml`) runs the full chain — Julia simulation (Nz=1024) → post-processing (both reference variants in parallel) → pytest → animation — on push to `main` and on PR comments starting with `test`.
+`--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped.
+
+CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=1024) once, then two jobs in parallel: `test-online` (assemble → pytest → animation, minutes) and `test-offline-check` (the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 
@@ -247,4 +223,4 @@ All job logs are written to the `logs/` subdirectory next to the submit script:
 - `logs/<job_name>.log` — PBS stdout/stderr (written by PBS after job ends)
 - `logs/<job_name>.out` — Python script output (written live via `tee`)
 
-Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10_fixed_ref`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref`.
+Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref` (the `_fixed_ref` tag exists only for the sweep).
