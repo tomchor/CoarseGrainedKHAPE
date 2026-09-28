@@ -49,8 +49,11 @@ APE_TOL = 1e-3
 KE_TOL = 1e-8
 
 # SFS APE under the filtered reference: S̃ inherits the same nearest-density lookup as Eₐ, on both of the
-# two profiles it now involves, so it is held to the same bound rather than to roundoff.
-SFS_APE_TOL = APE_TOL
+# two profiles it now involves, so it is held to a lookup-sized bound rather than to roundoff. The dip below
+# zero shrinks with the model resolution, not with the profile's: measured min/rms at ℓ=1 is -9.4e-3 at Nz=128,
+# -1.14e-3 at Nz=512 (CI) and -4.8e-5 at Nz=1024. 3e-3 clears the CI resolution and is still two decades below
+# the -0.7 a construction error gives (the unfiltered remainder, before PR #68).
+SFS_APE_TOL = 3e-3
 #---
 
 #+++ Helpers

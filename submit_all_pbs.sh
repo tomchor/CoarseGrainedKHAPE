@@ -34,6 +34,12 @@ esac; done
 # The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
 : "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
 : "${KHAPE_PYTHON:?set KHAPE_PYTHON to the python of your py313 environment; see the README, Environment}"
+# Optional output redirection: $KHAPE_OUTPUT_DIR (simulation output) and $KHAPE_PP_OUTPUT (post-processing output)
+# are forwarded to every job when set, so a run can write beside the production output instead of over it. The
+# PBS scripts, kelvin_helmholtz_instability.jl and src/aux00_utils.py all read them; give absolute paths.
+REDIRECT=""
+[ -n "${KHAPE_OUTPUT_DIR:-}" ] && REDIRECT="$REDIRECT,KHAPE_OUTPUT_DIR=$KHAPE_OUTPUT_DIR"
+[ -n "${KHAPE_PP_OUTPUT:-}" ]  && REDIRECT="$REDIRECT,KHAPE_PP_OUTPUT=$KHAPE_PP_OUTPUT"
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 # --save_sorted writes the validation-only sorted-state fields (the two model-grid z✶ methods, the column,
 # ∫E_b) that inv06-inv07 read. Every budget term is written regardless, so SAVE_SORTED=0 gives smaller
@@ -46,7 +52,7 @@ SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
                -A "$KHAPE_ACCOUNT" \
                -o logs/kelvin_helmholtz_${NZ}.log \
                -e logs/kelvin_helmholtz_${NZ}.log \
-               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED simulation.pbs)
+               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED$REDIRECT simulation.pbs)
 echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS, save_sorted=$SAVE_SORTED): $SIM_JOB"
 
 # Optional validation — parallel branch, runs after the simulation succeeds
@@ -58,7 +64,7 @@ if [ "$VALIDATE" = "1" ]; then
                    -A "$KHAPE_ACCOUNT" \
                    -o "logs/${VAL_NAME}.log" \
                    -e "logs/${VAL_NAME}.log" \
-                   -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+                   -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
                    -W depend=afterok:$SIM_JOB \
                    validation.pbs)
     echo "Submitted validation (depends on $SIM_JOB): $VAL_JOB"
@@ -72,7 +78,7 @@ PP_JOB=$(qsub -N "$PP_NAME" \
               -A "$KHAPE_ACCOUNT" \
               -o "logs/${PP_NAME}.log" \
               -e "logs/${PP_NAME}.log" \
-              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
               -W depend=afterok:$SIM_JOB \
               budgeting.pbs)
 echo "Submitted budgeting (depends on $SIM_JOB): $PP_JOB"
@@ -82,7 +88,7 @@ SF_JOB=$(qsub -N "$SF_NAME" \
               -A "$KHAPE_ACCOUNT" \
               -o "logs/${SF_NAME}.log" \
               -e "logs/${SF_NAME}.log" \
-              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
               -W depend=afterok:$PP_JOB \
               sweep_filter.pbs)
 echo "Submitted sweep filter (depends on $PP_JOB): $SF_JOB"
@@ -92,7 +98,7 @@ ST_JOB=$(qsub -N "$ST_NAME" \
               -A "$KHAPE_ACCOUNT" \
               -o "logs/${ST_NAME}.log" \
               -e "logs/${ST_NAME}.log" \
-              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON \
+              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
               -W depend=afterok:$SF_JOB \
               sweep_transfer.pbs)
 echo "Submitted sweep transfer (depends on $SF_JOB): $ST_JOB"
@@ -104,7 +110,7 @@ if [ "$PLOTS" = "1" ]; then
                      -A "$KHAPE_ACCOUNT" \
                      -o "logs/${PLOTS_NAME}.log" \
                      -e "logs/${PLOTS_NAME}.log" \
-                     -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+                     -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
                      -W depend=afterok:$ST_JOB \
                      plots.pbs)
     echo "Submitted final plots (depends on $ST_JOB): $PLOTS_JOB"

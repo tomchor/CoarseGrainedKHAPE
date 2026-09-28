@@ -61,7 +61,7 @@ FIELD_TOL = {
     "Eaˢ(ρ, z)":            1e-4,   # S̃: measured 1e-5 from t=12 on
     "∂ₜ SFS APE":           1e-3,
     "Π_A":                  5e-2,   # measured 1e-2 to 2e-2
-    "ε_Aˢ":                 2e-2,   # measured 4e-3 to 6e-3
+    "ε_Aˢ":                 5e-2,   # 4e-3 to 6e-3 at Nz=1024, 2.1e-2 at CI's Nz=512 (centred vs face-paired gradients, grows with Δz)
     "SFS KE->APE exchange": 3e-3,   # -τ(w,b_r)
     "Rˢ":                   1e-3,   # measured 2e-4
 }

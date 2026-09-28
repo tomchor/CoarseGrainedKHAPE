@@ -158,7 +158,7 @@ def sim_output():
     return xr.open_dataset(SIM_OUTPUT, decode_times=False, chunks={"time": 1})
 
 
-ONLINE_SFS_APE_TOL = 1e-3   # as test_positivity.py's APE_TOL; see the note above
+ONLINE_SFS_APE_TOL = 3e-3   # as test_positivity.py's SFS_APE_TOL: -1.14e-3 measured at CI's Nz=512, -4.8e-5 at Nz=1024
 
 
 @pytest.mark.parametrize("ell", ONLINE_FILTER_SCALES)
