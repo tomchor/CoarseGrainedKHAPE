@@ -50,10 +50,10 @@ let s = ArgParseSettings()
             default = 200.0
 
         "--Re0"
-            help = "Base Reynolds number (default: 5e-4)"
+            help = "Base Reynolds number (default: 1e-3)"
             arg_type = Float64
             required = false
-            default = 5e-4
+            default = 1e-3
 
         "--Ri"
             help = "Base Richardson number (default: 0.1)"
@@ -214,12 +214,35 @@ walltime = Walltime()
 ε = KineticEnergyEquation.DissipationRate(model)
 ε̄ = Average(ε, dims=(1, 2)) |> Field
 
-#+++ Minimum Kolmogorov scale, following Kaminski & Smyth (2019, JFM 862, 639-658)
+#+++ Minimum Kolmogorov scale, after Kaminski & Smyth (2019, JFM 862, 639-658, doi:10.1017/jfm.2018.973)
 # L_K is built from the horizontally averaged dissipation ε̄(z) evaluated at the height where it
 # peaks, i.e. the smallest Kolmogorov scale anywhere in the (x, y)-averaged profile — not the
-# pointwise minimum over the field, which no DNS resolution criterion refers to. Their criterion is
-# 2.5 L_K ≥ Δx, so the ratio reported below is ≥ 1 while the run is resolved.
-# L_K goes in the output writer as a scalar time series, which is what their figure 8(d) plots.
+# pointwise minimum over the field, which no DNS resolution criterion refers to. The criterion applied here is
+# 1.2 L_K ≥ Δx, so the ratio reported below is ≥ 1 while the run is resolved.
+#
+# Where the factor comes from. Kaminski & Smyth's criterion is 2.5 L_K ≥ Δx, the Smyth-group rule set out in Smyth &
+# Moum (2000, Phys. Fluids 12, 1327-1342, doi:10.1063/1.870385, §II), who set the grid spacing to 2.5 times the minimum
+# Batchelor scale L_B = L_K Pr^(-1/2) (L_K at the Pr = 1 used here) and validate it against the Nasmyth and
+# Panchev-Kesich spectra. They cite Moin & Mahesh (1998, Annu. Rev. Fluid Mech. 30, 539-578,
+# doi:10.1146/annurev.fluid.30.1.539): a DNS needs Δ "no greater than a few (3-6) times" L_K, since the smallest resolved
+# scale need only be O(η); most of the dissipation occurs at scales well above η (the dissipation spectrum peaks near
+# 24η, Pope 2000, Turbulent Flows, §6.5.4). In wavenumber terms 2.5 L_K ≥ Δx is k_max L_K ≥ π/2.5 ≈ 1.26, next to
+# Pope's (§9.1.2) k_max η ≥ 1.5 for spectral DNS, beyond which 0.2% of the dissipation remains.
+#
+# Those are spectral-code rules, exact up to the Nyquist wavenumber π/Δx. Oceananigans differences over one cell, whose
+# modified wavenumber 2 sin(kΔ/2)/Δ is within 10% of k only up to kΔ ≈ 1.6, half the Nyquist wavenumber (Moin & Mahesh,
+# §2.2: to differentiate a 3η wave to 5%, a Fourier scheme needs Δ = 1.5η, fourth-order central 0.55η, second-order
+# 0.26η). Scaling the spectral rule by that effective resolution gives 2.5/2 ≈ 1.2. Measured on Pope's model spectrum
+# (§6.5.3, β = 5.2, c_η = 0.4), the second-order viscous operator loses 9.8% of the dissipation at Δx = 2.5 L_K and 2.5%
+# at 1.2 L_K (3.5% and 0.8% at the spectral peak), with 37% and 5% of the dissipation at scales shorter than 6 cells,
+# where the fourth-order advection starts to lose accuracy. That model spectrum is for 3D turbulence with an inertial
+# range; these 2D billows put their dissipation in thin braids, so a convergence test at fixed Re is the real arbiter,
+# and the factor is a floor rather than a guarantee.
+#
+# Read the ratio over the turbulent phase (the billow's breakdown, t ≈ 60-70 here), not at t = 0: the initial w
+# perturbation carries `abs(randn())` per grid point, grid-scale noise whose gradients make ε̄ 3-8× the laminar shear's
+# dissipation until viscosity removes it within a time unit, and that sets the minimum over the whole run.
+# L_K goes in the output writer as a scalar time series, which is what Kaminski & Smyth's figure 8(d) plots.
 ε̄_max = Field(Reduction(maximum!, ε̄, dims=(1, 2, 3)))
 L_K = (params.ν^3 / ε̄_max)^(1/4) |> Field
 
@@ -228,7 +251,7 @@ L_K = (params.ν^3 / ε̄_max)^(1/4) |> Field
 # the device (avoiding scalar indexing on the GPU).
 function kolmogorov_resolution(sim)
     compute!(L_K)
-    return @sprintf("2.5L_K/Δx = %.2f", 2.5 * maximum(L_K) / Δx)
+    return @sprintf("1.2L_K/Δx = %.2f", 1.2 * maximum(L_K) / Δx)
 end
 #---
 
