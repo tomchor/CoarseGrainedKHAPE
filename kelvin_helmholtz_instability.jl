@@ -50,10 +50,10 @@ let s = ArgParseSettings()
             default = 200.0
 
         "--Re0"
-            help = "Base Reynolds number (default: 5e-4)"
+            help = "Base Reynolds number (default: 1e-3)"
             arg_type = Float64
             required = false
-            default = 5e-4
+            default = 1e-3
 
         "--Ri"
             help = "Base Richardson number (default: 0.1)"
