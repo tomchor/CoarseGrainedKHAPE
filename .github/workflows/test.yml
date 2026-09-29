@@ -332,8 +332,10 @@ jobs:
             });
 
   # ---------------------------------------------------------------------------
-  # Combined report — updates the original 'Budget Closure Tests' context that
-  # test_trigger.yml sets to pending, so the PR check resolves.
+  # Combined report — resolves the 'Budget Closure Tests' context that test_trigger.yml sets to pending,
+  # so the PR check resolves, then closes any other status still pending on the commit: a commit status
+  # never expires, and the trigger runs from main, so a context it named before a rename here would
+  # otherwise stay pending on the PR for good and mask the result at a glance.
   # ---------------------------------------------------------------------------
   report:
     name: Report combined status
@@ -353,12 +355,23 @@ jobs:
             const off = '${{ needs.test-offline-check.result }}';
             const gf = '${{ needs.test-gaussian-filter.result }}';
             const success = on === 'success' && off === 'success' && gf === 'success';
-            github.rest.repos.createCommitStatus({
+            const sha = '${{ inputs.head_sha }}';
+            const post = (name, description) => github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ inputs.head_sha }}',
+              sha,
               state: success ? 'success' : 'failure',
               target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
-              description: success ? 'All budget tests passed' : 'One or more budget tests failed',
-              context: 'Budget Closure Tests',
+              description,
+              context: name,
             });
+            await post('Budget Closure Tests', success ? 'All budget tests passed' : 'One or more budget tests failed');
+            // Every job has finished by now, so a context still pending is a leftover of the trigger and nothing
+            // will ever update it; close it with the combined result so the commit's state reads at a glance.
+            const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef,
+                                                   { owner: context.repo.owner, repo: context.repo.repo, ref: sha, per_page: 100 });
+            const latest = new Map();   // newest first: the first status seen per context is its current state
+            for (const s of statuses) if (!latest.has(s.context)) latest.set(s.context, s);
+            for (const [name, s] of latest)
+              if (s.state === 'pending' && s.creator?.login === 'github-actions[bot]')
+                await post(name, `Retired context, closed with the combined result: ${success ? 'passed' : 'failed'}`);
