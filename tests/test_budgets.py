@@ -1,8 +1,8 @@
 """
 Budget closure tests for SFS KE and APE budgets.
 
-For each filter scale, checks that the residual is small relative to
-the smallest budget term: rms(residual) / min_v(rms(term_v)) < THRESHOLD.
+For each filter scale, checks that the residual is small relative to the
+budget's terms: rms(residual) / mean_v(rms(term_v)) < THRESHOLD.
 """
 
 import pytest
@@ -10,14 +10,10 @@ import numpy as np
 import xarray as xr
 from conftest import PP_OUTPUT, STEM
 
-# Residual must be < THRESHOLD x 100% of the smallest budget term (this number is large since we test with a
-# short, coarse simulation
-THRESHOLD = 0.1
-
-
-@pytest.fixture(scope="session")
-def ref_suffix(request):
-    return request.config.getoption("--ref-suffix")
+# Residual must be < THRESHOLD x 100% of the mean budget term. Measured on the assembled online budgets over all
+# records: 0.46% and 0.40% (APE, ℓ=1 and 7) and 0.85% and 0.19% (KE) at CI's Nz=512, identical in two runs of the
+# same code; 0.14%, 0.18%, 0.48% and 0.29% at Nz=1024. KE at ℓ=1 at the CI resolution is the binding case.
+THRESHOLD = 0.01
 
 
 def rms(arr):
@@ -26,18 +22,20 @@ def rms(arr):
 
 
 def relative_residual(ds, residual_var, budget_vars):
-    """rms(residual) / min_v(rms(term_v))
+    """rms(residual) / mean_v(rms(term_v))
 
-    The denominator is the smallest non-zero RMS among all budget terms.
-    Zero-rms terms (e.g. Rˢ with a fixed reference profile) are excluded
-    because they do not set a meaningful scale.
+    The denominator is the mean of the non-zero rms over the budget terms (a zero-rms term sets no scale and is
+    excluded). It used to be the smallest term, which made the metric depend on whichever term happens to be
+    small at a filter scale: at ℓ=7, ∫Rˢ dV is a tenth of the mean, so a 1.6% discretisation difference in the
+    offline ε_Aˢ read as 20% of the budget. Against the mean, a fractional error in one term is caught once it
+    exceeds THRESHOLD x mean/rms(term), so 1% still catches a 10% error in that smallest term.
     """
     residual   = rms(ds[residual_var].values)
     term_norms = [rms(ds[v].values) for v in budget_vars]
     nonzero    = [s for s in term_norms if s > 0]
     if not nonzero:
         raise ValueError(f"All budget terms have zero RMS — cannot normalise residual.")
-    scale = min(nonzero)
+    scale = np.mean(nonzero)
     return residual / scale
 
 
@@ -49,11 +47,11 @@ def print_budget_summary(ds, residual_var, budget_vars, rel):
     for v in budget_vars:
         print(f"  {v:<35}  {rms(ds[v].values):.4e}")
     print(f"  {residual_var:<35}  {rms(ds[residual_var].values):.4e}")
-    print(f"  {'residual / min(terms)':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
+    print(f"  {'residual / mean(terms)':<35}  {rel:.3%}  ({'PASS' if rel < THRESHOLD else 'FAIL'}, threshold={THRESHOLD:.0%})")
 
 
-def load(suffix, ref_suffix=""):
-    path = PP_OUTPUT / f"{STEM}_{suffix}{ref_suffix}.nc"
+def load(suffix):
+    path = PP_OUTPUT / f"{STEM}_{suffix}.nc"
     assert path.exists(), f"Output file not found: {path}"
     return xr.open_dataset(path, decode_timedelta=False)
 
@@ -69,8 +67,8 @@ KE_BUDGET_VARS = [
 ]
 
 @pytest.fixture(scope="module")
-def ke_budget(ref_suffix):
-    return load("sfs_ke_budget_integrated", ref_suffix)
+def ke_budget():
+    return load("sfs_ke_budget_integrated")
 
 
 def test_ke_budget_residual(ke_budget, l_idx):
@@ -97,8 +95,8 @@ APE_BUDGET_VARS = [
 ]
 
 @pytest.fixture(scope="module")
-def ape_budget(ref_suffix):
-    return load("sfs_ape_budget_integrated", ref_suffix)
+def ape_budget():
+    return load("sfs_ape_budget_integrated")
 
 
 def test_ape_budget_residual(ape_budget, l_idx):

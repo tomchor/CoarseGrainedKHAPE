@@ -5,20 +5,19 @@ using Printf
 using Random
 using ArgParse
 using CUDA: has_cuda_gpu
+
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Grids: topology, znode
-using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor,
-      SubFilterKineticEnergyEquation
+import Oceananigans.Utils: actuates_next_iteration
+
+using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
-import Oceananigans.Utils: actuates_next_iteration
-using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral,
-      VerticalSort, ProfileLookup
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
 using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
-      FilteredAvailablePotentialEnergyDissipationRate,
-      FilteredAvailablePotentialToKineticEnergyConversion
+      FilteredAvailablePotentialEnergyDissipationRate, FilteredAvailablePotentialToKineticEnergyConversion
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
@@ -27,6 +26,7 @@ Random.seed!(546)
 
 include("utils.jl")
 include("online_diagnostics.jl")   # the one budget term Oceanostics does not provide
+include("filtered_reference_profile.jl")   # ⟨b✶⟩, the vertically filtered reference profile, on a coarse column
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()
@@ -80,9 +80,8 @@ let s = ArgParseSettings()
             default = 0.05
 
         "--filter_ls"
-            help = "Filter length scales ℓ (FWHM) for the online sub-filter diagnostics (filtered fields, Πₖ, ε_Kˢ, and \
-                    Π_A/ε_Aˢ under --save_sorted). The offline budget pipeline's --filter-scales must be a subset of these \
-                    (default: 1 7)"
+            help = "Filter length scales ℓ (FWHM) for the online sub-filter budgets (filtered fields and every term of the \
+                    SFS KE and APE budgets). postprocessing/01_online_budgets.py reads these scales (default: 1 7)"
             arg_type = Int
             nargs = '+'
             default = [1, 7]
@@ -94,10 +93,10 @@ let s = ArgParseSettings()
             action = :store_true
 
         "--save_sorted"
-            help = "Also output the Winters et al. (1995) sorted reference state: the reference height z✶ under each of the \
-                    three Oceanostics sorting methods, the sorted buoyancy profile b✶(z✶), the local APE Eₐ, and the \
-                    cross-scale APE flux Π_A with the sub-filter APE dissipation ε_Aˢ at each online filter scale. Adds a \
-                    few 3D fields and a full-domain sort per output, so off by default (for online-vs-offline validation)."
+            help = "Also output the validation-only view of the Winters et al. (1995) sorted reference state: the reference \
+                    height z✶ under the two model-grid sorting methods, the sorted column b✶(z✶) itself, and ∫E_b. The SFS \
+                    budgets themselves are always written; this adds two 3D fields and two extra sorts per output, so it is \
+                    off by default (for postprocessing/validation/inv06-inv07)."
             action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
@@ -277,9 +276,6 @@ vorticity = Field(∂z(u) - ∂x(w))
 # ℓ is the FWHM of the Gaussian kernel; σ = ℓ / (2√(2 ln 2)) is the std dev passed to GaussianFilter
 filter_ℓs = Tuple(filter_ls)  # from --filter_ls (default (1, 7))
 _FWHM_to_σ(ℓ) = ℓ / (2 * sqrt(2 * log(2)))
-_fields = (u=u_center, v=v_center, w=w_center, b=b)
-_filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => GaussianFilter(f; dims=(1, 3), σ=_FWHM_to_σ(ℓ)) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
-filtered_fields = (; _filt_pairs...)
 #---
 
 #+++ Online cross-scale KE transfer Πₖ and SFS KE dissipation ε_Kˢ  (Oceanostics)
@@ -299,131 +295,28 @@ to_center(ψ) = @at (Center, Center, Center) ψ
 _filter_N(σ) = (2 * max(1, floor(Int, 4σ / minimum_xspacing(grid) + 0.5)) + 1,
                 2 * max(1, floor(Int, 4σ / minimum_zspacing(grid) + 0.5)) + 1)
 
-# One reusable, offline-matched filter per scale, shared by the KE diagnostics here and by the
-# sub-filter APE dissipation under --save_sorted below.
+# One reusable, offline-matched filter per scale, shared by the KE diagnostics here, the written filtered
+# fields, and the sub-filter APE terms below.
 function matched_filter(ℓ)
     σ = _FWHM_to_σ(ℓ)
     return GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))
 end
 
-# The vertical marginal of that same Gaussian, for filtering the sorted column into ⟨b✶⟩ (see the
-# filtered-reference block under --save_sorted). The column is a 1×1×N grid spanning Lz uniformly, so a
-# filter carrying the *physical* σ convolves in true height — true only because this model grid is
-# uniform in z. On a stretched grid the column's slot heights vary (slot k is ΔV_k/(Lx·Ly)) while its
-# grid stays uniform, so the convolution would silently run in index space; ⟨b✶⟩ would then have to be
-# built on the model grid instead. Same restriction the offline `filtered_reference_profile` carries.
+# The written filtered fields use the same offline-matched filter as every sub-filter term below, so
+# `u_ℓ<ℓ>`, `w_ℓ<ℓ>`, `b_ℓ<ℓ>` are the fields those terms are built from (Oceanostics' own defaults
+# truncate at 2σ and shrink the stencil at the walls, which is not what the offline pipeline does).
+_fields = (u=u_center, v=v_center, w=w_center, b=b)
+_filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => matched_filter(ℓ)(f) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
+filtered_fields = (; _filt_pairs...)
+
 # Oceanostics wraps every composed sub-filter expression in a KernelFunctionOperation carrying a trivial
 # passthrough kernel (see `subfilter_ape_ccc` and friends upstream). That is not cosmetic: a writer is
 # specialised on the type of its whole output NamedTuple, and an unwrapped `Field(gf(Field(a))) - b` is a
 # deep BinaryOperation nest. Handing a writer several of those sent LLVM's instruction selector quadratic
 # (DAGCombiner::CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation for >45 min
 # at Nz=32. Wrapping collapses each term to one flat KernelFunctionOperation, as the built-in ones already are.
-# Levels per σ on the coarse grid the online ⟨b✶⟩ is filtered on; see `coarse_column`. The offline profile has no
-# such parameter: `filtered_reference_profile` filters the whole column by FFT, so the two constructions differ.
-const REFERENCE_FILTER_K = 1000
-
 @inline _passthrough_ccc(i, j, k, grid, a) = @inbounds a[i, j, k]
 flatten(op) = KernelFunctionOperation{Center, Center, Center}(_passthrough_ccc, grid, op)
-
-# ⟨b✶⟩ is a Gaussian convolution of width σ, so it carries no structure below σ and filtering it at the
-# column's own resolution is wasted work: the column has one slot per grid cell, which oversamples the
-# result by ~400x at ℓ=1 and ~3000x at ℓ=7. Worse, the cost is quadratic -- N slots against a stencil
-# that itself grows with N, since σ in slot units is σN/Lz -- so at Nz=512 the two scales together cost
-# ~6e9 operations per output. Oceanostics' filter is a KernelAbstractions kernel written for GPUs, and on
-# CI's two CPU threads that measured ~3 hours of a 4h23m run.
-#
-# Instead, block-average the column onto REFERENCE_FILTER_K levels per σ, filter there, and hand that pair
-# straight to `ProfileLookup`, which takes a (b✶, z✶) of any length. Both grids are uniform, so a block
-# average is an exact area average -- the right resampling, since the column carries structure below the
-# coarse spacing (its tie runs among it) that point-sampling would alias.
-#
-# The filter runs on those M levels, and ⟨b✶⟩ is then interpolated back onto the column's N heights before
-# the lookup, so only the *convolution* is coarse: Υ̃ = z̃✶(b̄) - z keeps the column's own resolution. Reading
-# the coarse cells whole instead quantises Υ̃ to Lz/M, and Π̃_A = -τ(uᵢ,b) ∂ᵢΥ̃ differentiates it with nothing
-# downstream to smooth the steps -- at Nz=1024, ℓ=7 that is δz̃✶ = dz/8.2, a ~12% staircase in ∂Υ̃/∂z, plainly
-# visible in the Π_A panel while every term that *integrates* Υ̃ stayed smooth. The interpolation costs one
-# O(N) kernel and nothing in the lookup, which is a binary search (`searchsortedfirst`), so O(log N).
-_column_N() = grid.Nx * grid.Ny * grid.Nz
-
-# One coarse cell is the mean of `n` consecutive column slots. The kernel is launched over the coarse
-# grid and reads the column field directly; both are 1×1×· so only k varies.
-@inline function _block_mean_ccc(i, j, k, coarse_grid, fine, n)
-    acc = zero(eltype(fine))
-    @inbounds for m in 1:n
-        acc += fine[1, 1, (k - 1) * n + m]
-    end
-    return acc / n
-end
-
-# ...and back: coarse cell κ is the mean of column slots (κ-1)n+1 … κn, so it stands at fractional column
-# index (κ-0.5)n + 0.5, and column slot k sits at fractional coarse index (k-0.5)/n + 0.5. Interpolating
-# there rather than reading the coarse cell whole is what keeps the z̃✶ lookup at the column's own
-# resolution: the filter still runs on M levels (that is the expensive part), but Υ̃ = z̃✶(b̄) - z is no
-# longer quantised to Lz/M. Mapping in index space rather than in z avoids depending on M*n == N, which
-# `fld` does not guarantee. Outside the range this clamps, matching the edge extension either side and
-# numpy's interp, which the offline `filtered_reference_profile` ends with.
-#
-# The result must be non-decreasing, because ProfileLookup rejects any step down. (1 - w)c₀ + w c₁ is not
-# monotone in floating point: near the walls ⟨b✶⟩ rises by less than an ulp per slot (at ℓ = 1, from about
-# Nz = 4700), and its rounding then steps down. c₀ + w(c₁ - c₀) is monotone in w, and clamping it to [c₀, c₁]
-# keeps each segment within its end values, so the joined profile is non-decreasing wherever the coarse one is.
-# The two forms differ by at most an ulp. The offline twin clamps too (`np.minimum.accumulate` in _fft_gaussian).
-@inline function _interp_from_coarse_ccc(i, j, k, column_grid, coarse, n, M)
-    FT = eltype(column_grid)
-    t  = (k - FT(0.5)) / n + FT(0.5)
-    κ  = clamp(floor(Int, t), 1, M - 1)
-    w  = clamp(t - κ, zero(FT), one(FT))
-    c₀ = @inbounds coarse[1, 1, κ]
-    c₁ = @inbounds coarse[1, 1, κ + 1]
-    return clamp(c₀ + w * (c₁ - c₀), min(c₀, c₁), max(c₀, c₁))
-end
-
-"""Coarse 1×1×M column and the block size that maps the sorted column onto it, for filter scale ℓ."""
-function coarse_column(ℓ)
-    N = _column_N()
-    σ = _FWHM_to_σ(ℓ)
-    M_target = ceil(Int, REFERENCE_FILTER_K * grid.Lz / σ)
-    n = max(1, fld(N, min(M_target, N)))          # slots per coarse cell
-    M = fld(N, n)                                  # drops at most n-1 slots at the top
-    tx, ty, tz = topology(grid)
-    z_bottom = znode(1, 1, 1, grid, Center(), Center(), Face())
-    coarse = RectilinearGrid(architecture(grid), eltype(grid);
-                             size = (1, 1, M), topology = (tx, ty, tz),
-                             x = (0, grid.Lx), y = (0, grid.Ly),
-                             z = (z_bottom, z_bottom + grid.Lz))
-    return coarse, n, M
-end
-
-# The column filter is Oceanostics' Gaussian in every respect except how the weights are carried, and it
-# is spelled out here rather than reused because that difference is fatal at this width. `GaussianFilterKernel`
-# stores its weights as an `NTuple` inside the kernel's *type* and fully unrolls the stencil loop, which is
-# the right design at the widths the x-z filter uses (tens) and pathological at ~8K: the tuple is passed
-# **by value** into CUDA's 32 KiB kernel parameter space, so a 8017-wide stencil is 62.6 KiB and the launch
-# fails outright ("Kernel invocation uses too much parameter memory", sm_80), and asking LLVM to unroll 8017
-# iterations is its own cost. Weights in a device array and a plain loop: the array costs 72 bytes as a
-# kernel parameter no matter how long it is, so the width ceiling goes away and K is an accuracy choice again.
-@inline function _gauss_column_ccc(i, j, k, coarse_grid, ψ, w, hw)
-    FT = eltype(coarse_grid)
-    s = zero(FT); w_sum = zero(FT)
-    Nz = size(coarse_grid, 3)
-    @inbounds for m = -hw:hw
-        kk = min(max(k + m, 1), Nz)    # edge extension, matching Oceanostics' boundary=:edge and scipy's :nearest
-        ω  = w[m + hw + 1]
-        s     += ω * ψ[1, 1, kk]
-        w_sum += ω
-    end
-    return s / w_sum
-end
-
-"""The vertical marginal of the same Gaussian, on a coarse column of M levels (stencil ≈ 8K, not 8σN/Lz)."""
-function coarse_filter(ℓ, coarse)
-    σ  = _FWHM_to_σ(ℓ)
-    Δ  = grid.Lz / size(coarse, 3)
-    hw = max(1, floor(Int, 4σ / Δ + 0.5))          # truncate at 4σ, matching scipy
-    FT = eltype(grid)
-    w  = on_architecture(architecture(grid), FT[exp(-(m * Δ)^2 / (2σ^2)) for m = -hw:hw])
-    return ψ -> KernelFunctionOperation{Center, Center, Center}(_gauss_column_ccc, coarse, ψ, w, hw)
-end
 
 _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
@@ -455,157 +348,132 @@ end
 ke_transfer_fields = (; _ke_pairs...)
 #---
 
-#+++ Online Winters et al. (1995) sorted reference state  (Oceanostics)
+#+++ Online Winters et al. (1995) sorted reference state and the sub-filter APE budget  (Oceanostics)
 # Sorting the buoyancy field adiabatically into its minimum-PE state assigns every parcel a reference
-# height z✶. Offline this is done in Python by 02_sort_density.py (an argsort of the whole field per
-# timestep, held in host RAM and written out at 2× the raw field size); done here it is one GPU sort
-# per output. The three methods describe the same reference state and agree on every volume integral,
-# but differ in where they put cells of *equal* buoyancy and on what grid they answer:
+# height z✶. The simulation does this once per output, on the GPU, with `VerticalSort`: the sorted column
+# itself, on a 1×1×N grid, which is the reference profile b✶(z✶) every APE term below is measured against.
+# The two model-grid methods describe the same reference state and differ only in where they put cells of
+# *equal* buoyancy; they are validation outputs (`inv06`), gated behind --save_sorted:
 #   ThreeDimensionalSort  z✶ on the model grid; tied cells take consecutive slots (z✶ spreads over a cell)
 #   HeavisideIntegral     z✶ on the model grid; tied cells share their layer's mid-height (Winters eq. 11)
-#   VerticalSort          the sorted column itself, on a 1×1×N grid → the reference profile b✶(z✶)
-# All three are emitted so postprocessing/validation/inv06_compare_sorted_profiles.py can compare them
-# against each other and against the offline sort. Note the offline pipeline sorts the *z-padded* domain
-# (load_dataset_and_grid pads it with edge values, at least Nz//2 cells each side), so the two do not sort the same field
-# near the top and bottom boundaries — quantifying that is part of what inv06 checks.
 #
-# Only the column is a reference *profile* as written. For the two model-grid methods `reference_buoyancy`
-# is the model's own `b`, which is already an output, so their profiles are recovered by pairing z✶ with b
-# and ordering by z✶ — the same thing the lock_release example in the Oceanostics PR does.
+# The column lives on its own grid, which a single NetCDFWriter handles alongside the model grid, as the
+# lock_release example upstream does. Holding two grids does make the writer disambiguate: every dimension
+# gets a suffix (z_aac → z_aac_grid1 for the model grid, _grid2 for the column) and the grid metadata groups
+# get a matching prefix. The offline code is written against the plain names, so `load_dataset_and_grid`
+# strips the model grid's suffix at load time (`strip_grid_suffix` in postprocessing/src/aux00_utils.py).
+#
 # The 3D writer's schedule, defined here so the time derivatives inside R below can update on the iterations
 # around its outputs, which include every one of the 2D writer's.
 output_schedule = ConsecutiveIterations(TimeInterval(2))
 
+z✶_1dsort = reference_height(model, method=VerticalSort())
+b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
+
+# Every APE term shares this one sort: `ProfileLookup` takes the column as an external (b✶, z✶) pair,
+# refreshes it on every compute! when it is a Field, and skips the O(N log N) sort. The reference profile's
+# own time derivative feeds R; R is the output, not ∂ₜb✶, so no writer advances it: a TimeDerivativeCallback
+# does, around each output, as does each scale's ∂ₜ⟨b✶⟩ below.
+lookup = ProfileLookup(z✶_1dsort)
+∂ₜb✶ = TimeDerivativeCallback(reference_buoyancy(z✶_1dsort), schedule=PrecedingIterations(output_schedule))
+simulation.callbacks[:∂ₜb✶] = ∂ₜb✶
+
+# R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
+z✶_lookup = reference_height(model, method=lookup)
+R_full = ReferenceTendencyCorrection(model, ∂ₜb✶.func, z✶_lookup)
+
+# The online local available potential energy Eₐ = ∫_{z✶}^{z}[b✶(z̃) - b] dz̃ (Holliday & McIntyre 1981),
+# per unit mass, the same integral the offline `local_potential_energies_timeseries` builds (`inv07` checks
+# the two). It reads the same lookup as every sub-filter term, so it adds no sort; ∫Eₐ with ∫E_b (below,
+# under --save_sorted) gives the online TPE = BPE + APE split, which ∫pe closes.
+E_a = AvailablePotentialEnergy(model, z✶_lookup)
+∫E_a = Integral(E_a)
+
+# The sub-filter APE terms use the filtered-reference scale decomposition (Wenegrat, Chor & Barkan
+# Eqs. 2.3-2.5, 2.19-2.22). Measuring the resolved reservoir against the unfiltered b✶ instead is the
+# g_z = δ(z) horizontal-filter limit: with a kernel that has vertical extent a fluid at rest still
+# carries APE against b✶, so that reservoir does not vanish at rest and the remainder goes negative.
+# This filter acts in x *and* z, so only ⟨b✶⟩ gives a decomposition into two non-negative reservoirs,
+# and the unfiltered form is not written at all.
+#
+# This set *is* the SFS APE budget: `postprocessing/01_online_budgets.py` reads it into the budget files,
+# and the offline pipeline (`postprocessing/offline/`) recomputes it only as the CI cross-check
+# (`pytest --offline-check`). Nothing here needs a new Oceanostics diagnostic: the two-argument constructors
+# let the two halves of each sub-filter quantity carry *different* reference profiles, composed here
+# exactly as R_s is.
+_ape_pairs    = Pair{Symbol, Any}[]   # both writers: the terms the panels animation draws
+_ape_3d_pairs = Pair{Symbol, Any}[]   # 3D writer only: the two halves of S̃, which the tests read
+for ℓ in filter_ℓs
+    gf = matched_filter(ℓ)
+    b✶_flt = filtered_reference_profile(reference_buoyancy(z✶_1dsort), grid, _FWHM_to_σ(ℓ))   # ⟨b✶⟩ on the column's N slots
+    lookup_flt = ProfileLookup(b✶_flt, z✶_1dsort)                         # heights unchanged; only b✶ filtered
+    z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
+
+    # τˡ(w, b_r) = filter(w b_r) - w̄ b_rˡ, the sub-filter half of the APE↔KE conversion. It is a *term* in
+    # both budgets (+1 in the KE residual, -1 in the APE one) and the field `plot_kelvin_helmholtz_instability.jl`
+    # discovers the panel scales from, so do not drop it.
+    #
+    # It is a reversible exchange, not a source or a sink, so **neither half of the separation has a
+    # fixed sign**: filter(w b_r) and w̄ b_rˡ are each of either sign, and so is their difference.
+    # Unlike ε_Kˢ (a dissipation) or S̃ (non-negative by construction against ⟨b✶⟩), τˡ admits no
+    # positivity check — a negative value here is physics, not a symptom.
+    #
+    # Reference profile. S̃ is measured against ⟨b✶⟩, so the resolved half must be too:
+    # τˡ = filter(w(b - b✶)) - w̄(b̄ - ⟨b✶⟩). Upstream's SubFilterAvailablePotentialToKineticEnergyConversion
+    # reads one profile, from `method`, for *both* halves, so no single call gives it: `method=lookup` is off
+    # by w̄δ and `method=lookup_flt` by filter(wδ), with δ = b✶ - ⟨b✶⟩. Adding the filtered conversion
+    # w̄(b̄ - b✶) and subtracting w̄(b̄ - ⟨b✶⟩) moves the resolved half onto ⟨b✶⟩ and leaves the filtered
+    # product alone. It changes the field, not the integral: ∫w̄ f(z) dV = 0 for any f(z), since ∫w dx dy
+    # vanishes at every height and filtering preserves that.
+    wb_rs = flatten(SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup) +
+                    FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup) -
+                    FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup_flt))
+
+    # S̃ = Ē_A - L̃: the filtered full-field APE against b✶, less the filtered field's APE against ⟨b✶⟩.
+    # Both halves are written on their own (3D writer) so the offline check can compare each.
+    Ea_flt = Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup))))   # Ē_A
+    L      = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)               # L̃ = Ẽ_A(b̄, z)
+    E_as   = flatten(Ea_flt - L)                                             # S̃
+    Π_A    = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
+    ε_As   = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
+                     FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
+    # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
+    ∂ₜb✶_flt = TimeDerivativeCallback(b✶_flt, schedule=PrecedingIterations(output_schedule))
+    simulation.callbacks[Symbol("∂ₜb✶_flt_ℓ$(ℓ)")] = ∂ₜb✶_flt
+    R_l  = ReferenceTendencyCorrection(model, ∂ₜb✶_flt.func, z✶ˡ_flt)
+    R_s  = flatten(Field(gf(R_full)) - R_l)
+
+    push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
+                      Symbol("Π_A_ℓ$(ℓ)")   => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
+                      Symbol("E_as_ℓ$(ℓ)")  => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
+                      Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
+                      Symbol("R_s_ℓ$(ℓ)")   => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
+                      Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as),
+                      Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as)))
+    push!(_ape_3d_pairs, Symbol("L_ℓ$(ℓ)") => L, Symbol("Ea_flt_ℓ$(ℓ)") => Ea_flt)
+end
+sfs_ape_fields = (; _ape_pairs...)
+
+# The 3D writer gets the whole APE budget; the 2D writer gets the per-scale terms and b_r (all model-grid, so
+# the 2D file stays single-grid), which is what lets `plot_kelvin_helmholtz_instability.jl` draw the SFS-budget
+# panels animation straight from the slice file.
+#
+# Keep the 2D tuple small. A writer is specialised on the type of its whole output NamedTuple, and growing
+# it from ~50 to ~76 heterogeneous entries once sent LLVM's instruction selector quadratic
+# (CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation of this writer for
+# >45 min at Nz=32. `flatten` above is what keeps each term one flat type; do not remove it.
+budget_fields = (; E_a, ∫E_a, sfs_ape_fields..., _ape_3d_pairs...)
+twod_extra    = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
+
+# Validation-only outputs: the two model-grid sorts, ∫E_b, and the column itself. `inv06` compares the three
+# methods against each other and against the offline sort, `inv07` reads the column. None of them enters the
+# budget, so --save_sorted changes no budget number; it costs two extra 3D sorts per output.
 sorted_fields = NamedTuple()
-twod_extra = NamedTuple()   # panel fields the 2D writer adds under --save_sorted
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
     z✶_heaviside = reference_height(model, method=HeavisideIntegral())
-
-
-    # The column lives on its own 1×1×N grid (N = Nx·Ny·Nz), which a single NetCDFWriter handles
-    # alongside the model grid, as the lock_release example upstream does. Holding two grids does make
-    # the writer disambiguate: every dimension gets a suffix (z_aac → z_aac_grid1 for the model grid,
-    # _grid2 for the column) and the grid metadata groups get a matching prefix. The offline pipeline
-    # is written against the plain names, so `load_dataset_and_grid` strips the model grid's suffix at
-    # load time (`strip_grid_suffix` in postprocessing/src/aux00_utils.py) and everything downstream
-    # is unaffected; the column's variables keep their own suffix and are read by inv06.
-    z✶_1dsort = reference_height(model, method=VerticalSort())
-    b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
-
-    # Online local available potential energy (Oceanostics PR #274). AvailablePotentialEnergy now
-    # computes the Holliday & McIntyre (1981) local APE density Eₐ = ∫_{z✶}^{z}[b✶(z̃) - b] dz̃, the same
-    # positive-definite integral the offline pipeline builds in local_potential_energies_timeseries
-    # (its `ape` field): with b = g(ρ₀-ρ)/ρ₀ the two are identical, per unit mass (m² s⁻²), no ρ₀/sign
-    # conversion. Reuse the ThreeDimensionalSort z✶ above so the sort is shared, not repeated. Eₐ (the
-    # local field) is validated against the offline `ape` by inv07; ∫Eₐ and ∫E_b give the online
-    # TPE = BPE + APE split, which ∫pe (already written) closes. E_b's local field is the trivial -bz✶,
-    # so only its integral is emitted.
-    E_a = AvailablePotentialEnergy(model, z✶_3dsort)
-    ∫E_a = Integral(E_a)
     ∫E_b = Integral(BackgroundPotentialEnergy(model, z✶_3dsort))
-
-    # Sub-filter APE dissipation ε_Aˢ = filter(ε_A) - ε_Aˡ, the diffusive sink of the sub-filter APE
-    # budget, at each online filter scale. Its two halves are built internally against one shared
-    # reference profile — hence the `ProfileLookup`, handed the VerticalSort column above so every
-    # scale shares that one sort.
-    # The cross-scale APE flux Π_A = -τᵢ(b, uᵢ) ∂ᵢΥˡ rides along: it is measured against the same
-    # filtered reference state ε_Aˢ uses, so it shares the filter and the column and adds no sort. Both
-    # are 2D x–z here (v ≡ 0), hence dims=(1, 3), matching the online Π_K.
-    # The reference profile's own time derivative, shared by every R below. R is the output, not ∂ₜb✶, so
-    # no writer advances it: a TimeDerivativeCallback does, around each output, as does each scale's ∂ₜ⟨b✶⟩.
-    lookup = ProfileLookup(z✶_1dsort)
-    ∂ₜb✶ = TimeDerivativeCallback(reference_buoyancy(z✶_1dsort), schedule=PrecedingIterations(output_schedule))
-    simulation.callbacks[:∂ₜb✶] = ∂ₜb✶
-
-    # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
-    z✶_lookup = reference_height(model, method=lookup)
-    R_full = ReferenceTendencyCorrection(model, ∂ₜb✶.func, z✶_lookup)
-
-    # The sub-filter APE terms use the filtered-reference scale decomposition (Wenegrat, Chor & Barkan
-    # Eqs. 2.3-2.5, 2.19-2.22). Measuring the resolved reservoir against the unfiltered b✶ instead is the
-    # g_z = δ(z) horizontal-filter limit: with a kernel that has vertical extent a fluid at rest still
-    # carries APE against b✶, so that reservoir does not vanish at rest and the remainder goes negative.
-    # This filter acts in x *and* z, so only ⟨b✶⟩ gives a decomposition into two non-negative reservoirs,
-    # and the unfiltered form is not written at all. The offline pipeline keeps `--reference true`, the
-    # earlier formulation, for comparison; it computes those terms itself.
-    #
-    # Nothing here needs a new Oceanostics diagnostic: ProfileLookup takes an external (b✶, z✶) pair,
-    # refreshes it on every compute! when it is a Field, and skips the O(N log N) sort; and the
-    # two-argument constructors let the two halves of each sub-filter quantity carry *different*
-    # reference profiles, composed here exactly as R_s already is.
-    _ape_pairs = Pair{Symbol, Any}[]
-    for ℓ in filter_ℓs
-        gf = matched_filter(ℓ)
-        coarse_ℓ, n_ℓ, M_ℓ = coarse_column(ℓ)
-        _blk(f) = Field(KernelFunctionOperation{Center, Center, Center}(_block_mean_ccc, coarse_ℓ, f, n_ℓ))
-        b✶_crs  = Field(coarse_filter(ℓ, coarse_ℓ)(_blk(reference_buoyancy(z✶_1dsort))))  # ⟨b✶⟩ on M levels
-        b✶_flt  = Field(KernelFunctionOperation{Center, Center, Center}(_interp_from_coarse_ccc,
-                                                z✶_1dsort.grid, b✶_crs, n_ℓ, M_ℓ))        # ...back onto the N slots
-        lookup_flt = ProfileLookup(b✶_flt, z✶_1dsort)                         # heights unchanged; only b✶ filtered
-        z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
-
-        # τˡ(w, b_r) = filter(w b_r) - w̄ b_rˡ, the sub-filter half of the APE↔KE conversion. Load-bearing,
-        # in three separate ways, so do not drop it because the offline pipeline ignores it (04 builds its
-        # own exchange term and 05 reads 04's):
-        #   * it is a *term* in both online budgets — inv10 reads wb_rs_ℓ<ℓ>_int with +1 in residual_K and
-        #     -1 in residual_A. At Nz=128/Re=262 it is the largest term in the KE budget at ℓ=1 (rms
-        #     5.1e-02, 100% of the next largest) and 86% of the largest at ℓ=7. Removing it opens a hole
-        #     that size and the fully-online closure check stops meaning anything;
-        #   * plot_kelvin_helmholtz_instability.jl derives `panel_ℓs` by scanning for `wb_rs_ℓ*` field
-        #     names, so dropping the 3D field yields *no* panels animation at all, not one panel fewer;
-        #   * it is the physical exchange, not scaffolding.
-        #
-        # It is a reversible exchange, not a source or a sink, so **neither half of the separation has a
-        # fixed sign**: filter(w b_r) and w̄ b_rˡ are each of either sign, and so is their difference.
-        # Energy runs both ways between the reservoirs. Unlike ε_Kˢ (a dissipation) or S̃ (non-negative by
-        # construction against ⟨b✶⟩), τˡ admits no positivity check — a negative value here is physics, not
-        # a symptom, and test_positivity.py deliberately says nothing about it.
-        #
-        # Reference profile. S̃ is measured against ⟨b✶⟩, so the resolved half must be too:
-        # τˡ = filter(w(b - b✶)) - w̄(b̄ - ⟨b✶⟩), the split 04 computes offline. Upstream's
-        # SubFilterAvailablePotentialToKineticEnergyConversion reads one profile, from `method`, for *both* halves,
-        # so no single call gives it: `method=lookup` is off by w̄δ and `method=lookup_flt` by filter(wδ), with
-        # δ = b✶ - ⟨b✶⟩. Adding the filtered conversion w̄(b̄ - b✶) and subtracting w̄(b̄ - ⟨b✶⟩) moves the resolved
-        # half onto ⟨b✶⟩ and leaves the filtered product alone. It changes the field, not the integral:
-        # ∫w̄ f(z) dV = 0 for any f(z), since ∫w dx dy vanishes at every height and filtering preserves that. Each
-        # filtered conversion builds its own w̄ and b̄, so this costs a few extra filter passes per output.
-        wb_rs = flatten(SubFilterAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup) +
-                        FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup) -
-                        FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup_flt))
-
-        L    = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)       # L̃ = Ẽ_A(b̄, z): builds S̃, not written itself
-        E_as = flatten(Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup)))) - L)   # S̃ = Ē_A - L̃
-        Π_A  = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
-        ε_As = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
-                       FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
-        # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
-        ∂ₜb✶_flt = TimeDerivativeCallback(b✶_flt, schedule=PrecedingIterations(output_schedule))
-        simulation.callbacks[Symbol("∂ₜb✶_flt_ℓ$(ℓ)")] = ∂ₜb✶_flt
-        R_l  = ReferenceTendencyCorrection(model, ∂ₜb✶_flt.func, z✶ˡ_flt)
-        R_s  = flatten(Field(gf(R_full)) - R_l)
-
-        push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
-                          Symbol("Π_A_ℓ$(ℓ)")   => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
-                          Symbol("E_as_ℓ$(ℓ)")  => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
-                          Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
-                          Symbol("R_s_ℓ$(ℓ)")   => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
-                          Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as),
-                          Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as)))
-    end
-    sfs_ape_fields = (; _ape_pairs...)
-
-    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, E_a, ∫E_a, ∫E_b, sfs_ape_fields...)
-
-    # The 2D writer also gets the sub-filter APE fields (and b_r, sharing the lookup z✶ above), so the
-    # panels animation can be drawn straight from the slice file by plot_kelvin_helmholtz_instability.jl.
-    # All are model-grid, so the 2D file stays single-grid.
-    #
-    # Keep this tuple small. A writer is specialised on the type of its whole output NamedTuple, and
-    # growing it from ~50 to ~76 heterogeneous entries once sent LLVM's instruction selector quadratic
-    # (CombineToPostIndexedLoadStore -> hasPredecessorHelper) and stalled compilation of this writer for
-    # >45 min at Nz=32. `flatten` above is what keeps each term one flat type; do not remove it.
-    twod_extra = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_fields...)
+    sorted_fields = (; z✶_3dsort, z✶_heaviside, z✶_1dsort, b✶_1dsort, ∫E_b)
 end
 #---
 
@@ -635,7 +503,7 @@ actuates_next_iteration(schedule::ConsecutiveIterations, clock, growth) = actuat
 
 # The model-grid z✶ fields go in the 3D file only; the 2D writer below slices with `indices` for a
 # lightweight x–z animation and has no use for them.
-simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., sorted_fields...),
+simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., budget_fields..., sorted_fields...),
                                                   schedule = output_schedule,
                                                   filename = output_filename,
                                                   array_type = Array{Float64},

@@ -15,12 +15,10 @@ already do them. Each recomputes its diagnostic offline, compares against the on
 Those scripts also write the comparison figures, which is why they run as subprocesses rather than
 being imported: they are top-level scripts, not modules.
 
-Only the time-varying reference is covered. Most of these quantities are reference-independent — a
-filtered field, Π_K and ε_Kˢ are built from velocities alone, and the sorted state is a property of the
-instantaneous buoyancy field — so running them again under `--fixed-reference` would repeat identical
-work on identical inputs. ε_Aˢ is the exception: it does depend on the reference state, and the online
-one is always the sort of the current buoyancy, so it has no counterpart under `--fixed-reference`.
-There is nothing to compare in that variant either way.
+These scripts are the *figure-producing* half of the offline cross-check; `tests/test_offline_check.py`
+is the other half, comparing every term of the assembled online budgets against the offline pipeline's
+files. Both run only under `pytest --offline-check` (CI's offline-check job): each script recomputes its
+quantity offline, which is minutes of work at the CI resolution.
 
 `inv03` (the S̄/τ tensor components) is not included: it needs a `--save_tensors` run, which writes six
 extra 3D fields per filter scale, and the quantities it checks already enter Π_K, which `inv02` covers.
@@ -101,11 +99,12 @@ VALIDATION = REPO_ROOT / "postprocessing" / "validation"
 #
 # `inv10` is not an online-vs-offline comparison at all: every term of both budgets is now written by
 # the simulation, so it checks that the online budgets *close* on their own, with the same metric
-# `test_budgets.py` applies offline (rms(residual) / min over terms of rms(term)). It is held at the
-# same 0.10 threshold, which is what makes the two directly comparable. Measured at Nz=192/Re=262,
-# against the offline pipeline on the same run:
-#   KE  l=1  online 8.8%  offline 9.6%      KE  l=7  online 0.53%  offline 1.1%
-#   APE l=1  online 5.5%  offline 4.4%      APE l=7  online 1.9%   offline 2.4%
+# `test_budgets.py` applies to the assembled files (rms(residual) / mean over terms of rms(term)). It is
+# held at the same 0.01 threshold, which is what makes the two directly comparable. Measured at CI's
+# Nz=512 on 2026-09-28 (first pair skipped, identical in two runs of the same code): KE 0.79% (ℓ=1) and
+# 0.17% (ℓ=7), APE 0.43% and 0.38%; at Nz=1024, all records: KE 0.48% and 0.29%, APE 0.14% and 0.18%.
+# The offline pipeline's own budget sits at 2.3% (Nz=512) and 1.2% (Nz=1024) on the same runs, which is
+# its ε discretisation; test_offline_check.py holds it at 3%.
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
@@ -114,20 +113,17 @@ CASES = [
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
     pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
     pytest.param("inv09_compare_ape_transfer.py", 0.15, ["--n-workers", "2"], id="Pi_A"),
-    pytest.param("inv10_online_budget_closure.py", 0.10, [], id="online_budget_closure"),
+    pytest.param("inv10_online_budget_closure.py", 0.01, [], id="online_budget_closure"),
 ]
 
 
-@pytest.mark.parametrize("script,tolerance,extra", CASES)
-def test_online_matches_offline(script, tolerance, extra, pytestconfig):
-    # Skip under `--ref-suffix _fixed_ref` rather than relying on the caller not to ask for it: none of
-    # these comparisons involve the reference profile, so the fixed-reference run would be a byte-for-byte
-    # repeat of the time-varying one.
-    ref_suffix = pytestconfig.getoption("--ref-suffix")
-    if ref_suffix:
-        pytest.skip(f"reference-independent comparison; runs only for the time-varying reference "
-                    f"(got --ref-suffix {ref_suffix!r})")
+# Each script recomputes its quantity offline, minutes of work at the CI resolution, so the whole file runs
+# only under --offline-check, in CI's offline-check job beside tests/test_offline_check.py.
+pytestmark = pytest.mark.offline_check
 
+
+@pytest.mark.parametrize("script,tolerance,extra", CASES)
+def test_online_matches_offline(script, tolerance, extra):
     if not SIM_OUTPUT.exists():
         pytest.skip(f"simulation output not found: {SIM_OUTPUT} (run the simulation first)")
 

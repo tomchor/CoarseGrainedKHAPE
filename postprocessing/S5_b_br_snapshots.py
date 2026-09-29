@@ -7,8 +7,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from src.aux00_utils import PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, check_same_padded_grid
-from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r
+from src.aux00_utils import model_grid_suffix, strip_grid_suffix
 from src.aux03_plotting import run_label
 #---
 
@@ -22,8 +21,6 @@ parser = argparse.ArgumentParser(description="Time-evolution snapshots: buoyancy
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--times", type=float, nargs="+", default=[20, 50, 80],
                     help="Snapshot times, one column each (nearest available is used)")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Use the fixed-in-time reference profile produced by 02 with --fixed-reference")
 parser.add_argument("--zlim", type=float, default=4.0, help="Half-height of the plotted z window")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
@@ -34,16 +31,18 @@ FIGURES   = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
-ref_suffix = "_fixed_ref" if args.fixed_reference else ""
 #---
 
-#+++ Load the simulation and the sorted reference profile
-# b_r = -(g/ρ₀)(ρ - ρ_*(z)) is built against the *unfiltered* ρ_*, so unlike the resolved b_rˡ it carries
-# no filter scale and no filtered-reference subtlety: one field per time, valid for any ℓ.
-print("Loading simulation dataset...")
-# Pad as 02 did, so ρ_*'s own z grid is the one b_r interpolates it onto.
-_filtered_fn = str(PP_OUTPUT / f"{stem}_filtered_velocities.nc")
-ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(_filtered_fn, required=True))
+#+++ Load the simulation's own b and b_r
+# b_r = b - b✶(z) is measured against the *unfiltered* sorted profile, so unlike the resolved b_rˡ it carries
+# no filter scale and no filtered-reference subtlety: one field per time, valid for any ℓ. The simulation
+# writes it to the 2D slice file, on the same sort as every online budget term.
+filename_2d = filename.replace(".nc", "_2d.nc")
+print(f"Loading the 2D simulation output: {filename_2d}")
+ds = xr.open_dataset(filename_2d, decode_times=False)
+ds = strip_grid_suffix(ds, model_grid_suffix(ds))
+if "b_r" not in ds:
+    raise SystemExit(f"'b_r' not in {filename_2d}: rerun the simulation with the current kelvin_helmholtz_instability.jl")
 
 t_sel = [float(ds.time.sel(time=t, method="nearest").values) for t in args.times]
 for want, got in zip(args.times, t_sel):
@@ -53,26 +52,9 @@ if len(set(t_sel)) < len(t_sel):     # two requests on one record would duplicat
     print(f"  note: some requested times share a record; plotting {len(t_sel)} distinct times")
 ds = ds.sel(time=t_sel)
 
-ds_b = ds[["b", "dV", "LxLy"]].copy()
-ds_b.attrs.update(ds.attrs)
-ds_b = calculate_density_fields_from_buoyancy(ds_b, buoyancy_name="b", density_name="ρ")
-
-sorted_filename = str(PP_OUTPUT / f"{stem}_sorted_density{ref_suffix}.nc")
-print(f"Loading sorted reference profile: {sorted_filename}")
-ds_sorted = xr.open_dataset(sorted_filename, decode_times=False)
-check_same_padded_grid(ds, ds_sorted, Path(sorted_filename).name)   # sorted on this padded grid?
-rho_sorted = ds_sorted.rho_sorted.sel(time=t_sel, method="nearest")
-drift = np.abs(rho_sorted.time.values - np.asarray(t_sel)).max()
-if drift > 1e-6:
-    print(f"  note: nearest sorted-profile times differ from the snapshot times by up to {drift:.3g}")
-rho_sorted = rho_sorted.assign_coords(time=ds_b.time)   # align exactly; the offsets are reported above
-
-print("Computing b_r...")
-b_r = calculate_b_r(ds_b.ρ, rho_sorted)
-
 zsl = slice(-args.zlim, +args.zlim)
-b_fields   = [ds_b.b.sel(time=t).sel(z_aac=zsl).squeeze()  for t in t_sel]
-b_r_fields = [b_r.sel(time=t).sel(z_aac=zsl).squeeze()     for t in t_sel]
+b_fields   = [ds.b.sel(time=t).sel(z_aac=zsl).squeeze()   for t in t_sel]
+b_r_fields = [ds.b_r.sel(time=t).sel(z_aac=zsl).squeeze() for t in t_sel]
 print("Done.")
 #---
 
@@ -169,7 +151,7 @@ if label:
 t_tag = "-".join(f"{t:.0f}" for t in t_sel)
 # PDF, as the other paper figures (S3, plot2). The pcolormesh layers are rasterized above, so the file
 # stays small while the contours, axes and text remain vector.
-outfile = str(FIGURES / f"{stem}_b_br_snapshots_t{t_tag}{ref_suffix}.pdf")
+outfile = str(FIGURES / f"{stem}_b_br_snapshots_t{t_tag}.pdf")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")

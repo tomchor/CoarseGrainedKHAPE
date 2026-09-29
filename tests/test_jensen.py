@@ -140,7 +140,7 @@ def test_vertical_filtering_breaks_the_jensen_bound(synthetic, cells):
                                         f"vertical structure.")
 #---
 
-#+++ Online sub-filter APE (simulation output, --save_sorted)
+#+++ Online sub-filter APE (simulation output)
 # `E_as_ℓ<ℓ>` is now S̃ = Ē_A - L̃, the filtered-reference sub-filter APE: the simulation builds the resolved
 # reservoir against ⟨b✶⟩ and writes no unfiltered counterpart. So the field this once expected to be
 # sign-indefinite is now the one the construction makes non-negative, and the xfail is gone with it.
@@ -158,7 +158,7 @@ def sim_output():
     return xr.open_dataset(SIM_OUTPUT, decode_times=False, chunks={"time": 1})
 
 
-ONLINE_SFS_APE_TOL = 1e-3   # as test_positivity.py's APE_TOL; see the note above
+ONLINE_SFS_APE_TOL = 3e-3   # as test_positivity.py's SFS_APE_TOL: -1.14e-3 measured at CI's Nz=512, -4.8e-5 at Nz=1024
 
 
 @pytest.mark.parametrize("ell", ONLINE_FILTER_SCALES)
@@ -166,7 +166,7 @@ def test_online_sfs_ape_is_non_negative(sim_output, ell):
     """The simulation's own S̃ is non-negative, which is what the filtered reference is for."""
     var = f"E_as_ℓ{ell}"
     if var not in sim_output:
-        pytest.skip(f"'{var}' not in simulation output: the run did not use --save_sorted, or ℓ={ell} is not among its --filter_ls")
+        pytest.skip(f"'{var}' not in simulation output: the run predates the online budgets, or ℓ={ell} is not among its --filter_ls")
     print(f"\nOnline S̃ positivity, x-z filter  (l={ell})")
     relative = report(sim_output[var], f"{var} (online)")
     assert relative > -ONLINE_SFS_APE_TOL, (

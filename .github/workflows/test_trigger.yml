@@ -53,9 +53,12 @@ jobs:
               state: 'pending',
               description: 'Tests dispatched…',
             };
-            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (time-varying ref)' });
-            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (fixed ref)' });
-            await github.rest.repos.createCommitStatus({ ...params, context: 'Gaussian Filter Test' });
+            // Only the combined context is marked pending here. test.yml's jobs post their own contexts when
+            // they finish and its report job resolves this one. A per-job name set to pending here would have
+            // to match test.yml exactly, and this workflow runs from main, so after a rename on a branch it
+            // would stay pending on the PR forever: a commit status never expires. The report job also closes
+            // any status still pending on the commit, which covers older copies of this file.
+            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests' });
 
       - name: Dispatch test workflow on PR branch
         env:

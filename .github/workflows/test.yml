@@ -21,7 +21,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Run the Julia simulation once; both test jobs share its output.
+  # Run the Julia simulation once; the test jobs share its output.
   # ---------------------------------------------------------------------------
   simulate:
     name: Run simulation
@@ -45,25 +45,25 @@ jobs:
       - name: Install Julia packages
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
-      # --save_sorted adds the Winters sorted reference state, which tests/test_online_vs_offline.py
-      # checks against the offline sort. It costs one extra sort per output and no extra 3D fields.
+      # Every term of both SFS budgets is written unconditionally. --save_sorted adds the validation-only
+      # view of the sorted reference state (the two model-grid z✶ methods, the column, ∫E_b), which the
+      # inv06/inv07 scripts of the offline-check job compare against the offline sort.
       # The tests find this run through STEM in tests/conftest.py, which has to change with --Nz.
-      - name: Run simulation (Nz=1024, CPU)
-        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 1024 --Ri 0.1 --stop_time 70 --Re0 1e-3 --filter_ls 1 7 --save_sorted
+      - name: Run simulation (Nz=512, CPU)
+        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3 --filter_ls 1 7 --save_sorted
 
       - name: Upload simulation output
         uses: actions/upload-artifact@v4
         with:
           name: simulation-output
           path: |
-            output/khi_Nz1024_Ri0.10.nc
-            output/khi_Nz1024_Ri0.10_2d.nc
+            output/khi_Nz512_Ri0.10.nc
+            output/khi_Nz512_Ri0.10_2d.nc
           compression-level: 9
           retention-days: 2
 
       # The panels animations drawn from the online 2D fields at the end of the simulation, the same
-      # figure the postprocessing jobs later build offline (animation-time-varying), so the two
-      # artifacts give an online-vs-offline side-by-side of one run.
+      # figure anim1_panels.py later draws from the assembled budget files (animation-online-budgets).
       - name: Upload online animations
         if: always()
         uses: actions/upload-artifact@v4
@@ -131,13 +131,14 @@ jobs:
 
 
   # ---------------------------------------------------------------------------
-  # Test job template — instantiated twice below (time-varying / fixed-ref).
+  # The budgets as produced: assembled from the simulation's online terms, then the closure and
+  # positivity tests. Minutes of Python.
   # ---------------------------------------------------------------------------
-  test-time-varying:
-    name: Test (time-varying reference)
+  test-online:
+    name: Test (online budgets)
     needs: simulate
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
 
     permissions:
       contents: read
@@ -164,11 +165,11 @@ jobs:
       - name: Create output directories
         run: mkdir -p figures animations postprocessing/output
 
-      - name: Run postprocessing pipeline
+      - name: Assemble and plot the budgets
         working-directory: postprocessing
-        run: N_WORKERS=2 bash 00_get_budgets.sh output/khi_Nz1024_Ri0.10.nc --filter-scales 1 7
+        run: bash 00_get_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
 
-      - name: Run budget closure tests
+      - name: Run budget closure and positivity tests
         id: pytest
         run: pytest tests/ -v -s
 
@@ -181,7 +182,7 @@ jobs:
         working-directory: postprocessing
         run: |
           for l in 1 7; do
-            python anim1_panels.py --filename output/khi_Nz1024_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8
+            python anim1_panels.py --filename output/khi_Nz512_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8
           done
 
       - name: List output files
@@ -189,8 +190,6 @@ jobs:
         run: |
           echo "=== figures/ ==="
           ls -la figures/ || echo "(directory missing)"
-          echo "=== figures/validation/ ==="
-          ls -la figures/validation/ || echo "(directory missing)"
           echo "=== animations/ ==="
           ls -la animations/ || echo "(directory missing)"
           echo "=== postprocessing/output/ ==="
@@ -200,21 +199,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: budget-plots-time-varying
+          name: budget-plots
           path: figures/*.png
-          if-no-files-found: warn
-          retention-days: 20
-
-      # The online-vs-offline comparison figures written by the validation scripts that
-      # tests/test_online_vs_offline.py runs (inv01/inv02/inv05/inv06/inv07). They go in their own
-      # subdirectory, so `figures/*.png` above does not pick them up. Uploaded on `always()` so the
-      # plots are still there to look at when a comparison fails — which is when they matter most.
-      - name: Upload online-vs-offline validation plots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: validation-plots-time-varying
-          path: figures/validation/*.png
           if-no-files-found: warn
           retention-days: 20
 
@@ -222,16 +208,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: animation-time-varying
+          name: animation-online-budgets
           path: animations/*.mp4
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload postprocessing NetCDF files
+      - name: Upload budget NetCDF files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: postprocessing-output-time-varying
+          name: postprocessing-output
           path: postprocessing/output/*_integrated.nc
           if-no-files-found: warn
           retention-days: 14
@@ -249,14 +235,20 @@ jobs:
               state: success ? 'success' : 'failure',
               target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
               description: success ? 'All budget tests passed' : 'Budget tests failed',
-              context: 'Budget Closure Tests (time-varying ref)',
+              context: 'Budget Closure Tests (online)',
             });
 
-  test-fixed-ref:
-    name: Test (fixed reference)
+  # ---------------------------------------------------------------------------
+  # The offline pipeline as a cross-check: postprocessing/offline/ recomputes every term independently
+  # (scipy filtering on a padded domain, a numpy sort, an FFT-filtered reference profile) and
+  # tests/test_offline_check.py compares each against the assembled online budgets; the inv0* validation
+  # scripts of tests/test_online_vs_offline.py run here too. About an hour at this resolution.
+  # ---------------------------------------------------------------------------
+  test-offline-check:
+    name: Test (offline pipeline reproduces the online budgets)
     needs: simulate
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
 
     permissions:
       contents: read
@@ -283,60 +275,43 @@ jobs:
       - name: Create output directories
         run: mkdir -p figures animations postprocessing/output
 
-      - name: Run postprocessing pipeline (fixed reference)
+      - name: Assemble the online budgets
         working-directory: postprocessing
-        run: bash 00_get_budgets.sh output/khi_Nz1024_Ri0.10.nc --filter-scales 1 7 --fixed-reference
+        run: python 01_online_budgets.py --filename output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
 
-      - name: Run budget closure tests (fixed reference)
+      - name: Run the offline pipeline
+        working-directory: postprocessing
+        run: N_WORKERS=2 bash offline/run_offline_budgets.sh output/khi_Nz512_Ri0.10.nc --filter-scales 1 7
+
+      - name: Compare offline against online, and run the validation scripts
         id: pytest
-        run: pytest tests/ -v -s --ref-suffix _fixed_ref
-
-      - name: Install ffmpeg
-        if: always() && steps.pytest.outcome == 'success'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Generate animations (fixed reference, filter scales 1 and 7)
-        if: always() && steps.pytest.outcome == 'success'
-        working-directory: postprocessing
-        run: |
-          for l in 1 7; do
-            python anim1_panels.py --filename output/khi_Nz1024_Ri0.10.nc --filter-scale $l --dpi 100 --fps 8 --fixed-reference
-          done
+        run: pytest tests/test_offline_check.py tests/test_online_vs_offline.py -v -s --offline-check
 
       - name: List output files
         if: always()
         run: |
-          echo "=== figures/ ==="
-          ls -la figures/ || echo "(directory missing)"
-          echo "=== animations/ ==="
-          ls -la animations/ || echo "(directory missing)"
-          echo "=== postprocessing/output/ ==="
-          ls -la postprocessing/output/ || echo "(directory missing)"
+          echo "=== figures/validation/ ==="
+          ls -la figures/validation/ || echo "(directory missing)"
+          echo "=== postprocessing/output/offline/ ==="
+          ls -la postprocessing/output/offline/ || echo "(directory missing)"
 
-      - name: Upload budget plots
+      # The online-vs-offline comparison figures written by the validation scripts. Uploaded on
+      # `always()` so the plots are still there to look at when a comparison fails.
+      - name: Upload online-vs-offline validation plots
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: budget-plots-fixed-ref
-          path: figures/*.png
+          name: validation-plots
+          path: figures/validation/*.png
           if-no-files-found: warn
           retention-days: 20
 
-      - name: Upload animation (fixed reference)
+      - name: Upload offline budget NetCDF files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: animation-fixed-ref
-          path: animations/*.mp4
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload postprocessing NetCDF files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: postprocessing-output-fixed-ref
-          path: postprocessing/output/*_integrated.nc
+          name: postprocessing-output-offline
+          path: postprocessing/output/offline/*_integrated.nc
           if-no-files-found: warn
           retention-days: 14
 
@@ -352,17 +327,19 @@ jobs:
               sha: '${{ inputs.head_sha }}',
               state: success ? 'success' : 'failure',
               target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
-              description: success ? 'All budget tests passed' : 'Budget tests failed',
-              context: 'Budget Closure Tests (fixed ref)',
+              description: success ? 'Offline pipeline reproduces the online budgets' : 'Offline check failed',
+              context: 'Budget Closure Tests (offline check)',
             });
 
   # ---------------------------------------------------------------------------
-  # Combined report — updates the original 'Budget Closure Tests' context that
-  # test_trigger.yml sets to pending, so the PR check resolves.
+  # Combined report — resolves the 'Budget Closure Tests' context that test_trigger.yml sets to pending,
+  # so the PR check resolves, then closes any other status still pending on the commit: a commit status
+  # never expires, and the trigger runs from main, so a context it named before a rename here would
+  # otherwise stay pending on the PR for good and mask the result at a glance.
   # ---------------------------------------------------------------------------
   report:
     name: Report combined status
-    needs: [test-time-varying, test-fixed-ref, test-gaussian-filter]
+    needs: [test-online, test-offline-check, test-gaussian-filter]
     runs-on: ubuntu-latest
     if: inputs.head_sha != '' && always()
 
@@ -374,16 +351,27 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const tv = '${{ needs.test-time-varying.result }}';
-            const fr = '${{ needs.test-fixed-ref.result }}';
+            const on = '${{ needs.test-online.result }}';
+            const off = '${{ needs.test-offline-check.result }}';
             const gf = '${{ needs.test-gaussian-filter.result }}';
-            const success = tv === 'success' && fr === 'success' && gf === 'success';
-            github.rest.repos.createCommitStatus({
+            const success = on === 'success' && off === 'success' && gf === 'success';
+            const sha = '${{ inputs.head_sha }}';
+            const post = (name, description) => github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ inputs.head_sha }}',
+              sha,
               state: success ? 'success' : 'failure',
               target_url: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
-              description: success ? 'All budget tests passed' : 'One or more budget tests failed',
-              context: 'Budget Closure Tests',
+              description,
+              context: name,
             });
+            await post('Budget Closure Tests', success ? 'All budget tests passed' : 'One or more budget tests failed');
+            // Every job has finished by now, so a context still pending is a leftover of the trigger and nothing
+            // will ever update it; close it with the combined result so the commit's state reads at a glance.
+            const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef,
+                                                   { owner: context.repo.owner, repo: context.repo.repo, ref: sha, per_page: 100 });
+            const latest = new Map();   // newest first: the first status seen per context is its current state
+            for (const s of statuses) if (!latest.has(s.context)) latest.set(s.context, s);
+            for (const [name, s] of latest)
+              if (s.state === 'pending' && s.creator?.login === 'github-actions[bot]')
+                await post(name, `Retired context, closed with the combined result: ${success ? 'passed' : 'failed'}`);

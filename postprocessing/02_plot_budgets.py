@@ -4,31 +4,25 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import PP_OUTPUT, reference_suffix
+from src.aux00_utils import PP_OUTPUT
 from src.aux03_plotting import budget_colors, run_label
 #---
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Plot SFS KE and APE budget terms from saved budget files")
+parser = argparse.ArgumentParser(description="Plot the integrated SFS KE and APE budgets written by 01_online_budgets.py")
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc",
                     help="Path to simulation NetCDF file (used to derive budget filenames)")
-parser.add_argument("--fixed-reference", action="store_true", default=False,
-                    help="Load the fixed-in-time reference profile outputs (produced by pipeline with --fixed-reference)")
-parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
-                    help="Plot the budgets built with this --reference (03-05 tag the 'true' ones _trueref)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
-fixed_reference = args.fixed_reference
-ref_suffix = ("_fixed_ref" if fixed_reference else "") + reference_suffix(args.reference)
 #---
 
 #+++ Load budget data
 print("Loading budget data...")
-ke_filename  = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated{ref_suffix}.nc"))
-ape_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated{ref_suffix}.nc"))
+ke_filename  = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ke_budget_integrated.nc"))
+ape_filename = str(PP_OUTPUT / (Path(filename).stem + f"_sfs_ape_budget_integrated.nc"))
 ke_budget  = xr.open_dataset(ke_filename,  decode_timedelta=False)
 ape_budget = xr.open_dataset(ape_filename, decode_timedelta=False)
 filter_scales = ke_budget.filter_scale.values
@@ -80,14 +74,10 @@ for ℓ in filter_scales:
     axes[0].set_ylim(ymin, ymax)
     axes[1].set_ylim(ymin, ymax)
 
-    if label and fixed_reference:
-        fig.suptitle(f"{label} (fixed reference)", fontsize=11)
-    elif label:
+    if label:
         fig.suptitle(label, fontsize=11)
-    elif fixed_reference:
-        fig.suptitle("(fixed reference)", fontsize=11)
 
-    plot_filename = str(REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}{ref_suffix}.png"))
+    plot_filename = str(REPO_ROOT / "figures" / (Path(filename).stem + f"_sfs_budgets_l{ℓ:.4f}.png"))
     fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Plot saved to: {plot_filename}")

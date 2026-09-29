@@ -9,8 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from src.aux00_utils import PP_OUTPUT, reference_suffix
-from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, calculate_b_r
+from src.aux00_utils import PP_OUTPUT
 from src.aux03_plotting import run_label, budget_colors
 #---
 
@@ -26,9 +25,6 @@ parser.add_argument("--clim-percentile", type=float, default=99, help="Percentil
 parser.add_argument("--zlim", type=float, default=3.8, help="Vertical extent for z-axis (symmetric around 0)")
 parser.add_argument("--fps", type=int, default=12, help="Frames per second")
 parser.add_argument("--dpi", type=int, default=150, help="DPI for output video")
-parser.add_argument("--fixed-reference", action="store_true", default=False, help="Load the fixed-in-time reference profile outputs")
-parser.add_argument("--reference", choices=["filtered", "true"], default="filtered",
-                    help="Read the output built with this --reference (03-05 and sweep2 tag the 'true' ones _trueref)")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 
@@ -39,8 +35,7 @@ ANIMATIONS.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 filename_2d = filename.replace(".nc", "_2d.nc")
-fixed_suffix = "_fixed_ref" if args.fixed_reference else ""   # 02's sorted density carries only this tag
-ref_suffix = fixed_suffix + reference_suffix(args.reference)   # adds _trueref for --reference true
+ref_suffix = ""
 #---
 
 #+++ Load datasets
@@ -65,10 +60,10 @@ ape_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref
 ke_int = ke_int.sel(filter_scale=ℓ_sel, method="nearest")
 ape_int = ape_int.sel(filter_scale=ℓ_sel, method="nearest")
 
-print("Loading sorted density and computing b_r...")
-ds_sorted = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sorted_density{fixed_suffix}.nc"), decode_times=False)
-_ds_for_rho = calculate_density_fields_from_buoyancy(ds_2d[["b"]].copy(), buoyancy_name="b", density_name="ρ")
-ds_2d["b_r"] = calculate_b_r(_ds_for_rho["ρ"], ds_sorted["rho_sorted"]).transpose(*_ds_for_rho["ρ"].dims)
+# b_r = b - b✶(z) comes from the simulation itself (the 2D writer carries it), measured against the same
+# sorted column as every online budget term.
+if "b_r" not in ds_2d:
+    raise SystemExit(f"'b_r' not in {filename_2d}: rerun the simulation with the current kelvin_helmholtz_instability.jl")
 #---
 
 #+++ Reindex 2D data to budget time coordinate

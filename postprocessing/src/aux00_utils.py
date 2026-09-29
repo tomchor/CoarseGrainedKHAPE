@@ -255,15 +255,6 @@ def scale_subset_tag(filter_scales):
     return "" if filter_scales is None else "_l" + "-".join(f"{float(s):g}" for s in filter_scales)
 
 
-def reference_suffix(reference):
-    """Filename tag for `--reference true`, so its output never overwrites the default (filtered) run's.
-
-    02's sorted density does not depend on the reference and carries no tag; the outputs of 03-06 and
-    sweep2 do, and 03/04 also record the reference as the `ape_reference` attribute that 05 checks.
-    """
-    return "" if reference == "filtered" else f"_{reference}ref"
-
-
 def extension_of(ds_filt):
     """The wall extension the filtering step used, so every later step extends identically."""
     return ds_filt.attrs.get("z_extension", "edge")
@@ -278,7 +269,7 @@ def extension_for_run(filtered_filename):
         return "edge"
 
 
-def load_dataset_and_grid(filename, min_margin=None, extension="edge"):
+def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True):
     """
     Load the simulation output and grid information
 
@@ -286,6 +277,11 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge"):
     ----------
     filename : str
         Path to the NetCDF file
+    pad : bool
+        Extend the z domain past both walls (see `_pad_domain_in_z`), which the offline filtering needs so
+        its stencil stays inside the array. `pad=False` returns the simulation's own grid, with the same
+        `dV`, `dV_physical` and padding attributes (`n_pad_z=0`) the padded dataset carries, so the readers
+        of the online budget terms and the padded offline pipeline present one interface downstream.
 
     Returns
     -------
@@ -293,7 +289,7 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge"):
         Dataset with grid information added as attributes and variables,
         with the z domain extended to 2x its original height by padding each
         field with its bottom/top edge values and extending z coordinates by
-        the uniform grid spacing.
+        the uniform grid spacing (unless `pad=False`).
     """
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False, chunks={})
@@ -320,6 +316,19 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge"):
     # Add volume and area variables
     ds["dV"] = ds.Δx_caa * ds.Δy_aca * ds.Δz_aac
     ds["LxLy"] = ds.Lx * ds.Ly
+
+    if not pad:
+        # The simulation's own grid: every cell is physical, so the integration weight is the cell volume
+        # and the padding attributes record that there is none. `Lz` is the true domain height here, where
+        # `_pad_domain_in_z` would have widened it to the padded extent.
+        dz = float(ds.Δz_aac.isel(z_aac=0))
+        ds["dV_physical"] = ds["dV"]
+        ds.attrs["n_pad_z"]          = 0
+        ds.attrs["z_extension"]      = "none"
+        ds.attrs["z_extension_vars"] = ""
+        ds.attrs["z_min_physical"]   = float(ds.z_aac.values[0])  - dz / 2
+        ds.attrs["z_max_physical"]   = float(ds.z_aac.values[-1]) + dz / 2
+        return ds
 
     # Pad domain in z: at least Nz//2 cells each side, more when a filter needs it (see _pad_domain_in_z)
     ds = _pad_domain_in_z(ds, min_margin=min_margin, extension=extension)

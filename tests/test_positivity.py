@@ -24,9 +24,8 @@ checks it on real pipeline output.
 The total KE ½uᵢuᵢ is absent for the opposite reason: it is a sum of squares, so a test of its sign
 would only be testing numpy.
 
-Both reference-profile variants are covered, since CI runs the suite twice (`--ref-suffix`).
-Positivity needs the reference profile to be monotone in z, not to be the sort of the current field,
-so it holds for either.
+The budget files are assembled from the simulation's online terms (`postprocessing/01_online_budgets.py`),
+on the simulation's own grid, so there is no z padding to cut (`n_pad_z = 0` in their attributes).
 """
 
 import pytest
@@ -50,20 +49,18 @@ APE_TOL = 1e-3
 KE_TOL = 1e-8
 
 # SFS APE under the filtered reference: S̃ inherits the same nearest-density lookup as Eₐ, on both of the
-# two profiles it now involves, so it is held to the same bound rather than to roundoff.
-SFS_APE_TOL = APE_TOL
+# two profiles it now involves, so it is held to a lookup-sized bound rather than to roundoff. The dip below
+# zero shrinks with the model resolution, not with the profile's: measured min/rms at ℓ=1 is -9.4e-3 at Nz=128,
+# -1.14e-3 at Nz=512 (CI) and -4.8e-5 at Nz=1024. 3e-3 clears the CI resolution and is still two decades below
+# the -0.7 a construction error gives (the unfiltered remainder, before PR #68).
+SFS_APE_TOL = 3e-3
 #---
 
 #+++ Helpers
-@pytest.fixture(scope="session")
-def ref_suffix(request):
-    return request.config.getoption("--ref-suffix")
-
-
-def load(suffix, ref_suffix=""):
+def load(suffix):
     """Open one of the 4D field files. Chunked: these hold every local budget field, so they are far
     too big to pull into memory whole."""
-    path = PP_OUTPUT / f"{STEM}_{suffix}{ref_suffix}.nc"
+    path = PP_OUTPUT / f"{STEM}_{suffix}.nc"
     assert path.exists(), f"Output file not found: {path}"
     return xr.open_dataset(path, decode_timedelta=False, chunks={"time": 1})
 
@@ -92,12 +89,14 @@ APE_FIELDS = [
 ]
 
 @pytest.fixture(scope="module")
-def ape_fields(ref_suffix):
-    return load("sfs_ape_budget_fields", ref_suffix)
+def ape_fields():
+    return load("sfs_ape_budget_fields")
 
 
 @pytest.mark.parametrize("var", APE_FIELDS)
 def test_local_ape_is_positive(ape_fields, l_idx, var):
+    if var not in ape_fields:
+        pytest.skip(f"'{var}' not in the budget file: the simulation output predates the online L̃ and Ē_A")
     l = ape_fields.filter_scale.values[l_idx]
     print(f"\nLocal APE  (l={l:.4f})")
     check_positive(ape_fields[var].sel(filter_scale=l), var, APE_TOL)
@@ -105,8 +104,8 @@ def test_local_ape_is_positive(ape_fields, l_idx, var):
 
 #+++ SFS KE (offline pipeline)
 @pytest.fixture(scope="module")
-def ke_fields(ref_suffix):
-    return load("sfs_ke_budget_fields", ref_suffix)
+def ke_fields():
+    return load("sfs_ke_budget_fields")
 
 
 def test_sfs_ke_is_positive(ke_fields, l_idx):
@@ -147,17 +146,16 @@ def test_sfs_ape_is_positive(ape_fields, l_idx):
         pytest.skip(f"budget built with ape_reference={reference!r}; S̃ ≥ 0 only holds for 'filtered'")
 
     l = ape_fields.filter_scale.values[l_idx]
-    # Files written before `n_pad_z` was recorded carry the old default, which is Nz_padded//4 per side.
+    # The online budgets carry no padding (n_pad_z = 0); the offline files record theirs.
     n_pad = ape_fields.attrs.get("n_pad_z", ape_fields.sizes["z_aac"] // 4)
     print(f"\nSFS APE, filtered reference  (l={l:.4f}, dropping {int(n_pad)} padded cells per side)")
     check_positive(drop_padding(ape_fields["Eaˢ(ρ, z)"].sel(filter_scale=l), int(n_pad)),
                    "Eaˢ(ρ, z)", SFS_APE_TOL)
 #---
 
-#+++ Local APE (online, --save_sorted)
-# The simulation's own Eₐ, built from Oceanostics' ThreeDimensionalSort z✶ instead of the offline
-# nearest-density lookup: a second implementation of the same integral, and the only check here that
-# sees the Julia side. Written only under --save_sorted (which CI uses), so it skips otherwise.
+#+++ Local APE (online)
+# The simulation's own Eₐ, built from Oceanostics' ProfileLookup z✶ on the sorted column, straight from the
+# simulation file rather than through the assembled budget.
 @pytest.fixture(scope="module")
 def sim_output():
     if not SIM_OUTPUT.exists():
@@ -168,7 +166,7 @@ def sim_output():
 @pytest.mark.parametrize("var", ["E_a", "∫E_a"])
 def test_online_local_ape_is_positive(sim_output, var):
     if var not in sim_output:
-        pytest.skip(f"'{var}' not in simulation output — the run did not use --save_sorted")
+        pytest.skip(f"'{var}' not in simulation output — the run predates the online budgets")
     print(f"\nOnline local APE")
     check_positive(sim_output[var], var, APE_TOL)
 #---

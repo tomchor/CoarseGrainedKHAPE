@@ -2,20 +2,24 @@
 # Submit the simulation and post-processing as chained PBS jobs (afterok dependencies);
 # each stage only runs if the previous one succeeds. Optional validation and plotting stages.
 #
-#   simulation → budgeting_filter → budgeting → sweep_filter → sweep_transfer   (always)
+#   simulation → budgeting → sweep_filter → sweep_transfer                      (always)
 #   + validation  (online-vs-offline figures + animations; parallel after sim)  (VALIDATE=1)
 #   + plots       (plot2 transfer spectrum, plot3 budgets, plot4 panels)        (PLOTS=1)
 #
-# Usage: bash submit_all_pbs.sh [NZ=2048] [FIXED_REF=0] [VALIDATE=0] [PLOTS=0] [SAVE_SORTED=1]
+# The SFS KE and APE budgets are computed by the simulation itself; `budgeting` assembles and plots them
+# (postprocessing/01_online_budgets.py, 02_plot_budgets.py). The sweep over filter scales stays offline.
+#
+# Usage: bash submit_all_pbs.sh [NZ=2048] [VALIDATE=0] [PLOTS=0] [SAVE_SORTED=1] [FIXED_REF=0]
 #   NZ         vertical resolution
-#   FIXED_REF  use fixed-in-time reference profile: 0 or 1
 #   VALIDATE   also run the online-vs-offline validation (adds --save_tensors for the tensor comparison and
-#              forces --save_sorted, which inv06-inv10 read): 0 or 1
-#   SAVE_SORTED  write the sorted reference state and the online APE budget terms (default 1): 0 or 1
+#              forces --save_sorted, which inv06-inv07 read): 0 or 1
+#   SAVE_SORTED  also write the validation-only sorted-state fields (default 1): 0 or 1. The budgets do not
+#              depend on it.
 #   PLOTS      also run the final plots after sweep_transfer: 0 or 1
+#   FIXED_REF  the sweep transfer's fixed-in-time reference profile (the budgets have no such variant): 0 or 1
 #
 # To run post-processing alone:
-#   bash postprocessing/submit_budgeting.sh [NZ=2048] [FIXED_REF=0|1|both]
+#   bash postprocessing/submit_budgeting.sh [NZ=2048]
 
 NZ=2048; FIXED_REF=0; VALIDATE=0; PLOTS=0
 # An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
@@ -30,20 +34,25 @@ esac; done
 # The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
 : "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
 : "${KHAPE_PYTHON:?set KHAPE_PYTHON to the python of your py313 environment; see the README, Environment}"
+# Optional output redirection: $KHAPE_OUTPUT_DIR (simulation output) and $KHAPE_PP_OUTPUT (post-processing output)
+# are forwarded to every job when set, so a run can write beside the production output instead of over it. The
+# PBS scripts, kelvin_helmholtz_instability.jl and src/aux00_utils.py all read them; give absolute paths.
+REDIRECT=""
+[ -n "${KHAPE_OUTPUT_DIR:-}" ] && REDIRECT="$REDIRECT,KHAPE_OUTPUT_DIR=$KHAPE_OUTPUT_DIR"
+[ -n "${KHAPE_PP_OUTPUT:-}" ]  && REDIRECT="$REDIRECT,KHAPE_PP_OUTPUT=$KHAPE_PP_OUTPUT"
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
-# --save_sorted is on by default. It writes the sorted reference state and the online APE budget terms, the
-# cross-check that the validation job (inv06-inv10) and the online panels animation use. The offline budget
-# does not read them: 03 and 05 compute Pi_A and eps_As themselves, against the exact filtered profile.
-# SAVE_SORTED=0 gives smaller output and changes no budget number; VALIDATE=1 turns it back on.
+# --save_sorted writes the validation-only sorted-state fields (the two model-grid z✶ methods, the column,
+# ∫E_b) that inv06-inv07 read. Every budget term is written regardless, so SAVE_SORTED=0 gives smaller
+# output and changes no budget number; VALIDATE=1 turns it back on.
 SAVE_SORTED=${SAVE_SORTED:-1}
-if [ "$VALIDATE" = "1" ]; then SAVE_SORTED=1; fi          # inv06-inv10 read the sorted state
+if [ "$VALIDATE" = "1" ]; then SAVE_SORTED=1; fi          # inv06-inv07 read the sorted state
 [ "$VALIDATE" = "1" ] && SAVE_TENSORS=1 || SAVE_TENSORS=0   # inv03 reads the per-scale tensors
 
 SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
                -A "$KHAPE_ACCOUNT" \
                -o logs/kelvin_helmholtz_${NZ}.log \
                -e logs/kelvin_helmholtz_${NZ}.log \
-               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED simulation.pbs)
+               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED$REDIRECT simulation.pbs)
 echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS, save_sorted=$SAVE_SORTED): $SIM_JOB"
 
 # Optional validation — parallel branch, runs after the simulation succeeds
@@ -55,7 +64,7 @@ if [ "$VALIDATE" = "1" ]; then
                    -A "$KHAPE_ACCOUNT" \
                    -o "logs/${VAL_NAME}.log" \
                    -e "logs/${VAL_NAME}.log" \
-                   -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+                   -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
                    -W depend=afterok:$SIM_JOB \
                    validation.pbs)
     echo "Submitted validation (depends on $SIM_JOB): $VAL_JOB"
@@ -64,32 +73,22 @@ fi
 
 cd postprocessing
 
-BF_NAME="budgeting_filter_Nz${NZ}_Ri0.10"
-BF_JOB=$(qsub -N "$BF_NAME" \
-              -A "$KHAPE_ACCOUNT" \
-              -o "logs/${BF_NAME}.log" \
-              -e "logs/${BF_NAME}.log" \
-              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
-              -W depend=afterok:$SIM_JOB \
-              budgeting_filter.pbs)
-echo "Submitted budgeting filter (depends on $SIM_JOB): $BF_JOB"
-
-PP_NAME="budgeting_Nz${NZ}_Ri0.10${REF_SUFFIX}"
+PP_NAME="budgeting_Nz${NZ}_Ri0.10"
 PP_JOB=$(qsub -N "$PP_NAME" \
               -A "$KHAPE_ACCOUNT" \
               -o "logs/${PP_NAME}.log" \
               -e "logs/${PP_NAME}.log" \
-              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON \
-              -W depend=afterok:$BF_JOB \
+              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
+              -W depend=afterok:$SIM_JOB \
               budgeting.pbs)
-echo "Submitted budgeting (depends on $BF_JOB): $PP_JOB"
+echo "Submitted budgeting (depends on $SIM_JOB): $PP_JOB"
 
 SF_NAME="sweep_filter_Nz${NZ}_Ri0.10"
 SF_JOB=$(qsub -N "$SF_NAME" \
               -A "$KHAPE_ACCOUNT" \
               -o "logs/${SF_NAME}.log" \
               -e "logs/${SF_NAME}.log" \
-              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+              -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
               -W depend=afterok:$PP_JOB \
               sweep_filter.pbs)
 echo "Submitted sweep filter (depends on $PP_JOB): $SF_JOB"
@@ -99,7 +98,7 @@ ST_JOB=$(qsub -N "$ST_NAME" \
               -A "$KHAPE_ACCOUNT" \
               -o "logs/${ST_NAME}.log" \
               -e "logs/${ST_NAME}.log" \
-              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON \
+              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
               -W depend=afterok:$SF_JOB \
               sweep_transfer.pbs)
 echo "Submitted sweep transfer (depends on $SF_JOB): $ST_JOB"
@@ -111,7 +110,7 @@ if [ "$PLOTS" = "1" ]; then
                      -A "$KHAPE_ACCOUNT" \
                      -o "logs/${PLOTS_NAME}.log" \
                      -e "logs/${PLOTS_NAME}.log" \
-                     -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+                     -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT \
                      -W depend=afterok:$ST_JOB \
                      plots.pbs)
     echo "Submitted final plots (depends on $ST_JOB): $PLOTS_JOB"
