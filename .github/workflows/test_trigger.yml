@@ -53,8 +53,11 @@ jobs:
               state: 'pending',
               description: 'Tests dispatched…',
             };
-            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (time-varying ref)' });
-            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (fixed ref)' });
+            // One context per job of test.yml, plus the combined one its report job resolves. A context set to
+            // pending here that test.yml no longer reports on stays pending on the PR forever.
+            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests' });
+            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (online)' });
+            await github.rest.repos.createCommitStatus({ ...params, context: 'Budget Closure Tests (offline check)' });
             await github.rest.repos.createCommitStatus({ ...params, context: 'Gaussian Filter Test' });
 
       - name: Dispatch test workflow on PR branch

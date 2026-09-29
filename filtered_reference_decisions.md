@@ -339,3 +339,44 @@ since its measured cost is below every one of those differences; porting the FFT
 (§6) and would remove the last construction difference, but nothing now depends on it. The
 `--fixed-reference` budget variant and the `--reference true` comparison were dropped with the offline
 product; the sweep keeps its own frozen column.
+
+## 10. The closure metric: normalised by the mean term, 1% online and 3% offline
+
+`2026-09-29`. CI at Nz=512 (PR #70, run 36436052977) failed on one assertion: the offline APE budget's own
+closure at ℓ=7, 19.8% of the smallest term against the 10% threshold, while all 41 term-by-term comparisons
+passed. Decomposing the offline residual against the online one from the run's own artifacts (30 records,
+t ≥ 10):
+
+| APE, ℓ=7 | rms(off − on) | as a fraction of rms(∫Rˢ dV), the smallest term |
+|---|---|---|
+| ∫-∂ₜEₐˢ dV | 1e-7 | 0.00% |
+| ∫Π_A dV | 3e-5 | 0.13% |
+| ∫-ε_Aˢ dV | 4.7e-3 | 21.1% |
+| ∫τ dV | 6e-8 | 0.00% |
+| ∫Rˢ dV | 8e-6 | 0.04% |
+
+The ε_Aˢ difference correlates with residual_off − residual_on at +1.0000, and with the online ε_Aˢ
+substituted the offline closure is 3.82% against the online 3.83%. So the failure is §2's discretisation gap
+(centred against face-paired gradients, 1.6% of ε_Aˢ's rms at Nz=512, growing with Δz) read against a
+denominator, ∫Rˢ dV, that is a thirteenth of ε_Aˢ at ℓ=7. The same assertion gave 8.5% at Nz=1024.
+
+The metric now divides rms(residual) by the mean of the terms' rms, so that no single small term sets it; a
+fractional error in one term is caught once it exceeds threshold × mean/rms(term), which at ℓ=7 still means
+10% of ∫Rˢ dV for a 1% threshold. Measured, online over all records and offline from t ≥ 10:
+
+| budget, ℓ | online Nz=512 | online Nz=1024 | offline Nz=512 | offline Nz=1024 | offline with the online ε, Nz=512 |
+|---|---|---|---|---|---|
+| APE, 1 | 0.46% | 0.14% | 2.34% | 0.93% | 0.43% |
+| APE, 7 | 0.40% | 0.18% | 1.97% | 0.84% | 0.38% |
+| KE, 1 | 0.85% | 0.48% | 2.25% | 1.24% | 0.32% |
+| KE, 7 | 0.19% | 0.29% | 0.60% | 0.46% | 0.22% |
+
+The two Nz=512 runs (df18c0a, ee12061) give these to two decimals although their terms differ by a few tenths
+of a percent, the simulation not being bit-reproducible between CI runs. Thresholds: 1% online
+(`test_budgets.py`, `inv10`; KE at ℓ=1 at the CI resolution is the binding case) and 3% for the raw offline
+closure (`test_offline_check.py`, over t ≥ 10: over all records the offline KE at ℓ=1 is 2.98%). The offline
+budget cannot be held tighter than the online one: with ε substituted the two residuals agree to 1e-5, so the
+floor is in the terms' definitions (a single-step tendency against instantaneous terms, the lookup
+granularity), not in either implementation. The offline check's strictness is in its per-term tolerances. Two
+of those were loosened at the same time, ∫Π_A dV to 1e-2 and ∫Rˢ dV to 5e-3: at ℓ=7 they measured 9.3e-4 and
+9.6e-4 in one Nz=512 run and 2.6e-3 and 1.2e-3 in the other, against the 1e-3 set from Nz=1024.

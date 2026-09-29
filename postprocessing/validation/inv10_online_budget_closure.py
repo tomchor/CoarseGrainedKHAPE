@@ -8,8 +8,8 @@ offline pipeline at all:
     KE:   residual_K = -∂ₜKˢ + Π_K - ε_Kˢ + τ(w, b_r)
     APE:  residual_A = -∂ₜEₐˢ - τ(w, b_r) + Π_A - ε_Aˢ + Rˢ
 
-The metric is the one `tests/test_budgets.py` uses offline, rms(residual) / min over terms of
-rms(term), so the two are directly comparable. With `--offline-stem` the offline budget files are read
+The metric is the one `tests/test_budgets.py` applies to the assembled budget files, rms(residual) / mean
+over terms of rms(term), so the two are directly comparable. With `--offline-stem` the offline budget files are read
 too and both residuals are reported side by side, which is the comparison that matters: the online
 budget is worth having only if it closes at least as well as the offline one.
 
@@ -68,11 +68,11 @@ def rms(a):
 
 
 def relative_residual(residual, terms):
-    """rms(residual) / min over terms of rms(term), matching tests/test_budgets.py."""
+    """rms(residual) / mean over terms of rms(term), matching tests/test_budgets.py (see its docstring for why the mean)."""
     nonzero = [rms(t) for t in terms if rms(t) > 0]
     if not nonzero:
         return float("inf")
-    return rms(residual) / min(nonzero)
+    return rms(residual) / np.mean(nonzero)
 #---
 
 #+++ Load the online integrals
@@ -145,7 +145,7 @@ for name, spec in BUDGETS.items():
         for k, v in results[(name, ℓ)][0].items():
             print(f"  {k:<24}  {rms(v):.4e}")
         print(f"  {'residual':<24}  {rms(residual):.4e}")
-        check(rel, f"  {'residual / min(terms)':<24}  {rel:.3%}", print)
+        check(rel, f"  {'residual / mean(terms)':<24}  {rel:.3%}", print)
 #---
 
 #+++ Side-by-side with the offline residual
@@ -184,7 +184,7 @@ for r, name in enumerate(BUDGETS):
         for k, v in terms.items():
             ax.plot(t, v, lw=1.6, label=k)
         ax.plot(t, residual, "k--", lw=2, label="residual")
-        ax.set(xlabel="time", ylabel=f"{name} budget", title=f"{name}, ℓ = {ℓ:g}   (residual/min = {rel:.2%})")
+        ax.set(xlabel="time", ylabel=f"{name} budget", title=f"{name}, ℓ = {ℓ:g}   (residual/mean = {rel:.2%})")
         ax.legend(fontsize=7)
         ax.grid(alpha=0.3)
 fig.suptitle("Online SFS budgets" + (f"   {label}" if label else ""))

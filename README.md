@@ -206,7 +206,7 @@ Set `N_WORKERS` to control the offline pipeline's parallelism (default 1).
 
 ## Tests
 
-The test suite checks SFS KE and APE budget closure (rms residual / min rms of terms < 10%) and the sign of the energies that have one, on the budget files `01_online_budgets.py` assembles. It expects the CI run, `khi_Nz512_Ri0.10`, in `output/` with its budget files in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py` (`$KHAPE_TEST_STEM` overrides it).
+The test suite checks SFS KE and APE budget closure (rms residual / mean rms of terms < 1%) and the sign of the energies that have one, on the budget files `01_online_budgets.py` assembles. It expects the CI run, `khi_Nz512_Ri0.10`, in `output/` with its budget files in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py` (`$KHAPE_TEST_STEM` overrides it).
 
 ```bash
 pytest tests/ -v -s                                  # closure, positivity, the synthetic filter and Jensen tests (minutes)

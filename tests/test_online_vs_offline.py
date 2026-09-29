@@ -99,11 +99,12 @@ VALIDATION = REPO_ROOT / "postprocessing" / "validation"
 #
 # `inv10` is not an online-vs-offline comparison at all: every term of both budgets is now written by
 # the simulation, so it checks that the online budgets *close* on their own, with the same metric
-# `test_budgets.py` applies offline (rms(residual) / min over terms of rms(term)). It is held at the
-# same 0.10 threshold, which is what makes the two directly comparable. Measured at Nz=192/Re=262,
-# against the offline pipeline on the same run:
-#   KE  l=1  online 8.8%  offline 9.6%      KE  l=7  online 0.53%  offline 1.1%
-#   APE l=1  online 5.5%  offline 4.4%      APE l=7  online 1.9%   offline 2.4%
+# `test_budgets.py` applies to the assembled files (rms(residual) / mean over terms of rms(term)). It is
+# held at the same 0.01 threshold, which is what makes the two directly comparable. Measured at CI's
+# Nz=512 on 2026-09-28 (first pair skipped, identical in two runs of the same code): KE 0.79% (ℓ=1) and
+# 0.17% (ℓ=7), APE 0.43% and 0.38%; at Nz=1024, all records: KE 0.48% and 0.29%, APE 0.14% and 0.18%.
+# The offline pipeline's own budget sits at 2.3% (Nz=512) and 1.2% (Nz=1024) on the same runs, which is
+# its ε discretisation; test_offline_check.py holds it at 3%.
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
@@ -112,7 +113,7 @@ CASES = [
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
     pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
     pytest.param("inv09_compare_ape_transfer.py", 0.15, ["--n-workers", "2"], id="Pi_A"),
-    pytest.param("inv10_online_budget_closure.py", 0.10, [], id="online_budget_closure"),
+    pytest.param("inv10_online_budget_closure.py", 0.01, [], id="online_budget_closure"),
 ]
 
 
