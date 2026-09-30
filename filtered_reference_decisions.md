@@ -38,7 +38,7 @@ correlate at only **+0.73**, while their volume integrals agree to four figures.
 
 So the integrated budget is indifferent, and any *field* plot is not. `04` computes the exchange itself
 against `ref_rho_sorted` and no Python script reads the online `wb_rs` except `inv10`, which is the
-fully-online cross-check by design — so `plot4_panels` and `anim1_panels` are correct as they stand. Keep
+fully-online cross-check by design — so `plot6_panels` and `anim1_panels` are correct as they stand. Keep
 it that way: the online `wb_rs` is a validation output, not a plottable field.
 
 Update: the simulation now builds the online conversion on this split, filter(w(b − b✶)) − w̄(b̄ − ⟨b✶⟩), as the

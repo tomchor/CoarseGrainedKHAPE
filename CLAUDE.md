@@ -85,11 +85,12 @@ The budgets are computed by the simulation; the Python side assembles and plots 
 
 `postprocessing/validation/` holds the online-vs-offline comparison scripts, each of which recomputes a quantity offline and compares it against the simulation's online output: `inv01_compare_filters.py` (filtered fields), `inv02_compare_ke_transfer.py` (Π_K), `inv03_compare_tensor.py` (the S̄/τ tensor components), `inv05_compare_dissipation.py` (SFS KE dissipation ε_Kˢ), `inv06_compare_sorted_profiles.py` (the Winters sorted reference state: the sorted profile b✶(z✶) and the reference height z✶, for all three sorting methods), `inv07_compare_local_ape.py` (the local available potential energy Eₐ, field and integral), `inv08_compare_sfs_ape_dissipation.py` (the sub-filter APE dissipation ε_Aˢ at every filter scale, field and integral), and `inv09_compare_ape_transfer.py` (the cross-scale APE flux Π_A). `inv10_online_budget_closure.py` checks that the online budgets close from the `_int` series alone (`--offline-stem` sets the offline pipeline's residual beside it). `inv04_animate_comparison.py` makes the animated online | offline | difference version for a chosen `--field` (Π_K, ε_Ks, or a filtered field). `validation.pbs` runs them all. Each writes exactly **one** figure, to `figures/validation/` (their own subdirectory, so they stay separable from the budget and paper figures in `figures/`); CI uploads that directory as the `validation-plots` artifact. The tensor-component comparison (`inv03`) needs a `--save_tensors` run and the sorted-state comparison (`inv06`) a `--save_sorted` run; every budget term is always written.
 
-Standalone visualization scripts (not part of the numbered pipeline):
-- `plot1_panels.py` -- 4-panel snapshot of local SFS budget fields
-- `plot2_budgets.py` -- 2x2 panel of SFS KE and APE budget time series
-- `plot3_plot_transfer_spectrum.py` -- cross-scale transfer spectra
-- `anim1_panels.py` -- animated version of plot1 panels (requires ffmpeg); reads the assembled budget files and the online `b_r` from the `_2d.nc` file
+Standalone visualization scripts (not part of the numbered pipeline; `plots.pbs` runs every `plot*.py`, in name order, so a figure script must take `--filename`):
+- `plot2_transfer_spectrum.py` -- cross-scale transfer spectra (from the sweep output)
+- `plot3_b_br_snapshots.py` -- b (top row) and b_r (bottom row) snapshots, one column per time (from the `_2d.nc` file)
+- `plot5_budgets.py` -- 2x2 panel of SFS KE and APE budget time series (from the integrated budget files)
+- `plot6_panels.py` -- 4-panel snapshot of local SFS budget fields (from the budget fields files)
+- `anim1_panels.py` -- animated version of plot6 panels (requires ffmpeg); reads the assembled budget files and the online `b_r` from the `_2d.nc` file
 
 Shared utilities:
 - `aux00_utils.py` -- data loading (`load_dataset_and_grid`, `pad=False` for the simulation's own grid), filtering (`filter_fields`, `GaussianFilter`, `DaskParallelFilter`), domain padding (`_pad_domain_in_z`), spatial derivatives (`calculate_gradient`), tensor condensing (`condense_velocities`)

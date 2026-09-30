@@ -11,7 +11,7 @@
 #PBS -l select=1:ncpus=8:mem=128GB:ngpus=0
 #PBS -l job_priority=regular
 
-# Final figures from the post-processed budgets (budgeting + sweep pipelines must have run).
+# Final figures: every postprocessing/plot*.py (the simulation, budgeting and sweep pipelines must have run).
 set -eo pipefail
 
 NZ=${NZ:-2048}
@@ -29,8 +29,12 @@ module li
 echo $CUDA_VISIBLE_DEVICES
 
 LOG=logs/${JOB_NAME}.out
-time $PYTHON -u plot2_transfer_spectrum.py --filename $OUT_DIR/${SIM}.nc 2>&1 | tee    $LOG  # needs sweep output
-time $PYTHON -u plot3_budgets.py           --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget integrated
-time $PYTHON -u plot4_panels.py            --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a $LOG  # needs budget fields
+: > $LOG
+# Every plot*.py here is a figure script taking --filename; run them all, in name order, so a renamed or added
+# figure needs no change to this job. plot2 needs the sweep output, plot3 the simulation's _2d.nc file, plot5 the
+# integrated budgets and plot6 the budget fields.
+for script in plot*.py; do
+    time $PYTHON -u $script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a $LOG
+done
 
 qstat -f $PBS_JOBID >> $LOG

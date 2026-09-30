@@ -92,7 +92,7 @@ Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after 
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
-- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
+- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot5_budgets.py` (the integrated budgets) and `plot6_panels.py` (the local budget fields).
 
 ### Run simulation only
 
