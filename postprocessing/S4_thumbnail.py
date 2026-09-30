@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
+from src.aux03_plotting import xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -53,16 +54,16 @@ print(f"Selected ℓ   = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 print("Selecting fields...")
 sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
-ε_Kˢ     = ke_budget["ε_Kˢ"].sel(**sel).squeeze()
-Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()
-Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()
-ε_Aˢ     = ape_budget["ε_Aˢ"].sel(**sel).squeeze()
+ε_Kˢ     = xz_slice(ke_budget["ε_Kˢ"].sel(**sel)).squeeze()
+Π_K      = xz_slice(ke_budget["Π_K"].sel(**sel)).squeeze()
+Π_A      = xz_slice(ape_budget["Π_A"].sel(**sel)).squeeze()
+ε_Aˢ     = xz_slice(ape_budget["ε_Aˢ"].sel(**sel)).squeeze()
 #---
 
 #+++ Load buoyancy field for contours
 print("Loading buoyancy field...")
 ds = load_dataset_and_grid(filename)
-b = ds["b"].sel(time=t_sel, method="nearest").squeeze()
+b = xz_slice(ds["b"].sel(time=t_sel, method="nearest")).squeeze()
 print("Done.")
 #---
 

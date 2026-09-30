@@ -8,6 +8,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
+from src.aux03_plotting import xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -56,16 +57,17 @@ print("Extracting fields...")
 sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 sel_t = dict(time=t_sel, method="nearest")
 
-ω = ds["ω"].sel(**sel_t).squeeze()
-b = ds["b"].sel(**sel_t).squeeze()
+ω = xz_slice(ds["ω"].sel(**sel_t)).squeeze()
+b = xz_slice(ds["b"].sel(**sel_t)).squeeze()
 
-u_c = ds["u"].sel(**sel_t).squeeze()
-w_c = ds["w"].sel(**sel_t).squeeze()
-KE_total = 0.5 * (u_c**2 + w_c**2)
+u_c = xz_slice(ds["u"].sel(**sel_t)).squeeze()
+v_c = xz_slice(ds["v"].sel(**sel_t)).squeeze()
+w_c = xz_slice(ds["w"].sel(**sel_t)).squeeze()
+KE_total = 0.5 * (u_c**2 + v_c**2 + w_c**2)
 
-KE_sfs    = ke_budget["KE_of_sfs_flow"].sel(**sel).squeeze()
-APE_total = ape_budget["Ea(ρ, z)"].sel(**sel).squeeze()
-APE_sfs   = ape_budget["Eaˢ(ρ, z)"].sel(**sel).squeeze()
+KE_sfs    = xz_slice(ke_budget["KE_of_sfs_flow"].sel(**sel)).squeeze()
+APE_total = xz_slice(ape_budget["Ea(ρ, z)"].sel(**sel)).squeeze()
+APE_sfs   = xz_slice(ape_budget["Eaˢ(ρ, z)"].sel(**sel)).squeeze()
 print("Done.")
 #---
 
@@ -93,7 +95,7 @@ fig, axes = plt.subplots(2, 3, figsize=(15, 6.3), constrained_layout=True, grids
 #   kind in {"diverging", "buoyancy", "positive"}
 panels = {
     (0, 0): (ω,         r"$\omega$ (vorticity)",                                 "diverging"),
-    (0, 1): (KE_total,  r"Total KE: $\frac{1}{2}(u^2+w^2)$",                     "positive"),
+    (0, 1): (KE_total,  r"Total KE: $\frac{1}{2}(u^2+v^2+w^2)$",                     "positive"),
     (0, 2): (KE_sfs,    r"SFS KE: $\frac{1}{2}|\mathbf{u}-\bar{\mathbf{u}}|^2$", "positive"),
     (1, 0): (b,         r"$b$ (buoyancy)",                                       "buoyancy"),
     (1, 1): (APE_total, r"Total APE: $E_a(\rho, z)$",                            "positive"),

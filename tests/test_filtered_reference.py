@@ -117,7 +117,7 @@ def decompose(synthetic, ell, dims, filtered_reference):
     `filtered_reference`, and against the unfiltered ρ✶ otherwise. Everything else is held fixed, so the
     two paths differ in the reference profile and nothing else."""
     ds, dx, dz, sorted_state, full = synthetic
-    gf = GaussianFilter(ell, dx_min=dx, dz_min=dz)
+    gf = GaussianFilter(ell, {"x_caa": dx, "z_aac": dz})
     ds_filtered = ds.assign(ρ̄=gf.apply(ds.ρ, dims=dims))
 
     reference = (filtered_reference_profile(sorted_state.rho_sorted, sorted_state.dz_sorted, ell)

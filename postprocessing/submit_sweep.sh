@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Submit sweep jobs: shared filter step (sweep1) once, then per-FIXED_REF transfer steps (sweep2+sweep3).
-# Usage: bash submit_sweep.sh [NZ=2048] [FIXED_REF=0|1|both] [N_TIME_SKIP=2] [EXTENSION=edge|odd]
+# Usage: bash submit_sweep.sh [NZ=512] [FIXED_REF=0|1|both] [N_TIME_SKIP=2] [EXTENSION=edge|odd]
 #   FIXED_REF=both  submits transfer jobs for both 0 and 1 (filter runs only once)
 #   EXTENSION=odd   runs the whole sweep with odd reflection of b past the walls, into _sweep_odd files
-NZ=2048; FIXED_REF=0; N_TIME_SKIP=2; EXTENSION=edge
+NZ=512; FIXED_REF=0; N_TIME_SKIP=2; EXTENSION=edge
 # An unknown KEY=VALUE is refused rather than ignored: ignoring EXTENSION=odd used to rerun the edge sweep
 # over the production files.
 for arg in "$@"; do case $arg in

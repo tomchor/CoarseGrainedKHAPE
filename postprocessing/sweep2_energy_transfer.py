@@ -82,7 +82,7 @@ if extension != "edge" and ds_filt.attrs.get("z_extension_vars") != ds.attrs["z_
 filter_scales = ds_filt.filter_scale.values
 print(f"  Loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
-print(f"  Filter dimensions: x and z")
+print(f"  Filter dimensions: x, y and z")
 #---
 
 #+++ Build the frozen reference column (only when using fixed reference)

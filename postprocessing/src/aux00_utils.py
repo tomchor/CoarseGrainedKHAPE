@@ -349,10 +349,6 @@ def condense(ds, vlist, varname, dimname="i", indices=(1, 2, 3)):
 def condense_velocities(ds, dimname="i", indices=(1, 2, 3)):
     """Condense velocity components into tensor form"""
     return condense(ds, ["u", "v", "w"], "uᵢ", dimname=dimname, indices=indices)
-
-def condense_uw_velocities(ds, dimname="i", indices=(1, 3)):
-    """Condense u and w velocity components into tensor form (for 2D simulations)"""
-    return condense(ds, ["u", "w"], "uᵢ", dimname=dimname, indices=indices)
 #---
 
 #+++ Spatial derivatives
@@ -395,76 +391,59 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
     return aux_ds[output_name]
 #---
 
-#+++ Gaussian filter (x: periodic, z: bounded)
+#+++ Gaussian filter (x, y: periodic; z: bounded)
 # FWHM = 2√(2 ln 2) · σ  →  σ = FWHM / (2√(2 ln 2))
 _FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+FILTER_DIMS = ("x_caa", "y_aca", "z_aac")   # the directions the filter acts in, online and offline
+_PERIODIC_DIMS = ("x_caa", "y_aca")
 
 class GaussianFilter:
-    """Gaussian filter in x (periodic) and z (bounded) directions.
+    """Separable Gaussian filter of FWHM ℓ: sequential 1D scipy convolutions, mode='wrap' in x and y (periodic)
+    and mode='nearest' in z (edge-extended past the walls).
 
-    Two sequential 1D scipy Gaussian convolutions:
-      - x: mode='wrap'    — periodic BC
-      - z: mode='nearest' — extends with boundary value beyond domain walls
-
-    ℓ is the FWHM of the kernel; σ = ℓ · _FWHM_TO_SIGMA is derived internally.
+    `spacing` maps each dimension name to its grid spacing. The stencil reaches 4σ (scipy's default truncation)
+    but never beyond one period along a periodic dimension, the same cap the online filter carries, so the two
+    filters share their weights exactly.
     """
-    def __init__(self, ℓ, dx_min, dz_min):
-        self._sigma_x = ℓ * _FWHM_TO_SIGMA / dx_min
-        self._sigma_z = ℓ * _FWHM_TO_SIGMA / dz_min
+    def __init__(self, ℓ, spacing):
+        self.ℓ = float(ℓ)
+        self.spacing = dict(spacing)
 
     def apply(self, da, dims):
-        """Apply filter in dims[0] (x, periodic) then dims[1] (z, bounded).
-
-        Parameters
-        ----------
-        da : xr.DataArray
-        dims : list of str
-            [x_dim, z_dim], e.g. ['x_caa', 'z_aac']
-        """
+        """Filter `da` along each of `dims` in turn; a singleton dimension is left alone."""
         from scipy.ndimage import gaussian_filter1d
-        x_dim, z_dim = dims
-        da_x = xr.apply_ufunc(
-            gaussian_filter1d, da,
-            input_core_dims=[[x_dim]],
-            output_core_dims=[[x_dim]],
-            kwargs={"sigma": self._sigma_x, "axis": -1, "mode": "wrap"},
-            dask="parallelized",
-            output_dtypes=[da.dtype],
-            dask_gufunc_kwargs={"allow_rechunk": True},
-        )
-        return xr.apply_ufunc(
-            gaussian_filter1d, da_x,
-            input_core_dims=[[z_dim]],
-            output_core_dims=[[z_dim]],
-            kwargs={"sigma": self._sigma_z, "axis": -1, "mode": "nearest"},
-            dask="parallelized",
-            output_dtypes=[da_x.dtype],
-            dask_gufunc_kwargs={"allow_rechunk": True},
-        )
+        for dim in dims:
+            if da.sizes[dim] == 1:
+                continue
+            sigma = self.ℓ * _FWHM_TO_SIGMA / self.spacing[dim]
+            radius = max(1, int(4 * sigma + 0.5))
+            periodic = dim in _PERIODIC_DIMS
+            if periodic:
+                radius = min(radius, da.sizes[dim])
+            da = xr.apply_ufunc(
+                gaussian_filter1d, da,
+                input_core_dims=[[dim]],
+                output_core_dims=[[dim]],
+                kwargs={"sigma": sigma, "axis": -1, "mode": "wrap" if periodic else "nearest", "radius": radius},
+                dask="parallelized",
+                output_dtypes=[da.dtype],
+                dask_gufunc_kwargs={"allow_rechunk": True},
+            )
+        return da
 
 
 def make_gaussian_filter(ℓ, ds):
-    """Return a GaussianFilter for FWHM ℓ using grid spacing from ds.
-
-    Parameters
-    ----------
-    ℓ : float
-        Filter length scale (FWHM) in physical units.
-    ds : xr.Dataset
-        Simulation dataset (must contain Δx_caa and Δz_aac).
-    """
-    dx_min = float(ds.Δx_caa.min())
-    dz_min = float(ds.Δz_aac.min())
-    return GaussianFilter(ℓ, dx_min, dz_min)
+    """Return a GaussianFilter for FWHM ℓ using the grid spacings (Δx_caa, Δy_aca, Δz_aac) of ds."""
+    return GaussianFilter(ℓ, {dim: float(ds[f"Δ{dim}"].min()) for dim in FILTER_DIMS if f"Δ{dim}" in ds})
 
 
 def filter_fields(ds, filter_scales):
-    """Filter velocity and buoyancy fields at each length scale in x and z.
+    """Filter velocity and buoyancy fields at each length scale in x, y and z.
 
     Parameters
     ----------
     ds : xr.Dataset
-        Dataset with velocity components (u, w) and buoyancy b.
+        Dataset with velocity components (u, v, w) and buoyancy b.
     filter_scales : array-like
         Filter length scales (FWHM) in physical units.
 
@@ -474,15 +453,15 @@ def filter_fields(ds, filter_scales):
         Dataset with filtered fields ūᵢ and b̄ at each filter_scale,
         plus dV (scale-independent).
     """
-    ds = condense_uw_velocities(ds, indices=(1, 3))
+    ds = condense_velocities(ds)
 
     ds_filt_list = []
     for ℓ in filter_scales:
         print(f"  filter_scale = {ℓ:.4f}...")
         gf = make_gaussian_filter(ℓ, ds)
         ds_filt_list.append(xr.Dataset({
-            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "z_aac"]),
-            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "z_aac"]),
+            "ūᵢ": gf.apply(ds["uᵢ"], dims=FILTER_DIMS),
+            "b̄":  gf.apply(ds["b"],  dims=FILTER_DIMS),
         }))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
@@ -490,7 +469,7 @@ def filter_fields(ds, filter_scales):
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
     ds_filt.attrs.update(ds.attrs)
-    ds_filt.attrs["filter_dims"] = "x_caa,z_aac"
+    ds_filt.attrs["filter_dims"] = ",".join(FILTER_DIMS)
     return ds_filt
 #---
 

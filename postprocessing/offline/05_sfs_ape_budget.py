@@ -14,8 +14,8 @@ import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on the path, for `src.*`
-from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, condense_uw_velocities, integrate, make_gaussian_filter,
-                             load_energy_transfer, check_same_padded_grid)
+from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, load_dataset_and_grid, condense_velocities, integrate, make_gaussian_filter,
+                             load_energy_transfer, check_same_padded_grid, FILTER_DIMS)
 from src.aux01_pe_functions import (
     calculate_density_fields_from_buoyancy,
     local_potential_energies_timeseries,  # used for filtered density in loop
@@ -61,13 +61,13 @@ filtered_filename = str(PP_OUTPUT / (Path(filename).stem + "_filtered_velocities
 t0 = time.time()
 ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 1})
 filter_scales = ds_filt.filter_scale.values
-filtered_dimensions = ["x_caa", "z_aac"]
+filtered_dimensions = list(FILTER_DIMS)
 
-ds = condense_uw_velocities(ds, indices=[1, 3])
+ds = condense_velocities(ds)
 ds_full = ds[["b", "dV", "dV_physical", "LxLy", "uᵢ"]].copy()
 print(f"  Pre-filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
-print(f"  Filter dimensions: x and z")
+print(f"  Filter dimensions: x, y and z")
 
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))
 t0 = time.time()

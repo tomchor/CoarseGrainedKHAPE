@@ -46,7 +46,7 @@ def test_filter_fwhm_x(ell):
     da = xr.DataArray(impulse, dims=["x_caa", "z_aac"],
                       coords={"x_caa": x, "z_aac": [0.0]})
 
-    gf = GaussianFilter(ell, dx_min=dx, dz_min=dx)
+    gf = GaussianFilter(ell, {"x_caa": dx, "z_aac": dx})
     filtered = gf.apply(da, dims=["x_caa", "z_aac"])
 
     profile = filtered.isel(z_aac=0).values
@@ -68,7 +68,7 @@ def test_filter_fwhm_z(ell):
     da = xr.DataArray(impulse, dims=["x_caa", "z_aac"],
                       coords={"x_caa": [0.0], "z_aac": z})
 
-    gf = GaussianFilter(ell, dx_min=dz, dz_min=dz)
+    gf = GaussianFilter(ell, {"x_caa": dz, "z_aac": dz})
     filtered = gf.apply(da, dims=["x_caa", "z_aac"])
 
     profile = filtered.isel(x_caa=0).values

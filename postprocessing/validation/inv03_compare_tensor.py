@@ -8,9 +8,9 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
-from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities, open_grid_group
+from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_velocities, open_grid_group, FILTER_DIMS
 from src.aux02_ke_functions import calculate_strain_tensor, calculate_sfs_stress_tensor
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -37,10 +37,12 @@ stem = Path(filename).stem
 ℓ = args.filter_scale
 ℓ_tag = int(ℓ) if ℓ == int(ℓ) else ℓ
 
-# Tensor metadata: (online variable key, math label) for the three independent i,j ∈ {1,3} components.
+# Tensor metadata: (online variable key, math label) for the six independent components.
 COMPONENTS = {
-    "strain": [("S11", "S̄₁₁ = ∂ū/∂x"), ("S33", "S̄₃₃ = ∂w̄/∂z"), ("S13", "S̄₁₃ = ½(∂ū/∂z + ∂w̄/∂x)")],
-    "stress": [("tau11", "τ₁₁ = filter(u u) − ū ū"), ("tau33", "τ₃₃ = filter(w w) − w̄ w̄"), ("tau13", "τ₁₃ = filter(u w) − ū w̄")],
+    "strain": [("S11", "S̄₁₁ = ∂ū/∂x"), ("S22", "S̄₂₂ = ∂v̄/∂y"), ("S33", "S̄₃₃ = ∂w̄/∂z"),
+               ("S12", "S̄₁₂ = ½(∂ū/∂y + ∂v̄/∂x)"), ("S13", "S̄₁₃ = ½(∂ū/∂z + ∂w̄/∂x)"), ("S23", "S̄₂₃ = ½(∂v̄/∂z + ∂w̄/∂y)")],
+    "stress": [("tau11", "τ₁₁ = filter(u u) − ū ū"), ("tau22", "τ₂₂ = filter(v v) − v̄ v̄"), ("tau33", "τ₃₃ = filter(w w) − w̄ w̄"),
+               ("tau12", "τ₁₂ = filter(u v) − ū v̄"), ("tau13", "τ₁₃ = filter(u w) − ū w̄"), ("tau23", "τ₂₃ = filter(v w) − v̄ w̄")],
 }[args.tensor]
 TENSOR_SYMBOL = {"strain": "S̄ⁱʲ", "stress": "τⁱʲ"}[args.tensor]
 #---
@@ -67,10 +69,10 @@ if online_key0 not in ds_t:
 #---
 
 #+++ Recompute the tensor offline at this snapshot (mirrors 03_energy_transfer.py)
-filtered_dimensions = ["x_caa", "z_aac"]
-tensor_dimensions   = ("x_caa", "z_aac")
+filtered_dimensions = list(FILTER_DIMS)
+tensor_dimensions   = FILTER_DIMS
 
-uᵢ = condense_uw_velocities(ds_t, indices=(1, 3))["uᵢ"].load()
+uᵢ = condense_velocities(ds_t)["uᵢ"].load()
 gf = make_gaussian_filter(ℓ, ds_t)
 ūᵢ = gf.apply(uᵢ, dims=filtered_dimensions)
 
@@ -80,8 +82,8 @@ if args.tensor == "strain":
 else:
     T = calculate_sfs_stress_tensor(uᵢ, gf, filter_dims=filtered_dimensions, filtered_u_i=ūᵢ)
 
-# (i, j) component selector for the offline tensor: S11/τ11 ↔ (1,1), S33/τ33 ↔ (3,3), S13/τ13 ↔ (1,3)
-_ij = {"S11": (1, 1), "S33": (3, 3), "S13": (1, 3), "tau11": (1, 1), "tau33": (3, 3), "tau13": (1, 3)}
+# (i, j) component selector for the offline tensor, from the digits of the online name (S13/tau13 ↔ (1, 3)).
+_ij = {key: (int(key[-2]), int(key[-1])) for key, _ in COMPONENTS}
 #---
 
 #+++ One figure: rows = the three components, columns = online | offline | difference
@@ -100,9 +102,9 @@ for row, (key, math_label) in enumerate(COMPONENTS):
     vmax = vmax if vmax > 0 else 1.0
     kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
 
-    on.plot(ax=axes[row, 0], **kw);  axes[row, 0].set_title(f"Online {math_label}")
-    off.plot(ax=axes[row, 1], **kw); axes[row, 1].set_title("Offline")
-    diff.plot(ax=axes[row, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+    xz_slice(on).plot(ax=axes[row, 0], **kw);  axes[row, 0].set_title(f"Online {math_label}")
+    xz_slice(off).plot(ax=axes[row, 1], **kw); axes[row, 1].set_title("Offline")
+    xz_slice(diff).plot(ax=axes[row, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
     axes[row, 2].set_title("Difference (online − offline)")
 
     for k in range(3):

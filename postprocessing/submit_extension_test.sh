@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Submit the wall-extension test: the sweep at one filter scale with b extended past the walls by the other
 # admissible rule, to compare against the production (edge) sweep with compare_extension.py afterwards.
-# Usage: bash submit_extension_test.sh [NZ=2048] [SCALE=20] [EXTENSION=odd] [N_TIME_SKIP=2]
+# Usage: bash submit_extension_test.sh [NZ=512] [SCALE=20] [EXTENSION=odd] [N_TIME_SKIP=2]
 #   SCALE        filter scale to test; extension_test.pbs snaps it to the nearest production sweep scale
 #   N_TIME_SKIP  must match the production sweep, or the two are averaged over different times
-NZ=2048; SCALE=20; EXTENSION=odd; N_TIME_SKIP=2
+NZ=512; SCALE=20; EXTENSION=odd; N_TIME_SKIP=2
 for arg in "$@"; do case $arg in
   NZ=*)          NZ="${arg#*=}";;
   SCALE=*)       SCALE="${arg#*=}";;

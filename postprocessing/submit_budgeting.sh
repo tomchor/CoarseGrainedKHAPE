@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Submit the budgeting job: assemble the SFS budgets from the simulation's online terms and plot them.
-# Usage: bash submit_budgeting.sh [NZ=2048]
-NZ=2048
+# Usage: bash submit_budgeting.sh [NZ=512]
+NZ=512
 # An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
 for arg in "$@"; do case $arg in
   NZ=*) NZ="${arg#*=}";;

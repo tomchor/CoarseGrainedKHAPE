@@ -17,6 +17,10 @@ def run_label(attrs):
         parts.append(f"Pr = {float(attrs['Pr']):.0f}")
     return ",  ".join(parts)
 
+def xz_slice(da, j=0, y_name="y_aca"):
+    """The x–z plane at y index `j` of a field, for maps; a field without a y axis is returned as is."""
+    return da.isel({y_name: j}, drop=True) if y_name in da.dims else da
+
 budget_colors = {
     "tendency":    "C0",
     "flux":        "C1",

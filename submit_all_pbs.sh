@@ -9,7 +9,7 @@
 # The SFS KE and APE budgets are computed by the simulation itself; `budgeting` assembles and plots them
 # (postprocessing/01_online_budgets.py, 02_plot_budgets.py). The sweep over filter scales stays offline.
 #
-# Usage: bash submit_all_pbs.sh [NZ=2048] [VALIDATE=0] [PLOTS=0] [SAVE_SORTED=1] [FIXED_REF=0]
+# Usage: bash submit_all_pbs.sh [NZ=512] [VALIDATE=0] [PLOTS=0] [SAVE_SORTED=1] [FIXED_REF=0]
 #   NZ         vertical resolution
 #   VALIDATE   also run the online-vs-offline validation (adds --save_tensors for the tensor comparison and
 #              forces --save_sorted, which inv06-inv07 read): 0 or 1
@@ -19,9 +19,9 @@
 #   FIXED_REF  the sweep transfer's fixed-in-time reference profile (the budgets have no such variant): 0 or 1
 #
 # To run post-processing alone:
-#   bash postprocessing/submit_budgeting.sh [NZ=2048]
+#   bash postprocessing/submit_budgeting.sh [NZ=512]
 
-NZ=2048; FIXED_REF=0; VALIDATE=0; PLOTS=0
+NZ=512; FIXED_REF=0; VALIDATE=0; PLOTS=0
 # An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
 for arg in "$@"; do case $arg in
   NZ=*)          NZ="${arg#*=}";;

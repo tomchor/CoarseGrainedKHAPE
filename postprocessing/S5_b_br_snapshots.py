@@ -8,7 +8,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from src.aux00_utils import model_grid_suffix, strip_grid_suffix
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -53,8 +53,8 @@ if len(set(t_sel)) < len(t_sel):     # two requests on one record would duplicat
 ds = ds.sel(time=t_sel)
 
 zsl = slice(-args.zlim, +args.zlim)
-b_fields   = [ds.b.sel(time=t).sel(z_aac=zsl).squeeze()   for t in t_sel]
-b_r_fields = [ds.b_r.sel(time=t).sel(z_aac=zsl).squeeze() for t in t_sel]
+b_fields   = [xz_slice(ds.b.sel(time=t).sel(z_aac=zsl)).squeeze()   for t in t_sel]
+b_r_fields = [xz_slice(ds.b_r.sel(time=t).sel(z_aac=zsl)).squeeze() for t in t_sel]
 print("Done.")
 #---
 
