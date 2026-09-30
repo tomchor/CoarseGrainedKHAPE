@@ -4,7 +4,7 @@ Computes Available Potential Energy (APE) from Kelvin-Helmholtz instability simu
 
 ## Pipeline overview
 
-1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU and writes NetCDF output
+1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then draws the three figures that need nothing else (`plot3_b_br_snapshots.py`, `plot5_budgets.py`, `plot6_panels.py`) into `figures/`
 2. **Post-processing** — `postprocessing/budgeting.pbs` assembles the SFS KE and APE budgets from the terms the simulation computed online and plots them (the offline computation of those terms lives in `postprocessing/offline/` and runs only as a CI cross-check)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
@@ -64,7 +64,7 @@ The submit wrappers take the project to charge and the Python to run from two va
 | Variable | Default | Read by |
 |----------|---------|---------|
 | `KHAPE_ACCOUNT` | `UMCP0061` | every submit wrapper, which charges each job to it with `qsub -A` |
-| `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job (the path to your `py313` environment's `python`) |
+| `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job and to the simulation job, for the figures it draws after the run (the path to your `py313` environment's `python`) |
 | `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
 | `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
 
@@ -92,7 +92,7 @@ Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after 
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
-- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot4_sweep_spectrum_hovmoller.py` (Hovmöllers of the transfers, from the sweep output), `plot5_budgets.py` (the integrated SFS budgets) and `plot6_panels.py` (the local SFS budget fields), the last two assembled from the simulation output itself, so they need no post-processing.
+- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot4_sweep_spectrum_hovmoller.py` (Hovmöllers of the transfers, from the sweep output), `plot5_budgets.py` (the integrated SFS budgets) and `plot6_panels.py` (the local SFS budget fields), the last two assembled from the simulation output itself, so they need no post-processing. `plot3`, `plot5` and `plot6` are also drawn by the simulation job itself as soon as the run ends (see *Run simulation only*), so the plots job redraws them after the sweep.
 
 ### Run simulation only
 
@@ -112,6 +112,8 @@ bash submit_simulation.sh NZ=2048 SAVE_SORTED=1
 # Also write each 3D output as a consecutive-iteration pair (for pytest --offline-check; doubles the 3D output)
 bash submit_simulation.sh NZ=1024 OFFLINE_CHECK=1
 ```
+
+When the run ends, the same job draws the three figures that need nothing but the simulation's own files, into `figures/`: `plot3_b_br_snapshots.py` (from the `_2d.nc` file) and `plot5_budgets.py` and `plot6_panels.py` (which assemble the SFS budgets from the 3D file themselves). A figure that fails is logged as a warning rather than failing the job, so jobs chained on the simulation with `afterok` still start. The wrapper checks `KHAPE_PYTHON` at submission and passes it to the job for this.
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
 resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale. These

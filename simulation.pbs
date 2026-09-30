@@ -28,6 +28,9 @@ SAVE_SORTED=${SAVE_SORTED:-1}   # on by default: the validation-only sorted-stat
 [ "$SAVE_SORTED" = "1" ] && SORTED_FLAG="--save_sorted" || SORTED_FLAG=""
 OFFLINE_CHECK=${OFFLINE_CHECK:-0}   # off by default: the consecutive-iteration output pairs only the offline check reads, at twice the 3D output
 [ "$OFFLINE_CHECK" = "1" ] && OFFLINE_FLAG="--offline_check" || OFFLINE_FLAG=""
+PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}   # for the figures drawn after the run
+OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where the run is written; kelvin_helmholtz_instability.jl reads the same variable
+SIM=khi_Nz${NZ}_Ri0.10
 
 export JULIA_DEPOT_PATH="$WORK/.julia"
 export JULIA_CPU_TARGET="generic"
@@ -56,6 +59,15 @@ $JULIA --version
 $JULIA --project -e 'using Pkg; Pkg.instantiate()'
 
 time $JULIA --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ $TENSOR_FLAG $SORTED_FLAG $OFFLINE_FLAG 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
+
+# The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot3 reads the
+# _2d.nc file, plot5 and plot6 assemble the SFS budgets from the 3D file themselves (plot2 and plot4 need the sweep
+# and stay in plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this
+# one with afterok should still start.
+for script in plot3_b_br_snapshots.py plot5_budgets.py plot6_panels.py; do
+    time $PYTHON -u postprocessing/$script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
+        || echo "warning: $script failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
+done
 
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.log
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.out

@@ -23,7 +23,9 @@ Jobs are chained via PBS `afterok` dependencies. Always use `submit_*.sh` wrappe
 ```bash
 bash submit_simulation.sh NZ=2048
 ```
-Account: `$KHAPE_ACCOUNT` (default `UMCP0061`), which every submit wrapper passes with `qsub -A` (and `$KHAPE_PYTHON`, default `$HOME/miniconda3/envs/py313/bin/python`, for the Python jobs; both defaults live in `khape_defaults.sh`; see README, Environment); queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
+The job runs the simulation and then, in the same job, `plot3_b_br_snapshots.py`, `plot5_budgets.py` and `plot6_panels.py`, the three figures that need only the simulation's own files (a failing figure is a logged warning, not a job failure, so `afterok` chains still start); the wrapper passes `$KHAPE_PYTHON` to it for that.
+
+Account: `$KHAPE_ACCOUNT` (default `UMCP0061`), which every submit wrapper passes with `qsub -A` (and `$KHAPE_PYTHON`, default `$HOME/miniconda3/envs/py313/bin/python`, for the Python jobs and for the figures the simulation job draws after the run; both defaults live in `khape_defaults.sh`; see README, Environment); queue: `casper`, 1x A100, 8 cores, 64 GB RAM.
 
 The Julia simulation accepts CLI args: `--Nz`, `--Ri`, `--stop_time`, `--Re0`, `--Pr`, `--U`, `--h`, `--perturbation_amplitude`, `--filter_ls` (one or more online filter length scales ℓ; default `1 7`; every term of both SFS budgets is written at each), `--save_tensors` (flag; also writes the per-scale strain/stress tensor components for online-vs-offline validation), `--save_sorted` (flag; also writes the validation-only view of the Winters (1995) sorted reference state: the two model-grid z✶ methods, the sorted column, ∫E_b), and `--offline_check` (flag; also writes the record one time step after each 3D output, the consecutive-iteration pair the offline pipeline differences for its own tendencies; `pytest --offline-check` needs it, the online tendencies do not, and it doubles the 3D output). For local CPU development:
 ```bash
@@ -87,9 +89,9 @@ The budgets are computed by the simulation; the Python side assembles and plots 
 
 Standalone visualization scripts (not part of the numbered pipeline; `plots.pbs` runs every `plot*.py`, in name order, so a figure script must take `--filename`):
 - `plot2_transfer_spectrum.py` -- cross-scale transfer spectra (from the sweep output)
-- `plot3_b_br_snapshots.py` -- b (top row) and b_r (bottom row) snapshots, one column per time (from the `_2d.nc` file)
-- `plot5_budgets.py` -- 2x2 panel of SFS KE and APE budget time series (assembled from the simulation output by `online_budgets`; no post-processing needed)
-- `plot6_panels.py` -- 4-panel snapshot of local SFS budget fields (likewise straight from the simulation output)
+- `plot3_b_br_snapshots.py` -- b (top row) and b_r (bottom row) snapshots, one column per time (from the `_2d.nc` file; `simulation.pbs` draws it right after the run)
+- `plot5_budgets.py` -- 2x2 panel of SFS KE and APE budget time series (assembled from the simulation output by `online_budgets`; no post-processing needed, and `simulation.pbs` draws it right after the run)
+- `plot6_panels.py` -- 4-panel snapshot of local SFS budget fields (likewise straight from the simulation output, and likewise drawn by `simulation.pbs`)
 - `anim1_panels.py` -- animated version of plot6 panels (requires ffmpeg); reads the assembled budget files and the online `b_r` from the `_2d.nc` file
 - `X1_…` – `X11_…` -- the extra figures (X for extra), outside the manuscript set: Π hovmöllers, snapshot panels, a thumbnail, sweep-spectrum diagnostics. They write to `postprocessing/extra_figures/` (`EXTRA_FIGURES` in `aux00_utils.py`), never to `figures/`, which is left to the `plot*` scripts; `plots.pbs` does not run them
 
@@ -223,6 +225,6 @@ Every term of both sub-filter budgets is written by the simulation; `01_online_b
 
 - Output files are excluded from git (`.nc`, `.mp4`, `.pdf`, `.png`, `.jld2`).
 - Simulation output can reach 650 GB; scratch directory is `/glade/derecho/scratch/tomasc/khape/output/`.
-- The submit wrappers take `$KHAPE_ACCOUNT` (the project to charge) and, for Python jobs, `$KHAPE_PYTHON` (the `py313` interpreter) from the environment, falling back to the defaults in `khape_defaults.sh` (`UMCP0061`, `$HOME/miniconda3/envs/py313/bin/python`), which every wrapper sources; the Python wrappers stop at submission if the interpreter does not exist. No `.pbs` file names an account, a mail address or an environment, so the scripts work for whoever submits them.
+- The submit wrappers take `$KHAPE_ACCOUNT` (the project to charge) and `$KHAPE_PYTHON` (the `py313` interpreter, for the Python jobs and for the figures the simulation job draws after the run) from the environment, falling back to the defaults in `khape_defaults.sh` (`UMCP0061`, `$HOME/miniconda3/envs/py313/bin/python`), which every wrapper sources; every wrapper stops at submission if the interpreter does not exist. No `.pbs` file names an account, a mail address or an environment, so the scripts work for whoever submits them.
 - `$KHAPE_OUTPUT_DIR` moves the simulation output (default `output/`) and `$KHAPE_PP_OUTPUT` the post-processing output (default `postprocessing/output/`; the offline check writes to its `offline/` subdirectory). Every post-processing script takes `PP_OUTPUT` from `src/aux00_utils.py` rather than defining its own, the PBS jobs read the run from `${KHAPE_OUTPUT_DIR:-output}`, and `tests/conftest.py` honours both (`$KHAPE_TEST_STEM` picks the run). Keep it that way: a script with its own `PP_OUTPUT` writes somewhere the next step does not read.
 - Logs: `logs/<job_name>.log` (PBS), `logs/<job_name>.out` (Python stdout via tee). Job names follow `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]` (the `_fixed_ref` tag exists only for the sweep transfer).
