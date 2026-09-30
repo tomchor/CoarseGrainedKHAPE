@@ -22,10 +22,9 @@ itself lives in `offline/` and runs only as the CI cross-check (`pytest --offlin
 import os
 import re
 from pathlib import Path
-import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid, upper_records
+from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid, output_flag
 #---
 
 #+++ Configuration
@@ -90,15 +89,13 @@ time = ds.time.values
 
 if args.records == "differenced":
     # A TimeDerivative reads zero until its operand has been evaluated twice, so iteration 0's record states no
-    # budget. With --offline_check the output comes in ConsecutiveIterations pairs, (tⁿ, tⁿ⁺¹) at every
-    # TimeInterval, and the second of each is kept, whose derivative spans the pair; otherwise every record but the first.
-    is_upper = upper_records(time)
-    if is_upper.any():
-        print("  Paired output (--offline_check): keeping the upper record of each consecutive-iteration pair")
-        ds = ds.isel(time=np.where(is_upper)[0])
-    else:
-        print("  Unpaired output: keeping every record but the first")
-        ds = ds.isel(time=slice(1, None))
+    # budget. With --offline_check (the file's `offline_check` attribute) the output comes in ConsecutiveIterations
+    # pairs, (tⁿ, tⁿ⁺¹) at every TimeInterval, and the second of each is kept, whose derivative spans the pair;
+    # otherwise every record but the first.
+    paired = output_flag(ds, "offline_check")
+    print("  " + ("Paired output (offline_check=1): keeping the upper record of each consecutive-iteration pair" if paired
+                  else "Unpaired output (offline_check=0): keeping every record but the first"))
+    ds = ds.isel(time=slice(1, None, 2 if paired else 1))
 print(f"  {len(ds.time)} records kept out of {len(time)}")
 
 online_scales = sorted({float(m.group(1)) for v in ds.data_vars

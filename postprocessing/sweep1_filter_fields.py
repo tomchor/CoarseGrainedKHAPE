@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import (PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields, extension_suffix,
-                             scale_subset_tag, upper_records)
+                             scale_subset_tag, output_flag)
 #---
 
 #+++ Configuration
@@ -41,7 +41,7 @@ ds = load_dataset_and_grid(filename, min_margin=required_pad_margin(filter_scale
 ds = ds.chunk(dict(time=1))
 
 # Records per output time: two when the simulation ran with --offline_check (consecutive-iteration pairs), else one.
-per_output = 2 if upper_records(ds.time.values).any() else 1
+per_output = 2 if output_flag(ds, "offline_check") else 1
 i = np.arange(ds.sizes["time"])
 n_time_skip = args.n_time_skip
 ds = ds.isel(time=(i // per_output) % n_time_skip == 0)

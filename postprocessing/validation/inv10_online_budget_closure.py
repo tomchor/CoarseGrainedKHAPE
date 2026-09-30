@@ -31,7 +31,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
-from src.aux00_utils import PP_OUTPUT, model_grid_suffix, strip_grid_suffix, upper_records
+from src.aux00_utils import PP_OUTPUT, model_grid_suffix, strip_grid_suffix, output_flag
 from src.aux03_plotting import run_label
 #---
 
@@ -81,11 +81,12 @@ ds = xr.open_dataset(filename, decode_times=False)
 ds = strip_grid_suffix(ds, model_grid_suffix(ds))
 
 # The first output is dropped: a TimeDerivative reads zero until its operand has been evaluated twice, so the
-# record at iteration 0 states no budget. With --offline_check the writer runs on ConsecutiveIterations and the
+# record at iteration 0 states no budget. With --offline_check (the file's `offline_check` attribute) the writer runs on
+# ConsecutiveIterations and the
 # outputs come in pairs, and the whole first pair goes: the second record's derivatives span the initialisation
 # transient (∫Eₐˢ goes from zero to its working value within the first fraction of a time unit), which is not a
 # statement about the budget either and would dominate an rms over the run.
-skip = args.skip if args.skip is not None else (2 if upper_records(ds.time.values).any() else 1)
+skip = args.skip if args.skip is not None else (2 if output_flag(ds, "offline_check") else 1)
 ds = ds.isel(time=slice(skip, None))
 
 # τ(w,b_r) is the one term the two budgets share, with opposite signs: it is a reversible exchange

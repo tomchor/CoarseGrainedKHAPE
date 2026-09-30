@@ -107,14 +107,17 @@ let s = ArgParseSettings()
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
-# Keep the control flags (save_tensors, save_sorted, offline_check) out of `params`: they are Bools, which
-# NetCDF can't store as a global attribute, and not physical parameters. Likewise filter_ls is a vector (the
-# online filter scales, encoded in the output variable names as `_ℓ<ℓ>`), so keep it out of `params` too.
+# The control flags go into `params`, and so into both output files' global attributes, as 0/1 Ints (NetCDF has
+# no Bool attribute). The post-processing reads them back from there (`output_flag` in postprocessing/src/aux00_utils.py)
+# rather than inferring them from a file's contents: `offline_check` says whether the 3D output comes in
+# consecutive-iteration pairs, `save_tensors` whether the S̄ⁱʲ/τⁱʲ components are there, `save_sorted` whether the
+# sorted-state view is. filter_ls is a vector (the online filter scales, encoded in the output variable names as
+# `_ℓ<ℓ>`), so it stays out of `params`.
 save_tensors = pop!(parsed_args, :save_tensors)
 save_sorted = pop!(parsed_args, :save_sorted)
 offline_check = pop!(parsed_args, :offline_check)
 filter_ls = pop!(parsed_args, :filter_ls)
-params = (; parsed_args...)
+params = (; parsed_args..., save_tensors=Int(save_tensors), save_sorted=Int(save_sorted), offline_check=Int(offline_check))
 #---
 
 #+++ Define simulation parameters

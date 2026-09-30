@@ -127,7 +127,7 @@ whether the column goes to the file. All of these go into the main output file, 
 both grids; the resulting per-grid dimension suffixing is undone at load time by the post-processing loader.
 `inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare them against the offline sort.
 
-`OFFLINE_CHECK=1` passes `--offline_check`, which makes the 3D writer also write the record one time step after each output (`ConsecutiveIterations`). Only the offline pipeline reads those pairs, to form its own tendencies for `pytest --offline-check`; the online tendencies come from `TimeDerivative` and need no pair, so the default (`0`) writes one record per output time and halves the 3D output. CI's offline-check run passes the flag.
+`OFFLINE_CHECK=1` passes `--offline_check`, which makes the 3D writer also write the record one time step after each output (`ConsecutiveIterations`). Only the offline pipeline reads those pairs, to form its own tendencies for `pytest --offline-check`; the online tendencies come from `TimeDerivative` and need no pair, so the default (`0`) writes one record per output time and halves the 3D output. CI's offline-check run passes the flag. The three flags are written to both output files as 0/1 global attributes (`save_tensors`, `save_sorted`, `offline_check`), which is how the post-processing tells what a run contains.
 
 ### Run a simulation + online-vs-offline validation
 
