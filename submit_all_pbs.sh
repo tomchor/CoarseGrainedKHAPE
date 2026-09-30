@@ -52,7 +52,7 @@ SIM_JOB=$(qsub -N kelvin_helmholtz_${NZ} \
                -A "$KHAPE_ACCOUNT" \
                -o logs/kelvin_helmholtz_${NZ}.log \
                -e logs/kelvin_helmholtz_${NZ}.log \
-               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED$REDIRECT simulation.pbs)
+               -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED,KHAPE_PYTHON=$KHAPE_PYTHON$REDIRECT simulation.pbs)
 echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS, save_sorted=$SAVE_SORTED): $SIM_JOB"
 
 # Optional validation — parallel branch, runs after the simulation succeeds

@@ -7,8 +7,9 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
+from src.aux00_utils import load_dataset_and_grid
 from src.aux03_plotting import run_label
+from src.aux04_online_budgets import online_budgets
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -29,13 +30,14 @@ FIGURES   = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
-ref_suffix = ""
 #---
 
-#+++ Load budgets
-print("Loading KE and APE budgets...")
-ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields{ref_suffix}.nc"),  decode_times=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_suffix}.nc"), decode_times=False)
+#+++ Assemble the budgets from the simulation's online terms
+# Straight from the simulation output, so this runs as soon as the Julia job has finished: `online_budgets` is what
+# 01_online_budgets.py writes to the budget files, lazily, and one time at one scale is all that gets read below.
+print("Assembling the SFS KE and APE budgets from the simulation output...")
+ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
+ke_budget, ape_budget = online_budgets(ds)
 
 ke_budget = ke_budget.sel(z_aac=slice(-4, +4))
 ape_budget = ape_budget.sel(z_aac=slice(-4, +4))
@@ -59,9 +61,8 @@ exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze() # APE->KE exch
 ε_Aˢ     = ape_budget["ε_Aˢ"].sel(**sel).squeeze()              # SFS APE dissipation
 #---
 
-#+++ Load buoyancy field for contours
+#+++ Buoyancy field for contours, from the same (unpadded) simulation output
 print("Loading buoyancy field...")
-ds = load_dataset_and_grid(filename)
 b = ds["b"].sel(time=t_sel, method="nearest").squeeze()
 print("Done.")
 #---
@@ -149,7 +150,7 @@ for ax, letter in zip(axes.flat, "abcd"):
             fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
 
-outfile = str(FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}{ref_suffix}.pdf")
+outfile = str(FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}.pdf")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")

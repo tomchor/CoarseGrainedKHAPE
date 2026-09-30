@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import PP_OUTPUT
+from src.aux00_utils import EXTRA_FIGURES, PP_OUTPUT
 from src.aux03_plotting import run_label, collapse_time_pairs
 #---
 
@@ -25,7 +25,7 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FIGURES = REPO_ROOT / "figures"; FIGURES.mkdir(exist_ok=True)
+EXTRA_FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 ref_suffix = ("_fixed_ref" if args.fixed_reference else "")
 ext_suffix = "" if args.extension == "edge" else f"_{args.extension}"
@@ -89,7 +89,7 @@ for (r, c), letter in zip([(0, 0), (0, 1), (1, 0), (1, 1)], "abcd"):
                     fontsize=10, fontweight="bold", ha="left", va="top")
 #---
 
-plot_filename = str(FIGURES / os.path.basename(input_filename)
-                    .replace("energy_transfer_sweep", "S9_shape_amplitude").replace(".nc", ".pdf"))
+plot_filename = str(EXTRA_FIGURES / os.path.basename(input_filename)
+                    .replace("energy_transfer_sweep", "X9_shape_amplitude").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
