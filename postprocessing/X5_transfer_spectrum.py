@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import PP_OUTPUT
+from src.aux00_utils import EXTRA_FIGURES, PP_OUTPUT
 from src.aux03_plotting import run_label
 #---
 
@@ -79,7 +79,8 @@ info_parts.append(time_label)
 ax.text(0.98, 0.04, ",  ".join(info_parts), transform=ax.transAxes, fontsize=10, ha="right", va="bottom",
         bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.8))
 
-plot_filename = str(REPO_ROOT / "figures" / os.path.basename(input_filename)
+EXTRA_FIGURES.mkdir(exist_ok=True)
+plot_filename = str(EXTRA_FIGURES / os.path.basename(input_filename)
                     .replace("energy_transfer_sweep", "cross-scale_transfer_spectrum").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")

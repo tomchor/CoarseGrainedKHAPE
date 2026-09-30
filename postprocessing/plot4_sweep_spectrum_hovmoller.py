@@ -141,6 +141,6 @@ cbar.set_label(r"$\int \Pi\, \mathrm{d}V$")
 
 plot_filename = str(FIGURES / os.path.basename(input_filename)
                     .replace("energy_transfer_sweep",
-                             "S6_spectrum_hovmoller" + ("_timex" if time_x else "")).replace(".nc", ".pdf"))
+                             "sweep_spectrum_hovmoller" + ("_timex" if time_x else "")).replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")

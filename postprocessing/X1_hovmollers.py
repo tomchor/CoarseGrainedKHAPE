@@ -6,7 +6,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.colors import SymLogNorm
-from src.aux00_utils import PP_OUTPUT
+from src.aux00_utils import EXTRA_FIGURES, PP_OUTPUT
 from src.aux03_plotting import run_label
 #---
 
@@ -67,9 +67,8 @@ if label:
 #---
 
 #+++ Save
-figures_dir = REPO_ROOT / "figures"
-figures_dir.mkdir(exist_ok=True)
-plot_filename = str(figures_dir / os.path.basename(input_filename)
+EXTRA_FIGURES.mkdir(exist_ok=True)
+plot_filename = str(EXTRA_FIGURES / os.path.basename(input_filename)
                     .replace("energy_transfer_sweep", "hovmoller_PiK_PiA").replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")

@@ -106,7 +106,7 @@ for row, (fields, row_label, cmap, vmin, vmax) in enumerate(rows):
         ax.contour(bx, bz, bdata, levels=blevels, colors="k", linewidths=0.6, alpha=0.5)
 
         # One colourbar per row: the scale is shared, so three identical bars would be three times the
-        # ink for the same information. It goes in the last column, inset as in S2_panels.
+        # ink for the same information. It goes in the last column, inset as in X2_panels.
         if col == 0:
             ax.text(0.5, 0.97, row_label, transform=ax.transAxes, fontsize=11, ha="center", va="top",
                     color="black", bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.6))
@@ -149,7 +149,7 @@ if label:
                      bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 
 t_tag = "-".join(f"{t:.0f}" for t in t_sel)
-# PDF, as the other paper figures (S3, plot2). The pcolormesh layers are rasterized above, so the file
+# PDF, as the other paper figures (plot2, and X3 among the extra ones). The pcolormesh layers are rasterized above, so the file
 # stays small while the contours, axes and text remain vector.
 outfile = str(FIGURES / f"{stem}_b_br_snapshots_t{t_tag}.pdf")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
