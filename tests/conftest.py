@@ -29,7 +29,8 @@ def pytest_addoption(parser):
         "--offline-check",
         action="store_true",
         default=False,
-        help="Run the offline budget pipeline and check that it reproduces the online budgets (slow; CI's offline-check job)",
+        help="Run the offline budget pipeline and check that it reproduces the online budgets (slow; CI's offline-check job; "
+             "needs a simulation run with --offline_check)",
     )
 
 

@@ -11,20 +11,20 @@ pipeline used to write, so nothing downstream knows which pipeline produced them
     <stem>_sfs_ke_budget_fields.nc    <stem>_sfs_ke_budget_integrated.nc
     <stem>_sfs_ape_budget_fields.nc   <stem>_sfs_ape_budget_integrated.nc
 
-The fields are on the simulation's own grid (no z padding, `n_pad_z = 0`), and only the upper record of
-each `ConsecutiveIterations` pair is kept: the online `TimeDerivative` there is the single-step backward
-difference across the pair, the same difference the offline pipeline formed, so the budget is stated at the
-same instants. The offline pipeline itself lives in `offline/` and runs only as the CI cross-check
-(`pytest --offline-check`).
+The fields are on the simulation's own grid (no z padding, `n_pad_z = 0`), and only the records whose
+`TimeDerivative` spans a time step are kept: every record but the first (iteration 0, where the derivative has
+had one evaluation and reads zero) or, when the simulation ran with `--offline_check` and wrote consecutive-
+iteration pairs, the upper record of each pair, whose derivative is the single-step difference across it, the
+same difference the offline pipeline forms, so the budget is stated at the same instants. The offline pipeline
+itself lives in `offline/` and runs only as the CI cross-check (`pytest --offline-check`).
 """
 #+++ Imports
 import os
 import re
 from pathlib import Path
-import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
+from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid, output_flag
 #---
 
 #+++ Configuration
@@ -33,8 +33,9 @@ parser = argparse.ArgumentParser(description="Assemble the SFS KE and APE budget
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=None,
                     help="Filter scales ℓ to assemble; each must be among the simulation's online --filter_ls (default: all of them)")
-parser.add_argument("--records", choices=["upper", "all"], default="upper",
-                    help="Keep the upper record of each consecutive-iteration pair (default, the offline convention) or every record")
+parser.add_argument("--records", choices=["differenced", "all"], default="differenced",
+                    help="Keep the records whose TimeDerivative spans a time step (default: the upper member of each pair of an "
+                         "--offline_check run, else every record but the first), or every record")
 args = parser.parse_args()
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -86,17 +87,15 @@ print("Loading the simulation output (unpadded)...")
 ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
 time = ds.time.values
 
-if args.records == "upper":
-    # Output comes in ConsecutiveIterations pairs, (tⁿ, tⁿ⁺¹) at every TimeInterval: keep the second of
-    # each, whose TimeDerivative spans the pair. A record is the upper member when the gap before it is
-    # one time step rather than one output interval, i.e. much shorter than the longest gap in the file.
-    dt = np.diff(time)
-    is_upper = np.zeros(len(time), dtype=bool)
-    is_upper[1:] = dt < 0.25 * np.max(dt)
-    if is_upper.sum() < len(time) // 3:
-        print("  WARNING: the output does not come in consecutive-iteration pairs; keeping every record")
-    else:
-        ds = ds.isel(time=np.where(is_upper)[0])
+if args.records == "differenced":
+    # A TimeDerivative reads zero until its operand has been evaluated twice, so iteration 0's record states no
+    # budget. With --offline_check (the file's `offline_check` attribute) the output comes in ConsecutiveIterations
+    # pairs, (tⁿ, tⁿ⁺¹) at every TimeInterval, and the second of each is kept, whose derivative spans the pair;
+    # otherwise every record but the first.
+    paired = output_flag(ds, "offline_check")
+    print("  " + ("Paired output (offline_check=1): keeping the upper record of each consecutive-iteration pair" if paired
+                  else "Unpaired output (offline_check=0): keeping every record but the first"))
+    ds = ds.isel(time=slice(1, None, 2 if paired else 1))
 print(f"  {len(ds.time)} records kept out of {len(time)}")
 
 online_scales = sorted({float(m.group(1)) for v in ds.data_vars

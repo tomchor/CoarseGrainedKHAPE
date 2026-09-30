@@ -7,6 +7,25 @@ import xarray as xr
 # $KHAPE_PP_OUTPUT redirects the derived budget files, as $KHAPE_OUTPUT_DIR does the simulation output.
 PP_OUTPUT = Path(os.environ.get("KHAPE_PP_OUTPUT") or Path(__file__).resolve().parent.parent / "output")
 
+#+++ Control flags of the run
+# kelvin_helmholtz_instability.jl writes its three control flags into every output file's global attributes as 0/1
+# integers (NetCDF has no Bool attribute), and every derived file copies the simulation's attributes: `offline_check`
+# (the 3D output comes in consecutive-iteration pairs), `save_tensors` (the per-scale S̄ⁱʲ/τⁱʲ components are in the
+# 3D file) and `save_sorted` (so is the validation-only sorted-state view, on its own grid). Read them from here rather
+# than inferring them from a file's contents.
+FLAGS = ("offline_check", "save_tensors", "save_sorted")
+
+
+def output_flag(ds, name):
+    """The run's control flag `name` (one of FLAGS), as a bool, from the dataset's global attributes."""
+    if name not in FLAGS:
+        raise ValueError(f"{name!r} is not a control flag of the simulation; expected one of {FLAGS}")
+    if name not in ds.attrs:
+        raise KeyError(f"global attribute {name!r} missing: the file predates the simulation writing its flags. Rerun it, or "
+                       f"add the attribute by hand, e.g. `ncatted -a {name},global,c,i,1 <file.nc>`")
+    return bool(int(ds.attrs[name]))
+#---
+
 #+++ Multi-grid output files
 # A NetCDFWriter holding outputs on more than one grid disambiguates by suffixing every dimension name
 # (`z_aac` -> `z_aac_grid1`) and prefixing the grid metadata groups (`underlying_grid_reconstruction_kwargs`

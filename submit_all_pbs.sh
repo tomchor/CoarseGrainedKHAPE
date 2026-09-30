@@ -31,9 +31,9 @@ for arg in "$@"; do case $arg in
   PLOTS=*)       PLOTS="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, FIXED_REF=, VALIDATE=, PLOTS= or SAVE_SORTED=)" >&2; exit 2;;
 esac; done
-# The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
-: "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
-: "${KHAPE_PYTHON:?set KHAPE_PYTHON to the python of your py313 environment; see the README, Environment}"
+# The allocation to charge and the Python to run: defaults in khape_defaults.sh, overridden from the environment.
+source "$(dirname "$0")/khape_defaults.sh"
+check_khape_python
 # Optional output redirection: $KHAPE_OUTPUT_DIR (simulation output) and $KHAPE_PP_OUTPUT (post-processing output)
 # are forwarded to every job when set, so a run can write beside the production output instead of over it. The
 # PBS scripts, kelvin_helmholtz_instability.jl and src/aux00_utils.py all read them; give absolute paths.

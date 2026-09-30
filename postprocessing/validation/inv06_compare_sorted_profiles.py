@@ -40,7 +40,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
-from src.aux00_utils import load_dataset_and_grid, integrate, open_grid_group, model_grid_suffix, strip_grid_suffix
+from src.aux00_utils import load_dataset_and_grid, integrate, open_grid_group, model_grid_suffix, strip_grid_suffix, output_flag
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries, g, ρ0
 from src.aux03_plotting import run_label, xz_slice
 #---
@@ -88,18 +88,15 @@ grid = open_grid_group(filename)   # handles the _gridN naming a --save_sorted r
 z_bot, z_top = float(grid.z.min()), float(grid.z.max())   # original (unpadded) z faces
 in_domain = dict(z_aac=slice(z_bot, z_top))               # selects the original cell centers
 
-for v in ("z✶_3dsort", "z✶_heaviside"):
-    if v not in ds:
-        raise SystemExit(f"Online field '{v}' not in {filename} — rerun the simulation with --save_sorted.")
+if not output_flag(ds, "save_sorted"):
+    raise SystemExit(f"{filename} was written without --save_sorted (its `save_sorted` attribute is 0), so it has no z✶_3dsort, "
+                     f"z✶_heaviside or sorted column: rerun the simulation with --save_sorted.")
 
 # The sorted column shares the output file with the model-grid fields. Because they are on different
 # grids the writer suffixes every dimension (`z_aac` -> `z_aac_grid1` for the model, `_grid2` for the
 # column); `load_dataset_and_grid` strips the model's suffix, so the column's variables are still in
 # `ds` carrying theirs. Read them from the raw file to keep the padded/unpadded bookkeeping clear.
 ds_col = xr.open_dataset(filename, decode_times=False)
-for v in ("z✶_1dsort", "b✶_1dsort"):
-    if v not in ds_col:
-        raise SystemExit(f"Online field '{v}' not in {filename} — rerun the simulation with --save_sorted.")
 print(f"Sorted column read from {Path(filename).name}, on its own axis: {ds_col['b✶_1dsort'].dims}")
 
 if args.time is None:

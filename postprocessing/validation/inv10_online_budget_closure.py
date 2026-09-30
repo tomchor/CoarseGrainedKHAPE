@@ -19,7 +19,7 @@ tⁿ: a callback evaluates the operand on the iteration before the writer actuat
 Over one step the Δt/2 offset is negligible against the output interval. Rˢ is built on the same
 difference: its ∂ₜb✶ is a TimeDerivative that a callback updates on the same iterations.
 
-The first output pair spans the initialisation transient and is skipped.
+The first output (the first pair, in an --offline_check run) spans the initialisation transient and is skipped.
 """
 #+++ Imports
 import logging
@@ -31,7 +31,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
-from src.aux00_utils import PP_OUTPUT, model_grid_suffix, strip_grid_suffix
+from src.aux00_utils import PP_OUTPUT, model_grid_suffix, strip_grid_suffix, output_flag
 from src.aux03_plotting import run_label
 #---
 
@@ -43,7 +43,8 @@ import argparse
 parser = argparse.ArgumentParser(description="Check that the online SFS KE and APE budgets close")
 parser.add_argument("--filename", default="output/khi_Nz256_Ri0.10.nc", help="Simulation NetCDF file (run with --save_sorted)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[1, 7], help="Filter ℓ (FWHM) values matching the online filter_ℓs")
-parser.add_argument("--skip", type=int, default=2, help="Leading outputs to drop (default 2: the first ConsecutiveIterations pair)")
+parser.add_argument("--skip", type=int, default=None,
+                    help="Leading outputs to drop (default: the first pair of an --offline_check run, else the first record)")
 parser.add_argument("--offline-stem", default=None,
                     help="Stem of the offline pipeline's budget files in postprocessing/output/offline/ (written by "
                          "offline/run_offline_budgets.sh), for a side-by-side residual")
@@ -79,11 +80,14 @@ def relative_residual(residual, terms):
 ds = xr.open_dataset(filename, decode_times=False)
 ds = strip_grid_suffix(ds, model_grid_suffix(ds))
 
-# The writer runs on ConsecutiveIterations, so outputs come in pairs. The first pair is dropped: its
-# derivatives span the initialisation transient (∫Eₐˢ goes from zero to its working value within the
-# first fraction of a time unit), which is not a statement about the budget and would dominate an rms
-# over the run.
-ds = ds.isel(time=slice(args.skip, None))
+# The first output is dropped: a TimeDerivative reads zero until its operand has been evaluated twice, so the
+# record at iteration 0 states no budget. With --offline_check (the file's `offline_check` attribute) the writer runs on
+# ConsecutiveIterations and the
+# outputs come in pairs, and the whole first pair goes: the second record's derivatives span the initialisation
+# transient (∫Eₐˢ goes from zero to its working value within the first fraction of a time unit), which is not a
+# statement about the budget either and would dominate an rms over the run.
+skip = args.skip if args.skip is not None else (2 if output_flag(ds, "offline_check") else 1)
+ds = ds.isel(time=slice(skip, None))
 
 # τ(w,b_r) is the one term the two budgets share, with opposite signs: it is a reversible exchange
 # between the reservoirs, so whatever the sub-filter KE gains the sub-filter APE loses. That also means

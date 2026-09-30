@@ -5,14 +5,15 @@ from pathlib import Path
 import numpy as np
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import (PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields, extension_suffix,
-                             scale_subset_tag)
+                             scale_subset_tag, output_flag)
 #---
 
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Filter velocity and buoyancy fields for cross-scale energy transfer sweep")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
-parser.add_argument("--n-time-skip", type=int, default=1, help="Keep every n-th (consecutive) time step")
+parser.add_argument("--n-time-skip", type=int, default=1,
+                    help="Keep every n-th output time (both records of its consecutive-iteration pair, when the run has them)")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=None,
                     help="Filter scales to sweep (default: 30 points log-spaced over 0.02-20). Give a single "
                          "value to test one scale, e.g. --filter-scales 20; the output is then tagged with the "
@@ -39,9 +40,11 @@ ds = load_dataset_and_grid(filename, min_margin=required_pad_margin(filter_scale
                            extension=args.extension)
 ds = ds.chunk(dict(time=1))
 
+# Records per output time: two when the simulation ran with --offline_check (consecutive-iteration pairs), else one.
+per_output = 2 if output_flag(ds, "offline_check") else 1
 i = np.arange(ds.sizes["time"])
 n_time_skip = args.n_time_skip
-ds = ds.isel(time=(i // 2) % n_time_skip == 0)
+ds = ds.isel(time=(i // per_output) % n_time_skip == 0)
 print(f"Dataset loaded: {len(ds.time)} time steps")
 #---
 

@@ -13,9 +13,9 @@ for arg in "$@"; do case $arg in
   EXTENSION=*)   EXTENSION="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, FIXED_REF=, N_TIME_SKIP= or EXTENSION=)" >&2; exit 2;;
 esac; done
-# The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
-: "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
-: "${KHAPE_PYTHON:?set KHAPE_PYTHON to the python of your py313 environment; see the README, Environment}"
+# The allocation to charge and the Python to run: defaults in khape_defaults.sh, overridden from the environment.
+source "$(dirname "$0")/../khape_defaults.sh"
+check_khape_python
 case $EXTENSION in edge|odd) ;; *) echo "EXTENSION must be edge or odd, not '$EXTENSION'" >&2; exit 2;; esac
 [ "$EXTENSION" = "edge" ] && EXT_TAG="" || EXT_TAG="_${EXTENSION}"
 
