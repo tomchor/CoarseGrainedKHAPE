@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
-from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities, open_grid_group
+from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities, open_grid_group, output_flag
 from src.aux02_ke_functions import calculate_strain_tensor, calculate_sfs_stress_tensor
 from src.aux03_plotting import run_label
 #---
@@ -62,8 +62,9 @@ print(f"Selected snapshot time = {t_sel:.3f}  (requested {args.time})")
 ds_t = ds.sel(time=t_sel, method="nearest")
 
 online_key0 = f"{COMPONENTS[0][0]}_ℓ{ℓ_tag}"
-if online_key0 not in ds_t:
-    raise SystemExit(f"Online tensor field '{online_key0}' not in dataset — re-run the simulation with --save_tensors.")
+if not output_flag(ds, "save_tensors"):
+    raise SystemExit(f"{filename} was written without --save_tensors (its `save_tensors` attribute is 0), so it has no S̄ⁱʲ/τⁱʲ "
+                     f"components: rerun the simulation with --save_tensors.")
 #---
 
 #+++ Recompute the tensor offline at this snapshot (mirrors 03_energy_transfer.py)

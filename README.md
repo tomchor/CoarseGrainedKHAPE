@@ -19,7 +19,7 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 | `01_online_budgets.py`, `02_plot_budgets.py` | **Budget pipeline.** Every term of the SFS KE and APE budgets is computed by the simulation itself; `01` assembles the budget files from those online terms (at the simulation's own filter scales, ℓ = 1 and 7 by default) and `02` plots them. |
 | `offline/01_…` – `offline/05_…` | **Offline budget pipeline, kept as a test.** The independent Python implementation of every term (scipy filtering on a z-padded domain, a numpy density sort, an FFT-filtered reference profile). It is no longer a product: `offline/run_offline_budgets.sh` runs it into `output/offline/` and `pytest --offline-check` compares each term against the assembled online budgets (see [Tests](#tests)). |
 | `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
-| `plot2_…`, `plot3_…`, `plot4_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, SFS KE/APE budget time series, local-field snapshot panels). Output goes to `figures/`. |
+| `plot2_…`, `plot3_…`, `plot5_…`, `plot6_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, b and b_r snapshots, SFS KE/APE budget time series, local-field snapshot panels). `plots.pbs` runs every `plot*.py`. Output goes to `figures/`. |
 | `anim1_…`, `S1_…`, `S2_…`, `S3_…` | **Supplementary material.** Animations (`anim*`, requires `ffmpeg`) and supplementary figures (`S1`–`S3`: Π hovmöllers, snapshot panels, sweep-spectrum figures). |
 | `aux*` (under `src/`) | Shared utilities reused across the pipeline (data loading, Gaussian filtering, spatial derivatives, PE/KE budget terms, plotting helpers). |
 | `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the budget pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
@@ -29,7 +29,7 @@ All Python scripts accept `--filename`, and most accept `--filter-scales` and `-
 
 ### Where the budgets come from
 
-The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` reads the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that the plotting scripts and the tests consume, on the simulation's own grid, at the upper record of each consecutive-iteration output pair. See CLAUDE.md for the full account.
+The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` reads the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that the plotting scripts and the tests consume, on the simulation's own grid, one record per output time. See CLAUDE.md for the full account.
 
 The offline pipeline that used to compute these terms (`postprocessing/offline/`) recomputes every one of them independently and runs only as the CI cross-check. There is no fixed-in-time reference variant of the budgets; the sweep keeps its own (`sweep2 --fixed-reference`).
 
@@ -59,12 +59,12 @@ Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are option
 
 ### Environment
 
-The submit wrappers need two variables that belong to whoever submits, and two more move the output off the repository, for example to scratch. Set them in the login environment (e.g. `~/.bashrc`): the jobs run in a login shell, and PBS does not otherwise pass on the submitting shell's variables. Give absolute paths. No job script names an account, a mail address or a Python environment; PBS mails its reports to whoever submitted the job.
+The submit wrappers take the project to charge and the Python to run from two variables whose defaults live in `khape_defaults.sh` (sourced by every `submit_*.sh`, so that is the one place to change them), and two more variables move the output off the repository, for example to scratch. To override any of them, set it in the login environment (e.g. `~/.bashrc`): the jobs run in a login shell, and PBS does not otherwise pass on the submitting shell's variables. Give absolute paths. No `.pbs` file names an account, a mail address or a Python environment, since the wrapper hands them over at submission; PBS mails its reports to whoever submitted the job.
 
 | Variable | Default | Read by |
 |----------|---------|---------|
-| `KHAPE_ACCOUNT` | none, required | every submit wrapper, which charges each job to it with `qsub -A` |
-| `KHAPE_PYTHON` | none, required for post-processing | the wrappers, which pass it to every Python job (the path to your `py313` environment's `python`) |
+| `KHAPE_ACCOUNT` | `UMCP0061` | every submit wrapper, which charges each job to it with `qsub -A` |
+| `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job (the path to your `py313` environment's `python`) |
 | `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
 | `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
 
@@ -82,7 +82,7 @@ bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 
 # Add the online-vs-offline validation and/or the final plots (independently toggleable)
 bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors and --save_sorted
-bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_transfer
+bash submit_all_pbs.sh PLOTS=1               # + every plot*.py after sweep_transfer
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
@@ -92,7 +92,7 @@ Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after 
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
-- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs `plot2_transfer_spectrum.py`, `plot3_budgets.py`, and `plot4_panels.py`.
+- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot5_budgets.py` (the integrated budgets) and `plot6_panels.py` (the local budget fields).
 
 ### Run simulation only
 
@@ -108,6 +108,9 @@ bash submit_simulation.sh NZ=2048 SAVE_TENSORS=1
 
 # Also write the validation-only sorted reference state (for inv06/inv07)
 bash submit_simulation.sh NZ=2048 SAVE_SORTED=1
+
+# Also write each 3D output as a consecutive-iteration pair (for pytest --offline-check; doubles the 3D output)
+bash submit_simulation.sh NZ=1024 OFFLINE_CHECK=1
 ```
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
@@ -123,6 +126,8 @@ budget term whether or not it is written; the flag decides only whether the two 
 whether the column goes to the file. All of these go into the main output file, since one `NetCDFWriter` holds
 both grids; the resulting per-grid dimension suffixing is undone at load time by the post-processing loader.
 `inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare them against the offline sort.
+
+`OFFLINE_CHECK=1` passes `--offline_check`, which makes the 3D writer also write the record one time step after each output (`ConsecutiveIterations`). Only the offline pipeline reads those pairs, to form its own tendencies for `pytest --offline-check`; the online tendencies come from `TimeDerivative` and need no pair, so the default (`0`) writes one record per output time and halves the 3D output. CI's offline-check run passes the flag. The three flags are written to both output files as 0/1 global attributes (`save_tensors`, `save_sorted`, `offline_check`), which is how the post-processing tells what a run contains.
 
 ### Run a simulation + online-vs-offline validation
 
@@ -213,9 +218,9 @@ pytest tests/ -v -s                                  # closure, positivity, the 
 pytest tests/ -v -s --offline-check                  # + the offline pipeline as a cross-check (about an hour at Nz=1024, less at CI's Nz=512)
 ```
 
-`--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped.
+`--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped. It needs a simulation run with `--offline_check` (`OFFLINE_CHECK=1`), whose consecutive-iteration output pairs the offline pipeline differences for its tendencies; the pipeline refuses a run without them.
 
-CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=512) once, then two jobs in parallel: `test-online` (assemble → pytest → animation, minutes) and `test-offline-check` (the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
+CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=512) twice in parallel, once as production writes it and once with `--save_sorted --offline_check`, then two jobs in parallel: `test-online` (the production run: assemble → pytest → animation, minutes) and `test-offline-check` (the paired run: the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 

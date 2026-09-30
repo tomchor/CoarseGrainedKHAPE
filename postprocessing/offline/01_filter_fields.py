@@ -5,7 +5,7 @@ from pathlib import Path
 from dask.diagnostics.progress import ProgressBar
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on the path, for `src.*`
-from src.aux00_utils import PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields
+from src.aux00_utils import PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields, output_flag
 #---
 
 #+++ Configuration
@@ -29,6 +29,13 @@ print("Loading data and grid...")
 ds = load_dataset_and_grid(filename, min_margin=required_pad_margin(filter_scales))
 ds = ds.chunk({"time": 1})
 print(f"Dataset loaded: {len(ds.time)} time steps")
+# The tendencies of 04 and 05, and ∂ₜρ✶ inside R, are differences across the consecutive-iteration pair the
+# simulation writes at each output with --offline_check. The online TimeDerivative needs no pair, so a run without
+# the flag has one record per output time, and differencing those would span the whole output interval.
+if not output_flag(ds, "offline_check"):
+    raise ValueError(f"{Path(filename).name} was written without --offline_check (its `offline_check` attribute is 0), so it has "
+                     "no consecutive-iteration output pairs for the offline pipeline to difference: rerun the simulation with "
+                     "--offline_check (OFFLINE_CHECK=1).")
 #---
 
 #+++ Filter velocity and buoyancy fields at each length scale

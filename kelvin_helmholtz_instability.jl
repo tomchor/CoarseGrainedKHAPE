@@ -98,16 +98,26 @@ let s = ArgParseSettings()
                     budgets themselves are always written; this adds two 3D fields and two extra sorts per output, so it is \
                     off by default (for postprocessing/validation/inv06-inv07)."
             action = :store_true
+
+        "--offline_check"
+            help = "Also write the record one time step after each 3D output (ConsecutiveIterations pairs), which the offline \
+                    pipeline differences for its own tendencies in `pytest --offline-check`. The online tendencies come from \
+                    TimeDerivative and need no pair, so it is off by default, at half the 3D output."
+            action = :store_true
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
-# Keep the save_tensors control flag out of `params` (it is a Bool, which NetCDF can't store as a
-# global attribute, and it is not a physical parameter). Likewise filter_ls is a vector (the online
-# filter scales, encoded in the output variable names as `_ℓ<ℓ>`), so keep it out of `params` too.
+# The control flags go into `params`, and so into both output files' global attributes, as 0/1 Ints (NetCDF has
+# no Bool attribute). The post-processing reads them back from there (`output_flag` in postprocessing/src/aux00_utils.py)
+# rather than inferring them from a file's contents: `offline_check` says whether the 3D output comes in
+# consecutive-iteration pairs, `save_tensors` whether the S̄ⁱʲ/τⁱʲ components are there, `save_sorted` whether the
+# sorted-state view is. filter_ls is a vector (the online filter scales, encoded in the output variable names as
+# `_ℓ<ℓ>`), so it stays out of `params`.
 save_tensors = pop!(parsed_args, :save_tensors)
 save_sorted = pop!(parsed_args, :save_sorted)
+offline_check = pop!(parsed_args, :offline_check)
 filter_ls = pop!(parsed_args, :filter_ls)
-params = (; parsed_args...)
+params = (; parsed_args..., save_tensors=Int(save_tensors), save_sorted=Int(save_sorted), offline_check=Int(offline_check))
 #---
 
 #+++ Define simulation parameters
@@ -387,8 +397,12 @@ ke_transfer_fields = (; _ke_pairs...)
 # strips the model grid's suffix at load time (`strip_grid_suffix` in postprocessing/src/aux00_utils.py).
 #
 # The 3D writer's schedule, defined here so the time derivatives inside R below can update on the iterations
-# around its outputs, which include every one of the 2D writer's.
-output_schedule = ConsecutiveIterations(TimeInterval(2))
+# around its outputs, which include every one of the 2D writer's. The online tendencies (TimeDerivative, below)
+# difference each output against the iteration before it on their own, so one record per output time is a
+# complete budget statement. --offline_check adds the record one time step after each output: the offline
+# pipeline (postprocessing/offline/, the CI cross-check) differences that pair for its own tendencies and reads
+# nothing else from it, and it doubles the 3D output, so production runs leave it off.
+output_schedule = offline_check ? ConsecutiveIterations(TimeInterval(2)) : TimeInterval(2)
 
 z✶_1dsort = reference_height(model, method=VerticalSort())
 b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
@@ -518,10 +532,11 @@ if !(model.closure isa ScalarDiffusivity)
 end
 
 # The 3D writer updates the TimeDerivatives among its outputs, and R's callbacks theirs, on PrecedingIterations
-# of `output_schedule`, which falls back to every iteration for a schedule it cannot anticipate, as
-# ConsecutiveIterations is upstream: the writer would filter Kˢ and S̃, and the callbacks sort the column, on
-# every time step. Its actuations are the parent's plus the iterations right after, whose preceding iteration
-# is already an actuation, so only the parent's next actuation needs anticipating. This belongs upstream.
+# of `output_schedule`, which falls back to every iteration for a schedule it cannot anticipate, as the
+# ConsecutiveIterations of --offline_check is upstream: the writer would filter Kˢ and S̃, and the callbacks sort
+# the column, on every time step. Its actuations are the parent's plus the iterations right after, whose preceding
+# iteration is already an actuation, so only the parent's next actuation needs anticipating. This belongs upstream.
+# (The plain TimeInterval of the default is anticipated upstream and needs nothing here.)
 actuates_next_iteration(schedule::ConsecutiveIterations, clock, growth) = actuates_next_iteration(schedule.parent, clock, growth)
 
 # The model-grid z✶ fields go in the 3D file only; the 2D writer below slices with `indices` for a
