@@ -79,6 +79,12 @@ let s = ArgParseSettings()
             required = false
             default = 0.05
 
+        "--output_interval"
+            help = "Time between outputs, for both writers (default: 2.0); each 3D output is a consecutive-iteration pair"
+            arg_type = Float64
+            required = false
+            default = 2.0
+
         "--filter_ls"
             help = "Filter length scales ℓ (FWHM) for the online sub-filter budgets (filtered fields and every term of the \
                     SFS KE and APE budgets). postprocessing/01_online_budgets.py reads these scales (default: 1 7)"
@@ -383,7 +389,7 @@ ke_transfer_fields = (; _ke_pairs...)
 #
 # The 3D writer's schedule, defined here so the time derivatives inside R below can update on the iterations
 # around its outputs, which include every one of the 2D writer's.
-output_schedule = ConsecutiveIterations(TimeInterval(2))
+output_schedule = ConsecutiveIterations(TimeInterval(params.output_interval))
 
 z✶_1dsort = reference_height(model, method=VerticalSort())
 b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
@@ -530,7 +536,7 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., budget_f
 
 output_filename_2d = joinpath(output_dir, "$(simulation_name)_2d.nc")
 simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
-                                                       schedule = TimeInterval(2),
+                                                       schedule = TimeInterval(params.output_interval),
                                                        filename = output_filename_2d,
                                                        array_type = Array{Float32},
                                                        indices = (:, 1, :),

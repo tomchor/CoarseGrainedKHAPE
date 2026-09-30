@@ -191,7 +191,7 @@ For development on a workstation (no PBS scheduler), run the simulation and post
 
 ```bash
 # Julia simulation (CPU, small grid; CI's run)
-julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 128 --Ri 0.1 --stop_time 70 --Re0 0.4
+julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 128 --Ri 0.1 --stop_time 70 --Re0 0.4 --output_interval 4
 
 # Budgets (assembled from the online terms) and their plots, for an existing NetCDF file
 cd postprocessing
@@ -217,7 +217,7 @@ pytest tests/ -v -s --offline-check                  # + the offline pipeline as
 
 `--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped.
 
-CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=128, `--Re0 0.4` for Re = 258) once, then two jobs in parallel: `test-online` (assemble → pytest → animation, minutes) and `test-offline-check` (the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
+CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=128, `--Re0 0.4` for Re = 258, outputs every 4 time units) once, then two jobs in parallel: `test-online` (assemble → pytest → animation, minutes) and `test-offline-check` (the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 

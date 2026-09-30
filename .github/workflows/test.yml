@@ -49,9 +49,10 @@ jobs:
       # view of the sorted reference state (the two model-grid z✶ methods, the column, ∫E_b), which the
       # inv06/inv07 scripts of the offline-check job compare against the offline sort.
       # The tests find this run through STEM in tests/conftest.py, which has to change with --Nz. --Re0 0.4 puts
-      # this Nz=128 run at Re = 258, the Reynolds number the test tolerances were calibrated at.
+      # this Nz=128 run at Re = 258, the Reynolds number the test tolerances were calibrated at. On the CPU the cost
+      # is the outputs, not the time steps (about 80 s per 3D record on 8 cores), so CI writes every 4 time units.
       - name: Run simulation (Nz=128, CPU)
-        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 128 --Ri 0.1 --stop_time 70 --Re0 0.4 --filter_ls 1 7 --save_sorted
+        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 128 --Ri 0.1 --stop_time 70 --Re0 0.4 --output_interval 4 --filter_ls 1 7 --save_sorted
 
       - name: Upload simulation output
         uses: actions/upload-artifact@v4

@@ -20,7 +20,7 @@ regular output — and verifying that the online result reproduces the offline o
 where the overbar is a Gaussian filter of width ℓ (FWHM). `τⁱʲ` is the sub-filter stress tensor and
 `S̄ⁱʲ` the strain rate of the *filtered* velocity. `Π_K > 0` is forward (downscale) transfer. The KH runs
 were 2D in x–z (`v ≡ 0`) when this was written, so only the `i,j ∈ {1,3}` components survived; the runs are 3D
-since the `tc/3d-simulation` PR and every component enters. We omit `ρ₀` (Π_K is per unit mass, units m² s⁻³).
+since PR #72 and every component enters. We omit `ρ₀` (Π_K is per unit mass, units m² s⁻³).
 
 ## The online implementation
 
