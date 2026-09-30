@@ -65,6 +65,25 @@ def integrate(da, dV, dims=("x_caa", "y_aca", "z_aac")):
     return (da * dV).sum(dims)
 #---
 
+#+++ Consecutive-iteration output pairs
+def upper_records(time, ratio=0.25):
+    """Mask of the upper member of each consecutive-iteration output pair; all False when the output is not paired.
+
+    A simulation run with `--offline_check` writes its 3D output on `ConsecutiveIterations(TimeInterval(2))`, so the
+    records come in pairs (tⁿ, tⁿ⁺¹) one time step apart at every output interval; without the flag there is one
+    record per output time. A record is the upper member of a pair when the gap before it is one time step rather
+    than one output interval, i.e. shorter than `ratio` times the longest gap in the file. Fewer than a third of the
+    records flagged means the output is not paired (an isolated short gap is not a pair), and the mask is all False.
+    """
+    time = np.asarray(time, dtype=float)
+    is_upper = np.zeros(time.size, dtype=bool)
+    if time.size > 1:
+        is_upper[1:] = np.diff(time) < ratio * np.max(np.diff(time))
+    if is_upper.sum() < time.size // 3:
+        is_upper[:] = False
+    return is_upper
+#---
+
 #+++ Load data
 def required_pad_margin(filter_scales):
     """Physical z margin the padding must provide for the widest filter in `filter_scales`.

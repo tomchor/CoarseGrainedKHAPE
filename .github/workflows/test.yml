@@ -21,12 +21,24 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Run the Julia simulation once; the test jobs share its output.
+  # Run the Julia simulation twice, in parallel: as production writes it, for test-online, and with
+  # --offline_check, which writes each 3D output as a consecutive-iteration pair, for test-offline-check,
+  # whose offline pipeline differences the pairs for its own tendencies (the online TimeDerivative terms
+  # need none). --save_sorted adds the validation-only view of the sorted reference state (the two
+  # model-grid z✶ methods, the column, ∫E_b), which that job's inv06/inv07 compare against the offline sort.
   # ---------------------------------------------------------------------------
   simulate:
-    name: Run simulation
+    name: Run simulation (${{ matrix.output }})
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - output: production
+            flags: ""
+          - output: offline-check
+            flags: --save_sorted --offline_check
 
     steps:
       - uses: actions/checkout@v4
@@ -45,17 +57,15 @@ jobs:
       - name: Install Julia packages
         run: julia --project -e 'using Pkg; Pkg.instantiate()'
 
-      # Every term of both SFS budgets is written unconditionally. --save_sorted adds the validation-only
-      # view of the sorted reference state (the two model-grid z✶ methods, the column, ∫E_b), which the
-      # inv06/inv07 scripts of the offline-check job compare against the offline sort.
+      # Every term of both SFS budgets is written unconditionally; the matrix adds the flags above.
       # The tests find this run through STEM in tests/conftest.py, which has to change with --Nz.
       - name: Run simulation (Nz=512, CPU)
-        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3 --filter_ls 1 7 --save_sorted
+        run: julia --project -t 2 kelvin_helmholtz_instability.jl --Nz 512 --Ri 0.1 --stop_time 70 --Re0 1e-3 --filter_ls 1 7 ${{ matrix.flags }}
 
       - name: Upload simulation output
         uses: actions/upload-artifact@v4
         with:
-          name: simulation-output
+          name: simulation-output-${{ matrix.output }}
           path: |
             output/khi_Nz512_Ri0.10.nc
             output/khi_Nz512_Ri0.10_2d.nc
@@ -64,8 +74,9 @@ jobs:
 
       # The panels animations drawn from the online 2D fields at the end of the simulation, the same
       # figure anim1_panels.py later draws from the assembled budget files (animation-online-budgets).
+      # The 2D writer is the same in both runs, so one upload is enough.
       - name: Upload online animations
-        if: always()
+        if: always() && matrix.output == 'production'
         uses: actions/upload-artifact@v4
         with:
           name: animation-online
@@ -152,7 +163,7 @@ jobs:
       - name: Download simulation output
         uses: actions/download-artifact@v4
         with:
-          name: simulation-output
+          name: simulation-output-production
           path: output/
 
       - uses: actions/setup-python@v5
@@ -262,7 +273,7 @@ jobs:
       - name: Download simulation output
         uses: actions/download-artifact@v4
         with:
-          name: simulation-output
+          name: simulation-output-offline-check
           path: output/
 
       - uses: actions/setup-python@v5

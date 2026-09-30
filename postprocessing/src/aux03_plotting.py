@@ -286,8 +286,8 @@ def plot_dataset_variables(ds, time_stride=None, figsize=None, **kwargs):
 def collapse_time_pairs(ds, rtol=0.5):
     """Keep one record per group of near-coincident times.
 
-    The simulation writes with `ConsecutiveIterations(TimeInterval(2))`, so output arrives in pairs a
-    single timestep apart: at Nz=2048 the gaps alternate ~0.007 and ~4.0, a 550:1 ratio. The data is fine
+    A simulation run with `--offline_check` writes with `ConsecutiveIterations(TimeInterval(2))`, so its output
+    arrives in pairs a single timestep apart: at Nz=2048 the gaps alternate ~0.007 and ~4.0, a 550:1 ratio. The data is fine
     -- the two members differ by exactly the smooth evolution over that interval -- but `pcolormesh` puts
     cell boundaries at the midpoints between coordinates, so each pair renders as one hairline row and one
     full-height row, alternating up the panel. That banding is manufactured by the axis, not the flow.
@@ -298,8 +298,9 @@ def collapse_time_pairs(ds, rtol=0.5):
     exceeds a tenth of the interval and whole pairs survived, double-weighting those times.
     Scaled by an upper percentile, not the median: with paired output roughly half the gaps are the tiny
     within-pair ones, so the median sits inside that group and the test never fires. With no pairing the
-    gaps are uniform, the threshold lands at `rtol` of them, and nothing is dropped. The pairs exist for
-    the online TimeDerivative terms, which the offline pipeline no longer reads.
+    gaps are uniform, the threshold lands at `rtol` of them, and nothing is dropped, which is the case for a run
+    without the flag: the pairs exist for the offline pipeline's own tendencies, and the online TimeDerivative
+    terms need none.
     """
     import numpy as np
     t = ds.time.values

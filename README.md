@@ -29,7 +29,7 @@ All Python scripts accept `--filename`, and most accept `--filter-scales` and `-
 
 ### Where the budgets come from
 
-The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` reads the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that the plotting scripts and the tests consume, on the simulation's own grid, at the upper record of each consecutive-iteration output pair. See CLAUDE.md for the full account.
+The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` reads the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that the plotting scripts and the tests consume, on the simulation's own grid, one record per output time. See CLAUDE.md for the full account.
 
 The offline pipeline that used to compute these terms (`postprocessing/offline/`) recomputes every one of them independently and runs only as the CI cross-check. There is no fixed-in-time reference variant of the budgets; the sweep keeps its own (`sweep2 --fixed-reference`).
 
@@ -108,6 +108,9 @@ bash submit_simulation.sh NZ=2048 SAVE_TENSORS=1
 
 # Also write the validation-only sorted reference state (for inv06/inv07)
 bash submit_simulation.sh NZ=2048 SAVE_SORTED=1
+
+# Also write each 3D output as a consecutive-iteration pair (for pytest --offline-check; doubles the 3D output)
+bash submit_simulation.sh NZ=1024 OFFLINE_CHECK=1
 ```
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
@@ -123,6 +126,8 @@ budget term whether or not it is written; the flag decides only whether the two 
 whether the column goes to the file. All of these go into the main output file, since one `NetCDFWriter` holds
 both grids; the resulting per-grid dimension suffixing is undone at load time by the post-processing loader.
 `inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare them against the offline sort.
+
+`OFFLINE_CHECK=1` passes `--offline_check`, which makes the 3D writer also write the record one time step after each output (`ConsecutiveIterations`). Only the offline pipeline reads those pairs, to form its own tendencies for `pytest --offline-check`; the online tendencies come from `TimeDerivative` and need no pair, so the default (`0`) writes one record per output time and halves the 3D output. CI's offline-check run passes the flag.
 
 ### Run a simulation + online-vs-offline validation
 
@@ -213,9 +218,9 @@ pytest tests/ -v -s                                  # closure, positivity, the 
 pytest tests/ -v -s --offline-check                  # + the offline pipeline as a cross-check (about an hour at Nz=1024, less at CI's Nz=512)
 ```
 
-`--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped.
+`--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped. It needs a simulation run with `--offline_check` (`OFFLINE_CHECK=1`), whose consecutive-iteration output pairs the offline pipeline differences for its tendencies; the pipeline refuses a run without them.
 
-CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=512) once, then two jobs in parallel: `test-online` (assemble → pytest → animation, minutes) and `test-offline-check` (the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
+CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=512) twice in parallel, once as production writes it and once with `--save_sorted --offline_check`, then two jobs in parallel: `test-online` (the production run: assemble → pytest → animation, minutes) and `test-offline-check` (the paired run: the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
 
 ## Logs
 
