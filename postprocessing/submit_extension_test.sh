@@ -12,9 +12,9 @@ for arg in "$@"; do case $arg in
   N_TIME_SKIP=*) N_TIME_SKIP="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, SCALE=, EXTENSION= or N_TIME_SKIP=)" >&2; exit 2;;
 esac; done
-# The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
-: "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
-: "${KHAPE_PYTHON:?set KHAPE_PYTHON to the python of your py313 environment; see the README, Environment}"
+# The allocation to charge and the Python to run: defaults in khape_defaults.sh, overridden from the environment.
+source "$(dirname "$0")/../khape_defaults.sh"
+check_khape_python
 if [ "$EXTENSION" = "edge" ]; then
     echo "EXTENSION=edge has nothing to test: the edge half of the comparison is the production sweep" >&2
     exit 2

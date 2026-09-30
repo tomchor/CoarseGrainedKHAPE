@@ -59,12 +59,12 @@ Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are option
 
 ### Environment
 
-The submit wrappers need two variables that belong to whoever submits, and two more move the output off the repository, for example to scratch. Set them in the login environment (e.g. `~/.bashrc`): the jobs run in a login shell, and PBS does not otherwise pass on the submitting shell's variables. Give absolute paths. No job script names an account, a mail address or a Python environment; PBS mails its reports to whoever submitted the job.
+The submit wrappers take the project to charge and the Python to run from two variables whose defaults live in `khape_defaults.sh` (sourced by every `submit_*.sh`, so that is the one place to change them), and two more variables move the output off the repository, for example to scratch. To override any of them, set it in the login environment (e.g. `~/.bashrc`): the jobs run in a login shell, and PBS does not otherwise pass on the submitting shell's variables. Give absolute paths. No `.pbs` file names an account, a mail address or a Python environment, since the wrapper hands them over at submission; PBS mails its reports to whoever submitted the job.
 
 | Variable | Default | Read by |
 |----------|---------|---------|
-| `KHAPE_ACCOUNT` | none, required | every submit wrapper, which charges each job to it with `qsub -A` |
-| `KHAPE_PYTHON` | none, required for post-processing | the wrappers, which pass it to every Python job (the path to your `py313` environment's `python`) |
+| `KHAPE_ACCOUNT` | `UMCP0061` | every submit wrapper, which charges each job to it with `qsub -A` |
+| `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job (the path to your `py313` environment's `python`) |
 | `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
 | `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
 

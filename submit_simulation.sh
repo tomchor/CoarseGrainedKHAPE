@@ -18,8 +18,8 @@ for arg in "$@"; do case $arg in
   OFFLINE_CHECK=*) OFFLINE_CHECK="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, SAVE_TENSORS=, SAVE_SORTED= or OFFLINE_CHECK=)" >&2; exit 2;;
 esac; done
-# The allocation to charge and the Python to run belong to whoever submits, so they come from the environment.
-: "${KHAPE_ACCOUNT:?set KHAPE_ACCOUNT to the project code to charge; see the README, Environment}"
+# The allocation to charge: default in khape_defaults.sh, overridden from the environment.
+source "$(dirname "$0")/khape_defaults.sh"
 NAME="kelvin_helmholtz_${NZ}"
 qsub -N "$NAME" \
      -A "$KHAPE_ACCOUNT" \
