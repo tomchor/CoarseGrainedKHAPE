@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
+from src.aux00_utils import EXTRA_FIGURES, PP_OUTPUT, load_dataset_and_grid
 from src.aux03_plotting import xz_slice
 #---
 
@@ -25,8 +25,7 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FIGURES   = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
+EXTRA_FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 ref_suffix = ""
@@ -128,7 +127,7 @@ for ax, field, (xlo, xhi, zlo, zhi) in zip(axes.flat, panels, quadrants):
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-outfile = str(FIGURES / f"{stem}_thumbnail_t{t_sel:.1f}_l{ℓ_sel:.4f}{ref_suffix}.jpg")
+outfile = str(EXTRA_FIGURES / f"{stem}_thumbnail_t{t_sel:.1f}_l{ℓ_sel:.4f}{ref_suffix}.jpg")
 fig.savefig(outfile, dpi=3000, pad_inches=0)
 print(f"Figure saved to: {outfile}")
 #---

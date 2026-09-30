@@ -4,7 +4,7 @@ Computes Available Potential Energy (APE) from three-dimensional Kelvin-Helmholt
 
 ## Pipeline overview
 
-1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU and writes NetCDF output
+1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then draws the three figures that need nothing else (`plot3_b_br_snapshots.py`, `plot5_budgets.py`, `plot6_panels.py`) into `figures/`
 2. **Post-processing** — `postprocessing/budgeting.pbs` assembles the SFS KE and APE budgets from the terms the simulation computed online and plots them (the offline computation of those terms lives in `postprocessing/offline/` and runs only as a CI cross-check)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
@@ -20,7 +20,7 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 | `offline/01_…` – `offline/05_…` | **Offline budget pipeline, kept as a test.** The independent Python implementation of every term (scipy filtering on a z-padded domain, a numpy density sort, an FFT-filtered reference profile). It is no longer a product: `offline/run_offline_budgets.sh` runs it into `output/offline/` and `pytest --offline-check` compares each term against the assembled online budgets (see [Tests](#tests)). |
 | `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
 | `plot2_…`, `plot3_…`, `plot5_…`, `plot6_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, b and b_r snapshots, SFS KE/APE budget time series, local-field snapshot panels). `plots.pbs` runs every `plot*.py`. Output goes to `figures/`. |
-| `anim1_…`, `S1_…`, `S2_…`, `S3_…` | **Supplementary material.** Animations (`anim*`, requires `ffmpeg`) and supplementary figures (`S1`–`S3`: Π hovmöllers, snapshot panels, sweep-spectrum figures). |
+| `anim1_…`, `X1_…` – `X11_…` | **Extra material.** Animations (`anim*`, requires `ffmpeg`) and the extra figures outside the manuscript set (`X*`, X for extra: Π hovmöllers, snapshot panels, a thumbnail, sweep-spectrum diagnostics). The `X*` scripts write to `postprocessing/extra_figures/`, not `figures/`. |
 | `aux*` (under `src/`) | Shared utilities reused across the pipeline (data loading, Gaussian filtering, spatial derivatives, PE/KE budget terms, plotting helpers). |
 | `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the budget pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
 | `*.pbs`, `submit_*.sh` | PBS job scripts and their wrappers (see [Submitting jobs](#submitting-jobs)). |
@@ -29,7 +29,7 @@ All Python scripts accept `--filename`, and most accept `--filter-scales` and `-
 
 ### Where the budgets come from
 
-The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x, y **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` reads the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that the plotting scripts and the tests consume, on the simulation's own grid, one record per output time. See CLAUDE.md for the full account.
+The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x, y **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` writes the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that `02_plot_budgets.py`, `anim1_panels.py` and the tests consume, on the simulation's own grid, one record per output time; the assembly itself is `online_budgets` in `src/aux04_online_budgets.py`, which `plot5_budgets.py` and `plot6_panels.py` call on the simulation file directly, so those two figures need no post-processing. See CLAUDE.md for the full account.
 
 The offline pipeline that used to compute these terms (`postprocessing/offline/`) recomputes every one of them independently and runs only as the CI cross-check. There is no fixed-in-time reference variant of the budgets; the sweep keeps its own (`sweep2 --fixed-reference`).
 
@@ -64,7 +64,7 @@ The submit wrappers take the project to charge and the Python to run from two va
 | Variable | Default | Read by |
 |----------|---------|---------|
 | `KHAPE_ACCOUNT` | `UMCP0061` | every submit wrapper, which charges each job to it with `qsub -A` |
-| `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job (the path to your `py313` environment's `python`) |
+| `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job and to the simulation job, for the figures it draws after the run (the path to your `py313` environment's `python`) |
 | `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
 | `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
 
@@ -92,7 +92,7 @@ Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after 
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
-- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot5_budgets.py` (the integrated budgets) and `plot6_panels.py` (the local budget fields).
+- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot4_sweep_spectrum_hovmoller.py` (Hovmöllers of the transfers, from the sweep output), `plot5_budgets.py` (the integrated SFS budgets) and `plot6_panels.py` (the local SFS budget fields), the last two assembled from the simulation output itself, so they need no post-processing. `plot3`, `plot5` and `plot6` are also drawn by the simulation job itself as soon as the run ends (see *Run simulation only*), so the plots job redraws them after the sweep.
 
 ### Run simulation only
 
@@ -114,6 +114,8 @@ bash submit_simulation.sh NZ=256 OFFLINE_CHECK=1
 ```
 
 The grid is isotropic (Δx = Δy = Δz) on a domain of one KH wavelength λ in x, λ/3 in y and 25h in z, so `NZ` sets the whole grid: 288 × 96 × 512 cells at `NZ=512`. The Reynolds number scales as Re = Re₀ Nz^(4/3) (Kolmogorov resolution at fixed domain height), with Re₀ = 0.1 by default, i.e. Re = 410 at Nz=512.
+
+When the run ends, the same job draws the three figures that need nothing but the simulation's own files, into `figures/`: `plot3_b_br_snapshots.py` (from the `_2d.nc` file) and `plot5_budgets.py` and `plot6_panels.py` (which assemble the SFS budgets from the 3D file themselves). A figure that fails is logged as a warning rather than failing the job, so jobs chained on the simulation with `afterok` still start. The wrapper checks `KHAPE_PYTHON` at submission and passes it to the job for this.
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
 resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale. These

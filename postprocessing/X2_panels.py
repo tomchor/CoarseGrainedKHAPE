@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
+from src.aux00_utils import EXTRA_FIGURES, PP_OUTPUT, load_dataset_and_grid
 from src.aux03_plotting import xz_slice
 #---
 
@@ -26,8 +26,7 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FIGURES   = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
+EXTRA_FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 ref_suffix = ""
@@ -168,7 +167,7 @@ for ax, letter in zip(axes.flat, "abcdef"):
             fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
 
-outfile = str(FIGURES / f"{stem}_panels2x3_t{t_sel:.1f}_l{ℓ_sel:.4f}{ref_suffix}.png")
+outfile = str(EXTRA_FIGURES / f"{stem}_panels2x3_t{t_sel:.1f}_l{ℓ_sel:.4f}{ref_suffix}.png")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")

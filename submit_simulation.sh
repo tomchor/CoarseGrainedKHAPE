@@ -18,13 +18,15 @@ for arg in "$@"; do case $arg in
   OFFLINE_CHECK=*) OFFLINE_CHECK="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, SAVE_TENSORS=, SAVE_SORTED= or OFFLINE_CHECK=)" >&2; exit 2;;
 esac; done
-# The allocation to charge: default in khape_defaults.sh, overridden from the environment.
+# The allocation to charge, and the Python for the figures simulation.pbs draws after the run: defaults in
+# khape_defaults.sh, overridden from the environment.
 source "$(dirname "$0")/khape_defaults.sh"
+check_khape_python
 NAME="kelvin_helmholtz_${NZ}"
 qsub -N "$NAME" \
      -A "$KHAPE_ACCOUNT" \
      -o "logs/${NAME}.log" \
      -e "logs/${NAME}.log" \
-     -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED,OFFLINE_CHECK=$OFFLINE_CHECK \
+     -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED,OFFLINE_CHECK=$OFFLINE_CHECK,KHAPE_PYTHON=$KHAPE_PYTHON \
      simulation.pbs
 echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS, save_sorted=$SAVE_SORTED, offline_check=$OFFLINE_CHECK): $NAME"

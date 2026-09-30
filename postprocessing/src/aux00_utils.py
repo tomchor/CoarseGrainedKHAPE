@@ -6,6 +6,8 @@ import xarray as xr
 
 # $KHAPE_PP_OUTPUT redirects the derived budget files, as $KHAPE_OUTPUT_DIR does the simulation output.
 PP_OUTPUT = Path(os.environ.get("KHAPE_PP_OUTPUT") or Path(__file__).resolve().parent.parent / "output")
+# The X* scripts (extra figures, outside the manuscript set that the plot* scripts write to figures/) write here.
+EXTRA_FIGURES = Path(__file__).resolve().parent.parent / "extra_figures"
 
 #+++ Control flags of the run
 # kelvin_helmholtz_instability.jl writes its three control flags into every output file's global attributes as 0/1

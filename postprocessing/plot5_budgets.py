@@ -5,15 +5,16 @@ from pathlib import Path
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from src.aux00_utils import PP_OUTPUT
+from src.aux00_utils import load_dataset_and_grid
 from src.aux03_plotting import budget_colors, run_label
+from src.aux04_online_budgets import online_budgets
 #---
 
 #+++ Configuration
 import argparse
 parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE budgets at two filter scales")
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
-                    help="Path to simulation NetCDF file (used to derive budget filenames)")
+                    help="Path to simulation NetCDF file (the budgets are assembled from its online terms)")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
 parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive",
                     help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
@@ -25,13 +26,14 @@ FIGURES   = REPO_ROOT / "figures"
 FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
-ref_suffix = ""
 #---
 
-#+++ Load budget data
-print(f"Loading budget data: {stem}_sfs_{{ke,ape}}_budget_integrated{ref_suffix}.nc")
-ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated{ref_suffix}.nc"),  decode_timedelta=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
+#+++ Assemble the budgets from the simulation's online terms
+# Straight from the simulation output, so this runs as soon as the Julia job has finished: `online_budgets` is what
+# 01_online_budgets.py writes to the budget files, and only the volume integrals are read here.
+print("Assembling the SFS KE and APE budgets from the simulation output...")
+ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
+ke_budget, ape_budget = online_budgets(ds)
 print(f"  Filter scales available: {ke_budget.filter_scale.values}")
 #---
 
@@ -129,7 +131,7 @@ if info_parts:
 #---
 
 #+++ Save
-outfile = str(FIGURES / f"{stem}_sfs_budgets_2x2{ref_suffix}.pdf")
+outfile = str(FIGURES / f"{stem}_sfs_budgets_2x2.pdf")
 fig.savefig(outfile, dpi=200, bbox_inches="tight")
 print(f"Figure saved to: {outfile}")
 #---
