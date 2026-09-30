@@ -19,7 +19,7 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 | `01_online_budgets.py`, `02_plot_budgets.py` | **Budget pipeline.** Every term of the SFS KE and APE budgets is computed by the simulation itself; `01` assembles the budget files from those online terms (at the simulation's own filter scales, ℓ = 1 and 7 by default) and `02` plots them. |
 | `offline/01_…` – `offline/05_…` | **Offline budget pipeline, kept as a test.** The independent Python implementation of every term (scipy filtering on a z-padded domain, a numpy density sort, an FFT-filtered reference profile). It is no longer a product: `offline/run_offline_budgets.sh` runs it into `output/offline/` and `pytest --offline-check` compares each term against the assembled online budgets (see [Tests](#tests)). |
 | `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
-| `plot2_…`, `plot3_…`, `plot4_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, SFS KE/APE budget time series, local-field snapshot panels). Output goes to `figures/`. |
+| `plot2_…`, `plot3_…`, `plot5_…`, `plot6_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, b and b_r snapshots, SFS KE/APE budget time series, local-field snapshot panels). `plots.pbs` runs every `plot*.py`. Output goes to `figures/`. |
 | `anim1_…`, `S1_…`, `S2_…`, `S3_…` | **Supplementary material.** Animations (`anim*`, requires `ffmpeg`) and supplementary figures (`S1`–`S3`: Π hovmöllers, snapshot panels, sweep-spectrum figures). |
 | `aux*` (under `src/`) | Shared utilities reused across the pipeline (data loading, Gaussian filtering, spatial derivatives, PE/KE budget terms, plotting helpers). |
 | `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the budget pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
@@ -82,7 +82,7 @@ bash submit_all_pbs.sh NZ=1024 FIXED_REF=1
 
 # Add the online-vs-offline validation and/or the final plots (independently toggleable)
 bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors and --save_sorted
-bash submit_all_pbs.sh PLOTS=1               # + plot2/plot3/plot4 after sweep_transfer
+bash submit_all_pbs.sh PLOTS=1               # + every plot*.py after sweep_transfer
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
