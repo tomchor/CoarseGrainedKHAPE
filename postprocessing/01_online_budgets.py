@@ -1,35 +1,37 @@
 #!/usr/bin/env python
 """
-Write the SFS KE and APE budget files from the terms the simulation computes online.
+Write the integrated SFS KE and APE budgets from the terms the simulation computes online.
 
 Every term of both sub-filter budgets is written by `kelvin_helmholtz_instability.jl` at each of its
 `--filter_ls` scales: Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r) for the KE budget and S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ (with the
 same τ) for the APE one, each as a 3D field and as a volume integral. `online_budgets` (src/aux04_online_budgets.py)
 assembles them under the variable names the offline pipeline used to write, so nothing downstream knows which
-pipeline produced them, and this script writes the result to the four files the tests, `02_plot_budgets.py` and
-`anim1_panels.py` consume (`plot5_budgets.py` and `plot6_panels.py` call `online_budgets` themselves):
+pipeline produced them, and this script writes the volume integrals and the residual to the two files the tests,
+`02_plot_budgets.py` and `anim1_panels.py` consume:
 
-    <stem>_sfs_ke_budget_fields.nc    <stem>_sfs_ke_budget_integrated.nc
-    <stem>_sfs_ape_budget_fields.nc   <stem>_sfs_ape_budget_integrated.nc
+    <stem>_sfs_ke_budget_integrated.nc    <stem>_sfs_ape_budget_integrated.nc
 
-The fields are on the simulation's own grid (no z padding, `n_pad_z = 0`), and only the records whose
-`TimeDerivative` spans a time step are kept: every record but the first (iteration 0, where the derivative has
-had one evaluation and reads zero) or, when the simulation ran with `--offline_check` and wrote consecutive-
-iteration pairs, the upper record of each pair, whose derivative is the single-step difference across it, the
-same difference the offline pipeline forms, so the budget is stated at the same instants. The offline pipeline
-itself lives in `offline/` and runs only as the CI cross-check (`pytest --offline-check`).
+The 3D fields are not copied: they are in the simulation output already, and whoever needs them calls
+`online_budgets` on it (the tests, `plot5_budgets.py`, `plot6_panels.py`, `X2_panels.py`, `X4_thumbnail.py`) or
+on the x–z slices of the `_2d.nc` file (`anim1_panels.py`).
+
+Only the records whose `TimeDerivative` spans a time step are kept: every record but the first (iteration 0,
+where the derivative has had one evaluation and reads zero) or, when the simulation ran with `--offline_check`
+and wrote consecutive-iteration pairs, the upper record of each pair, whose derivative is the single-step
+difference across it, the same difference the offline pipeline forms, so the budget is stated at the same
+instants. The offline pipeline itself lives in `offline/` and runs only as the CI cross-check
+(`pytest --offline-check`).
 """
 #+++ Imports
 import os
 from pathlib import Path
-from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import PP_OUTPUT, load_dataset_and_grid
 from src.aux04_online_budgets import online_budgets, integrated_variables
 #---
 
 #+++ Configuration
 import argparse
-parser = argparse.ArgumentParser(description="Write the SFS KE and APE budget files from the simulation's online terms")
+parser = argparse.ArgumentParser(description="Write the integrated SFS KE and APE budgets from the simulation's online terms")
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--filter-scales", type=float, nargs="+", default=None,
                     help="Filter scales ℓ to assemble; each must be among the simulation's online --filter_ls (default: all of them)")
@@ -51,17 +53,11 @@ ke_budget, ape_budget = online_budgets(ds, filter_scales=args.filter_scales, rec
 print(f"  {len(ke_budget.time)} records kept out of {len(ds.time)}")
 #---
 
-#+++ Write the four budget files
+#+++ Write the two integrated budget files
 def save(budget, kind):
-    integrated_vars = integrated_variables(budget)
-    local_vars      = [v for v in budget.data_vars if v not in integrated_vars]
-    fields_filename     = str(PP_OUTPUT / f"{stem}_sfs_{kind}_budget_fields.nc")
     integrated_filename = str(PP_OUTPUT / f"{stem}_sfs_{kind}_budget_integrated.nc")
     print(f"  Saving {kind.upper()} integrated time series → {integrated_filename}")
-    budget[integrated_vars].load().to_netcdf(integrated_filename)
-    print(f"  Saving {kind.upper()} local fields → {fields_filename}")
-    with ProgressBar(minimum=5, dt=5):
-        budget[local_vars].to_netcdf(fields_filename)
+    budget[integrated_variables(budget)].load().to_netcdf(integrated_filename)
 
 
 print("\n" + "="*60)

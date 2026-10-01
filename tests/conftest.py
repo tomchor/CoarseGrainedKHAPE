@@ -1,4 +1,5 @@
 import os
+import sys
 import pytest
 import xarray as xr
 from pathlib import Path
@@ -22,6 +23,26 @@ SIM_OUTPUT = Path(os.environ.get("KHAPE_OUTPUT_DIR") or REPO_ROOT / "output") / 
 # (tests/test_online_vs_offline.py). Off by default: it costs about an hour at the CI resolution, and CI
 # runs it in its own job.
 OFFLINE_PP_OUTPUT = PP_OUTPUT / "offline"   # where offline/run_offline_budgets.sh writes
+
+
+#+++ The online budgets, 3D terms included
+@pytest.fixture(scope="session")
+def online_budget():
+    """{"ke": ..., "ape": ...}: both SFS budgets as `online_budgets` assembles them from the simulation output, lazily.
+
+    The 3D terms are read from the simulation file itself (01_online_budgets.py writes only the integrals), at the
+    filter scales and records of the integrated files, which is what `l_idx` indexes.
+    """
+    assert SIM_OUTPUT.exists(), f"Simulation output not found: {SIM_OUTPUT}"
+    sys.path.insert(0, str(REPO_ROOT / "postprocessing"))
+    from src.aux00_utils import load_dataset_and_grid
+    from src.aux04_online_budgets import online_budgets
+    integrated = xr.open_dataset(PP_OUTPUT / f"{STEM}_sfs_ke_budget_integrated.nc", decode_timedelta=False)
+    scales, records = integrated.filter_scale.values, integrated.attrs.get("online_records", "differenced")
+    ds = load_dataset_and_grid(str(SIM_OUTPUT), pad=False).chunk({"time": 1})
+    ke, ape = online_budgets(ds, filter_scales=scales, records=records)
+    return {"ke": ke, "ape": ape}
+#---
 
 
 def pytest_addoption(parser):

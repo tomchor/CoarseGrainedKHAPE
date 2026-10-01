@@ -33,8 +33,8 @@ stem = Path(filename).stem
 #---
 
 #+++ Assemble the budgets from the simulation's online terms
-# Straight from the simulation output, so this runs as soon as the Julia job has finished: `online_budgets` is what
-# 01_online_budgets.py writes to the budget files, lazily, and one time at one scale is all that gets read below.
+# Straight from the simulation output, so this runs as soon as the Julia job has finished: `online_budgets` assembles
+# the budgets lazily (01_online_budgets.py writes their integrals), and one time at one scale is all that gets read below.
 print("Assembling the SFS KE and APE budgets from the simulation output...")
 ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
 ke_budget, ape_budget = online_budgets(ds)

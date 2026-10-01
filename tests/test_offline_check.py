@@ -6,8 +6,9 @@ pipeline that used to compute them (`postprocessing/offline/`, steps 01-05: scip
 domain, a numpy sort of the density, an FFT-filtered reference profile, centred gradients) is an independent
 implementation of every term, and this test runs it and compares the two, term by term:
 
-  * every 3D field in the KE and APE budget files, as rms(offline - online) / rms(online) over the physical
-    domain (the offline fields carry the padding; it is cut here) at every record with t >= T_MIN;
+  * every 3D field of the KE and APE budgets (the offline pipeline's field files against the online terms in the
+    simulation output), as rms(offline - online) / rms(online) over the physical domain (the offline fields carry
+    the padding; it is cut here) at every record with t >= T_MIN;
   * every integrated term, as max|offline - online| / rms(online) over the same records;
   * the per-record minimum of S̃ (Eaˢ) at every record, as |min_off - min_on| / rms(online), so the two
     agree on where S̃ dips below zero during the small-amplitude phase and not only on its bulk;
@@ -115,11 +116,11 @@ def _open(path):
 
 
 @pytest.fixture(scope="session")
-def budgets(offline_files):
+def budgets(offline_files, online_budget):
     """(kind -> (online fields, offline fields, online integrated, offline integrated)), time axes aligned."""
     out = {}
     for kind in ("ke", "ape"):
-        on_f  = _open(PP_OUTPUT / f"{STEM}_sfs_{kind}_budget_fields.nc")
+        on_f  = online_budget[kind]   # the online 3D terms, straight from the simulation output
         off_f = _open(OFFLINE_PP_OUTPUT / f"{STEM}_sfs_{kind}_budget_fields.nc")
         on_i  = _open(PP_OUTPUT / f"{STEM}_sfs_{kind}_budget_integrated.nc")
         off_i = _open(OFFLINE_PP_OUTPUT / f"{STEM}_sfs_{kind}_budget_integrated.nc")

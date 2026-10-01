@@ -24,14 +24,15 @@ checks it on real pipeline output.
 The total KE ½uᵢuᵢ is absent for the opposite reason: it is a sum of squares, so a test of its sign
 would only be testing numpy.
 
-The budget files are assembled from the simulation's online terms (`postprocessing/01_online_budgets.py`),
-on the simulation's own grid, so there is no z padding to cut (`n_pad_z = 0` in their attributes).
+The fields are the simulation's online terms, read from its output under the budget's variable names
+(`online_budgets`, through the `online_budget` fixture of conftest.py), on the simulation's own grid, so there is
+no z padding to cut (`n_pad_z = 0` in the attributes).
 """
 
 import pytest
 import numpy as np
 import xarray as xr
-from conftest import PP_OUTPUT, SIM_OUTPUT, STEM
+from conftest import SIM_OUTPUT
 
 #+++ Tolerances
 # Worst allowed excursion below zero, as a fraction of the field's own rms: min(field)/rms(field) > -TOL.
@@ -59,14 +60,6 @@ SFS_APE_TOL = 5e-2
 #---
 
 #+++ Helpers
-def load(suffix):
-    """Open one of the 4D field files. Chunked: these hold every local budget field, so they are far
-    too big to pull into memory whole."""
-    path = PP_OUTPUT / f"{STEM}_{suffix}.nc"
-    assert path.exists(), f"Output file not found: {path}"
-    return xr.open_dataset(path, decode_timedelta=False, chunks={"time": 1})
-
-
 def positivity_stats(da):
     """(min, rms, min/rms, fraction of points below zero), computed in a single pass over the data."""
     stats = xr.Dataset(dict(minimum=da.min(), mean_square=(da**2).mean(), frac_neg=(da < 0).mean())).compute()
@@ -91,14 +84,14 @@ APE_FIELDS = [
 ]
 
 @pytest.fixture(scope="module")
-def ape_fields():
-    return load("sfs_ape_budget_fields")
+def ape_fields(online_budget):
+    return online_budget["ape"]
 
 
 @pytest.mark.parametrize("var", APE_FIELDS)
 def test_local_ape_is_positive(ape_fields, l_idx, var):
     if var not in ape_fields:
-        pytest.skip(f"'{var}' not in the budget file: the simulation output predates the online L̃ and Ē_A")
+        pytest.skip(f"'{var}' not in the simulation output: it predates the online L̃ and Ē_A")
     l = ape_fields.filter_scale.values[l_idx]
     print(f"\nLocal APE  (l={l:.4f})")
     check_positive(ape_fields[var].sel(filter_scale=l), var, APE_TOL)
@@ -106,8 +99,8 @@ def test_local_ape_is_positive(ape_fields, l_idx, var):
 
 #+++ SFS KE (offline pipeline)
 @pytest.fixture(scope="module")
-def ke_fields():
-    return load("sfs_ke_budget_fields")
+def ke_fields(online_budget):
+    return online_budget["ke"]
 
 
 def test_sfs_ke_is_positive(ke_fields, l_idx):
