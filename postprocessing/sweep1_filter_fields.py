@@ -64,8 +64,12 @@ print("\n" + "="*60)
 print("Saving filtered fields...")
 
 output_filename = str(PP_OUTPUT / (Path(filename).stem + f"_filtered_velocities_sweep{scale_tag}{ext_suffix}.nc"))
+# One HDF5 chunk per filtered field, which is how the filter hands them over. A contiguous variable is filled with NaN
+# from end to end before its first field is written (2.58 TB of it at 3D Nz=512); a chunk written whole is not.
+field_chunks = {v: tuple(c[0] for c in ds_filt[v].chunks) for v in ("ūᵢ", "b̄")}
+encoding = {v: {"chunksizes": c} for v, c in field_chunks.items() if np.prod(c) * ds_filt[v].dtype.itemsize < 2**32}
 with ProgressBar(minimum=5, dt=5):
-    ds_filt.to_netcdf(output_filename)
+    ds_filt.to_netcdf(output_filename, encoding=encoding)
 os.sync()
 print(f"Filtered fields saved to: {output_filename}")
 #---

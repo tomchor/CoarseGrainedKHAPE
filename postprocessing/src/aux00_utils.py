@@ -418,6 +418,63 @@ _FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 FILTER_DIMS = ("x_caa", "y_aca", "z_aac")   # the directions the filter acts in, online and offline
 _PERIODIC_DIMS = ("x_caa", "y_aca")
 
+def _edge_runs(a, axis):
+    """How many identical hyperplanes `a` starts and ends with along `axis` (each count at least 1)."""
+    planes = np.moveaxis(a, axis, 0)
+    n = len(planes)
+    lo = 1
+    while lo < n - 1 and np.array_equal(planes[lo], planes[0]):
+        lo += 1
+    hi = 1
+    while hi < n - lo and np.array_equal(planes[n - 1 - hi], planes[n - 1]):
+        hi += 1
+    return lo, hi
+
+
+def _filter_passes(a, passes):
+    """The 1D Gaussian passes `(axis, sigma, radius, mode)`, one after the other, on the array `a`."""
+    from scipy.ndimage import gaussian_filter1d
+    for axis, sigma, radius, mode in passes:
+        a = gaussian_filter1d(a, sigma=sigma, axis=axis, mode=mode, radius=radius)
+    return a
+
+
+def _filter_field(a, passes):
+    """`_filter_passes`, bit for bit, without filtering the z padding plane by plane.
+
+    `_pad_domain_in_z` extends a field past each wall with copies of the wall plane, which at the sweep's widest
+    scale is 73% of the column. When the last pass is the bounded one and `a` starts or ends with a run of identical
+    planes along it, the earlier passes act within a plane, so one plane of each run stands for all of them; and the
+    last pass sees a run through at most `radius + 1` of its planes, every one beyond that being all-run inside the
+    stencil and so equal to the last one computed. The same sums on the same values: the result is identical.
+    """
+    *within, (axis, sigma, radius, mode) = passes
+    n = a.shape[axis]
+    if mode != "nearest" or n < 3:
+        return _filter_passes(a, passes)
+    lo, hi = _edge_runs(a, axis)
+    if lo + hi <= 2:
+        return _filter_passes(a, passes)
+
+    index = [slice(None)] * a.ndim
+    def planes(array, start, stop):
+        index[axis] = slice(start, stop)
+        return array[tuple(index)]
+
+    core = _filter_passes(planes(a, lo - 1, n - hi + 1), within)   # one plane of each run, and everything between
+    keep_lo, keep_hi, n_core = min(lo, radius + 1), min(hi, radius + 1), core.shape[axis]
+    core = np.concatenate([np.repeat(planes(core, 0, 1), keep_lo - 1, axis=axis), core,
+                           np.repeat(planes(core, n_core - 1, n_core), keep_hi - 1, axis=axis)], axis=axis)
+    core = _filter_passes(core, [(axis, sigma, radius, mode)])
+
+    out = np.empty(a.shape, dtype=core.dtype)
+    n_core = core.shape[axis]
+    planes(out, lo - keep_lo, n - hi + keep_hi)[...] = core
+    planes(out, 0, lo - keep_lo)[...] = planes(core, 0, 1)
+    planes(out, n - hi + keep_hi, n)[...] = planes(core, n_core - 1, n_core)
+    return out
+
+
 class GaussianFilter:
     """Separable Gaussian filter of FWHM ℓ: sequential 1D scipy convolutions, mode='wrap' in x and y (periodic)
     and mode='nearest' in z (edge-extended past the walls).
@@ -431,26 +488,26 @@ class GaussianFilter:
         self.spacing = dict(spacing)
 
     def apply(self, da, dims):
-        """Filter `da` along each of `dims` in turn; a singleton dimension is left alone."""
-        from scipy.ndimage import gaussian_filter1d
-        for dim in dims:
-            if da.sizes[dim] == 1:
-                continue
+        """Filter `da` along each of `dims` in turn; a singleton dimension is left alone.
+
+        The passes run back to back on one whole field, a single dask task per field. One `apply_ufunc` per pass made
+        dask re-chunk the field between passes (each pass wants a different dimension in one chunk, and dask splits the
+        others to keep chunks small), which cost more than the filtering and left the output in pieces that are not
+        contiguous on disk.
+        """
+        core = [dim for dim in dims if da.sizes[dim] > 1]
+        if not core:
+            return da
+        passes = []
+        for axis, dim in enumerate(core, start=-len(core)):
             sigma = self.ℓ * _FWHM_TO_SIGMA / self.spacing[dim]
             radius = max(1, int(4 * sigma + 0.5))
             periodic = dim in _PERIODIC_DIMS
             if periodic:
                 radius = min(radius, da.sizes[dim])
-            da = xr.apply_ufunc(
-                gaussian_filter1d, da,
-                input_core_dims=[[dim]],
-                output_core_dims=[[dim]],
-                kwargs={"sigma": sigma, "axis": -1, "mode": "wrap" if periodic else "nearest", "radius": radius},
-                dask="parallelized",
-                output_dtypes=[da.dtype],
-                dask_gufunc_kwargs={"allow_rechunk": True},
-            )
-        return da
+            passes.append((axis, sigma, radius, "wrap" if periodic else "nearest"))
+        return xr.apply_ufunc(_filter_field, da, input_core_dims=[core], output_core_dims=[core], kwargs={"passes": passes},
+                              dask="parallelized", output_dtypes=[da.dtype], dask_gufunc_kwargs={"allow_rechunk": True})
 
 
 def make_gaussian_filter(ℓ, ds):
