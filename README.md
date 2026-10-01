@@ -173,6 +173,8 @@ bash submit_sweep.sh NZ=2048 EXTENSION=odd   # the whole sweep with b oddly refl
 
 `submit_sweep.sh` refuses any argument it does not know, so a misspelled key cannot silently rerun the default sweep over the production files.
 
+Under the default edge extension the sweep does not build its z padding. Its fields keep one padded cell past each wall, which is what the centred gradients at the wall cells read; the filter's `nearest` mode repeats the wall value from there on, as the padding did; and only the sorted reference column still holds the padded fluid. The filtered fields come out bit for bit as on the padded grid and the integrals agree with the padded computation to roundoff, while `sweep1`'s file and the arrays `sweep2` holds are Nz + 2 levels tall instead of 3.7 Nz. `EXTENSION=odd` is a different extension of b, so it keeps the whole padding in the arrays.
+
 #### Wall-extension test
 
 The manuscript leaves the extension of b and b✶ past the walls free (§2) and uses the wall values (§4). `EXTENSION=odd` reflects b oddly about the wall value instead; every other field keeps the wall value, so the comparison changes the buoyancy rule alone. Its files carry an `_odd` tag. `submit_extension_test.sh` (which submits `extension_test.pbs`) runs the odd rule at one scale, snapped to the nearest of the production sweep's 30, and `compare_extension.py` sets it against the production (edge) sweep:

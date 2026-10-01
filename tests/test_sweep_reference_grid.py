@@ -24,8 +24,9 @@ import pytest
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "postprocessing"))
-from src.aux00_utils import _pad_domain_in_z, required_pad_margin
+from src.aux00_utils import _pad_domain_in_z, required_pad_margin, make_gaussian_filter, sweep_halo
 from src.aux01_pe_functions import sorted_timeseries
+from src.aux02_ke_functions import calculate_energy_transfer
 
 sys.path.insert(0, str(Path(__file__).parent))
 from test_jensen import make_dataset
@@ -166,4 +167,101 @@ def test_sweep_construction_matches_the_full_timeseries_sort():
     print(f"  frozen vs time-varying at the last step: max|diff| = {drift:.3e}")
     assert drift > 0, ("the frozen and time-varying columns agree at the last step, so the fixture's field "
                        "does not evolve and the freezing is untested")
+#---
+
+
+#+++ The sweep leaves the padding out of its arrays
+# Under the edge extension the sweep loads its fields with one padded cell per side (`sweep_halo`) and leaves the rest
+# of the padding virtual: the filter's `nearest` mode repeats the wall value past the end of an array, which is what
+# the padding holds, and only the sorted column still needs the padded fluid. These tests hold that to the fully
+# padded computation.
+def _physical_plus_halo(ds_full, ds_halo):
+    """The cells of the fully padded dataset that the halo one keeps."""
+    n = ds_full.attrs["n_pad_z"] - ds_halo.attrs["n_pad_z"]
+    return slice(n, ds_full.sizes["z_aac"] - n)
+
+
+def _flow_dataset(n_times=2, Nx=16, Nz=64, Lx=4.0, U=1.0, h=0.5):
+    """u, w and b of a sheared, stratified layer with a wave on it, far enough from the walls that b is flat there to
+    the last bit, as it is in the runs (tanh(Lz/2h) is 1 in double precision)."""
+    ds = _grid_dataset(Nx=Nx, Nz=Nz, Lx=Lx, h=h).drop_vars("ρ").drop_vars("time")
+    X, Z = np.meshgrid(ds.x_caa.values, ds.z_aac.values, indexing="ij")
+    interior = np.exp(-(Z / 3.0) ** 2)
+    fields = dict(u=[], w=[], b=[])
+    for k in range(n_times):
+        wave = np.sin(2 * np.pi * X / Lx + k) + 0.5 * np.sin(6 * np.pi * X / Lx)
+        fields["u"].append(U * np.tanh(Z / h) + 0.2 * np.cos(2 * np.pi * X / Lx + k) * interior)
+        fields["w"].append(0.1 * wave * interior)                       # in phase with the displacement, so w·b_r has a mean
+        fields["b"].append(0.1 * np.tanh((Z + 0.3 * wave * interior) / h))
+    dims = ("time", "x_caa", "y_aca", "z_aac")
+    coords = dict(time=np.arange(n_times, dtype=float), x_caa=ds.x_caa, y_aca=ds.y_aca, z_aac=ds.z_aac)
+    for name, frames in fields.items():
+        ds[name] = xr.DataArray(np.stack(frames)[:, :, None, :], dims=dims, coords=coords)
+    return ds
+
+
+@pytest.mark.parametrize("fixed", [True, False])
+def test_virtual_padding_sorts_to_the_padded_column(fixed):
+    """The column is the sort of the whole padded field, whether the padding is in the arrays or not."""
+    margin = required_pad_margin(SWEEP_SCALES)
+    ds_full = _pad_domain_in_z(_grid_dataset(n_times=3), min_margin=margin)
+    ds_halo = _pad_domain_in_z(_grid_dataset(n_times=3), min_margin=margin, halo=sweep_halo("edge"))
+    assert ds_halo.attrs["n_pad_z"] + ds_halo.attrs["n_pad_z_virtual"] == ds_full.attrs["n_pad_z"]
+    assert all(ds_halo.attrs[k] == ds_full.attrs[k] for k in ("z_min", "z_max", "Lz"))
+    assert ds_halo.sizes["z_aac"] == ds_full.sizes["z_aac"] - 2 * ds_halo.attrs["n_pad_z_virtual"]
+
+    kept = _physical_plus_halo(ds_full, ds_halo)
+    assert np.array_equal(ds_halo.z_aac.values, ds_full.z_aac.values[kept])
+    assert np.array_equal(ds_halo["ρ"].values, ds_full["ρ"].isel(z_aac=kept).values)
+    assert float(ds_halo.dV_physical.sum()) == float(ds_full.dV_physical.sum())
+
+    kw = dict(field_to_sort="ρ", n_workers=1, fixed_reference=fixed, verbose_level=0)
+    full, halo = sorted_timeseries(ds_full, **kw), sorted_timeseries(ds_halo, **kw)
+    nz_full, nz_halo = ds_full.sizes["z_aac"], ds_halo.sizes["z_aac"]
+    print(f"\n  fixed_reference={fixed}: {full.sizes['z_1d_sorted']} slots from {nz_full} and from {nz_halo} z levels")
+    for name in ("rho_sorted", "dz_sorted"):
+        assert np.array_equal(full[name].values, halo[name].values), f"{name} depends on whether the padding is in the arrays"
+    assert np.array_equal(full.z_1d_sorted.values, halo.z_1d_sorted.values)
+
+
+def test_only_the_edge_extension_can_be_left_virtual():
+    """`nearest` repeats the wall value; an odd reflection is a different extension and has to be in the arrays."""
+    assert sweep_halo("odd") is None
+    with pytest.raises(ValueError, match="edge extension"):
+        _pad_domain_in_z(_grid_dataset(), min_margin=required_pad_margin(SWEEP_SCALES), extension="odd", halo=1)
+
+
+@pytest.mark.parametrize("ell", [0.5, 3.0, 20.0])
+def test_filter_without_the_padding_matches_on_the_kept_cells(ell):
+    """A field that repeats its wall value past the walls filters to the same numbers, bit for bit, with the padding in
+    the array and with the filter's `nearest` mode standing in for it, at scales narrower and wider than the domain."""
+    margin = required_pad_margin(SWEEP_SCALES)
+    ds_full = _pad_domain_in_z(_flow_dataset(), min_margin=margin)
+    ds_halo = _pad_domain_in_z(_flow_dataset(), min_margin=margin, halo=sweep_halo("edge"))
+    kept = _physical_plus_halo(ds_full, ds_halo)
+    gf = make_gaussian_filter(ell, ds_full)
+    for field in (ds_full.u, ds_full.b, ds_full.u * ds_full.w):
+        name = field.name or "u·w"
+        full = gf.apply(field, dims=["x_caa", "z_aac"]).isel(z_aac=kept).transpose("time", "x_caa", "y_aca", "z_aac")
+        halo = gf.apply(field.isel(z_aac=kept), dims=["x_caa", "z_aac"]).transpose("time", "x_caa", "y_aca", "z_aac")
+        assert np.array_equal(full.values, halo.values), f"filter({name}) at ℓ={ell} changes when the padding leaves the array"
+
+
+def test_transfer_integrals_do_not_need_the_padding():
+    """∫Π_K, ∫Π_A and both halves of the APE->KE conversion from fields that keep one padded cell, against the fully
+    padded computation, to roundoff: the padded cells add exact zeros to the integrals, in a different order."""
+    scales = [0.5, 3.0, 20.0]
+    margin = required_pad_margin(scales)
+    kw = dict(ds_filt=None, n_workers=1, filtered_reference=True)
+    full = calculate_energy_transfer(_pad_domain_in_z(_flow_dataset(), min_margin=margin), scales, **kw)
+    ds_halo = _pad_domain_in_z(_flow_dataset(), min_margin=margin, halo=sweep_halo("edge"))
+    halo = calculate_energy_transfer(ds_halo, scales, **kw)
+    integrals = [v for v in full.data_vars if v.startswith("∫")]
+    assert len(integrals) == 4
+    for name in integrals:
+        a, b = full[name].values, halo[name].values
+        rel = float(np.abs(a - b).max() / np.abs(a).max())
+        print(f"\n  {name:<20} max|padded| = {np.abs(a).max():.3e}   max|Δ|/max|padded| = {rel:.1e}")
+        assert np.abs(a).max() > 1e-6, f"{name} is ~0 on this field, so the comparison says nothing"
+        assert rel < 1e-12, f"{name} changes by {rel:.1e} when the padding is left out of the arrays"
 #---
