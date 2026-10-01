@@ -24,7 +24,7 @@ FILTER_JOB=$(qsub -N "$FILTER_NAME" \
                   -A "$KHAPE_ACCOUNT" \
                   -o "logs/${FILTER_NAME}.log" \
                   -e "logs/${FILTER_NAME}.log" \
-                  -v NZ=$NZ,N_TIME_SKIP=$N_TIME_SKIP,EXTENSION=$EXTENSION,KHAPE_PYTHON=$KHAPE_PYTHON \
+                  -v NZ=$NZ,N_TIME_SKIP=$N_TIME_SKIP,EXTENSION=$EXTENSION,KHAPE_PYTHON=$KHAPE_PYTHON$KHAPE_REDIRECT \
                   sweep_filter.pbs)
 echo "Submitted filter job (Nz=$NZ, extension=$EXTENSION): $FILTER_JOB"
 
@@ -36,7 +36,7 @@ submit_transfer() {
                      -A "$KHAPE_ACCOUNT" \
                      -o "logs/${NAME}.log" \
                      -e "logs/${NAME}.log" \
-                     -v NZ=$NZ,FIXED_REF=$fr,EXTENSION=$EXTENSION,KHAPE_PYTHON=$KHAPE_PYTHON \
+                     -v NZ=$NZ,FIXED_REF=$fr,EXTENSION=$EXTENSION,KHAPE_PYTHON=$KHAPE_PYTHON$KHAPE_REDIRECT \
                      -W depend=afterok:$FILTER_JOB \
                      sweep_transfer.pbs)
     echo "Submitted transfer job FIXED_REF=$fr (depends on $FILTER_JOB): $JOB"

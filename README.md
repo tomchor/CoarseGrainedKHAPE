@@ -59,7 +59,7 @@ Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are option
 
 ### Environment
 
-The submit wrappers take the project to charge and the Python to run from two variables whose defaults live in `khape_defaults.sh` (sourced by every `submit_*.sh`, so that is the one place to change them), and two more variables move the output off the repository, for example to scratch. To override any of them, set it in the login environment (e.g. `~/.bashrc`): the jobs run in a login shell, and PBS does not otherwise pass on the submitting shell's variables. Give absolute paths. No `.pbs` file names an account, a mail address or a Python environment, since the wrapper hands them over at submission; PBS mails its reports to whoever submitted the job.
+The submit wrappers take the project to charge and the Python to run from two variables whose defaults live in `khape_defaults.sh` (sourced by every `submit_*.sh`, so that is the one place to change them), and two more variables move the output off the repository, for example to scratch. To override any of them, export it in the shell you submit from, or set it in the login environment (e.g. `~/.bashrc`): every wrapper hands the Python and, when they are set, the two output directories to its jobs (`qsub -v`), which PBS would not otherwise pass on, and the jobs run in a login shell. Give absolute paths. No `.pbs` file names an account, a mail address or a Python environment, since the wrapper hands them over at submission; PBS mails its reports to whoever submitted the job.
 
 | Variable | Default | Read by |
 |----------|---------|---------|

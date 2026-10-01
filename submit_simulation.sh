@@ -27,6 +27,6 @@ qsub -N "$NAME" \
      -A "$KHAPE_ACCOUNT" \
      -o "logs/${NAME}.log" \
      -e "logs/${NAME}.log" \
-     -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED,OFFLINE_CHECK=$OFFLINE_CHECK,KHAPE_PYTHON=$KHAPE_PYTHON \
+     -v NZ=$NZ,SAVE_TENSORS=$SAVE_TENSORS,SAVE_SORTED=$SAVE_SORTED,OFFLINE_CHECK=$OFFLINE_CHECK,KHAPE_PYTHON=$KHAPE_PYTHON$KHAPE_REDIRECT \
      simulation.pbs
 echo "Submitted simulation (Nz=$NZ, save_tensors=$SAVE_TENSORS, save_sorted=$SAVE_SORTED, offline_check=$OFFLINE_CHECK): $NAME"
