@@ -11,6 +11,7 @@ from matplotlib.ticker import MaxNLocator
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from src.aux00_utils import PP_OUTPUT
 from src.aux03_plotting import run_label, budget_colors
+from src.aux04_online_budgets import online_budgets
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -40,25 +41,16 @@ ref_suffix = ""
 
 #+++ Load datasets
 print("Loading 2D simulation output...")
-ds_2d = xr.open_dataset(filename_2d, decode_times=False)
+ds_2d = xr.open_dataset(filename_2d, decode_times=False, chunks={})
 ds_2d = ds_2d.sel(z_aac=slice(-args.zlim, args.zlim), z_aaf=slice(-args.zlim, args.zlim))
-
-print(f"Loading KE and APE budget fields: {stem}_sfs_{{ke,ape}}_budget_fields{ref_suffix}.nc")
-ke_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields{ref_suffix}.nc"), decode_times=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_suffix}.nc"), decode_times=False)
-ke_budget = ke_budget.sel(z_aac=slice(-args.zlim, args.zlim))
-ape_budget = ape_budget.sel(z_aac=slice(-args.zlim, args.zlim))
-
-ℓ_sel = float(ke_budget.filter_scale.sel(filter_scale=args.filter_scale, method="nearest"))
-print(f"Selected filter scale: ℓ = {ℓ_sel:.4f}  (requested {args.filter_scale})")
-ke_budget = ke_budget.sel(filter_scale=ℓ_sel)
-ape_budget = ape_budget.sel(filter_scale=ℓ_sel)
 
 print("Loading integrated budgets...")
 ke_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
 ape_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
-ke_int = ke_int.sel(filter_scale=ℓ_sel, method="nearest")
-ape_int = ape_int.sel(filter_scale=ℓ_sel, method="nearest")
+ℓ_sel = float(ke_int.filter_scale.sel(filter_scale=args.filter_scale, method="nearest"))
+print(f"Selected filter scale: ℓ = {ℓ_sel:.4f}  (requested {args.filter_scale})")
+ke_int = ke_int.sel(filter_scale=ℓ_sel)
+ape_int = ape_int.sel(filter_scale=ℓ_sel)
 
 # b_r = b - b✶(z) comes from the simulation itself (the 2D writer carries it), measured against the same
 # sorted column as every online budget term.
@@ -68,9 +60,15 @@ if "b_r" not in ds_2d:
 
 #+++ Reindex 2D data to budget time coordinate
 print("Reindexing 2D data to budget time coordinate...")
-ds_2d = ds_2d.reindex(time=ke_budget.time, method="nearest")
-times = ke_budget.time.values
+ds_2d = ds_2d.reindex(time=ke_int.time, method="nearest")
+times = ke_int.time.values
 print(f"Aligned {len(times)} time steps")
+#---
+
+#+++ The budget panels, from the same file: the 2D writer carries every per-scale term
+ke_budget, ape_budget = online_budgets(ds_2d, filter_scales=[ℓ_sel], records="all")
+ke_budget = ke_budget.sel(filter_scale=ℓ_sel)
+ape_budget = ape_budget.sel(filter_scale=ℓ_sel)
 #---
 
 #+++ Extract coordinate arrays
@@ -231,7 +229,7 @@ ax_ape_budget.text(0.01, 0.95, "(n)", transform=ax_ape_budget.transAxes, fontsiz
 #---
 
 #+++ Suptitle
-label = run_label(ke_budget.attrs)
+label = run_label(ke_int.attrs)
 suptitle_base = f"ℓ = {ℓ_sel:.4f}"
 if label:
     suptitle_base = f"{label},  {suptitle_base}"

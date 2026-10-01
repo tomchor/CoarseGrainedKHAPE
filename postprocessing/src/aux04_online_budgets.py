@@ -7,9 +7,10 @@ loaded run into the two budgets under the variable names the offline pipeline us
 along a `filter_scale` dimension, the budget's sign on every integral and the residual formed, so nothing downstream
 knows which pipeline produced them. It is lazy (dask), so a caller that wants one slice pays for one slice.
 
-`01_online_budgets.py` writes what it returns to the four budget files that the tests, `02_plot_budgets.py` and
-`anim1_panels.py` read; `plot5_budgets.py` and `plot6_panels.py` call it on the simulation file directly, so they need
-no post-processing to have run.
+`01_online_budgets.py` writes the integrals it returns to the two integrated budget files that the tests,
+`02_plot_budgets.py` and `anim1_panels.py` read. The 3D terms are never copied: the tests, `plot5_budgets.py`,
+`plot6_panels.py`, `X2_panels.py` and `X4_thumbnail.py` call it on the simulation file directly, and `anim1_panels.py`
+on the `_2d.nc` file.
 """
 #+++ Imports
 import re
@@ -84,7 +85,7 @@ def _take(ds, var, ℓ, sign, integral=False):
     name = var if var in SCALE_INDEPENDENT else online_name(var, ℓ, "_int" if integral else "")
     if name not in ds:
         if var in OPTIONAL and not integral:
-            print(f"  note: '{name}' not in the simulation output; the budget is assembled without it")
+            print(f"  note: '{name}' not in this file; the budget is assembled without it")
             return None
         raise KeyError(f"Online term '{name}' not in the simulation output; rerun the simulation with the current "
                        f"kelvin_helmholtz_instability.jl (every budget term is written unconditionally).")
@@ -118,6 +119,9 @@ def online_budgets(ds, filter_scales=None, records="differenced"):
     `ds` is the simulation output as `load_dataset_and_grid(filename, pad=False)` returns it. `filter_scales` must be
     among the scales the simulation wrote (default: all of them). `records` keeps the differenced records (default,
     see `differenced_records`) or "all" of them. `integrated_variables` names the integrals and the residual.
+
+    The `_2d.nc` file works too, with `records="all"`: it holds the same terms in Float32 (bar `E_a` and the two halves
+    of S̃, which only the 3D writer has), and its records are never paired, whatever `offline_check` says.
     """
     if records not in ("differenced", "all"):
         raise ValueError(f"records must be 'differenced' or 'all', not {records!r}")

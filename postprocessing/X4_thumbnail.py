@@ -4,9 +4,9 @@ import logging
 import os
 from pathlib import Path
 import numpy as np
-import xarray as xr
 import matplotlib.pyplot as plt
-from src.aux00_utils import EXTRA_FIGURES, PP_OUTPUT, load_dataset_and_grid
+from src.aux00_utils import EXTRA_FIGURES, load_dataset_and_grid
+from src.aux04_online_budgets import online_budgets
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -30,10 +30,10 @@ stem = Path(filename).stem
 ref_suffix = ""
 #---
 
-#+++ Load budgets
+#+++ Assemble the budgets from the simulation's online terms (lazily, as plot6_panels.py)
 print("Loading KE and APE budgets...")
-ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields{ref_suffix}.nc"),  decode_times=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_suffix}.nc"), decode_times=False)
+ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
+ke_budget, ape_budget = online_budgets(ds)
 
 ke_budget = ke_budget.sel(z_aac=slice(-4, +4))
 ape_budget = ape_budget.sel(z_aac=slice(-4, +4))
@@ -58,9 +58,8 @@ sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 ε_Aˢ     = ape_budget["ε_Aˢ"].sel(**sel).squeeze()
 #---
 
-#+++ Load buoyancy field for contours
+#+++ Buoyancy field for contours, from the same (unpadded) simulation output
 print("Loading buoyancy field...")
-ds = load_dataset_and_grid(filename)
 b = ds["b"].sel(time=t_sel, method="nearest").squeeze()
 print("Done.")
 #---

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build and plot the SFS KE and APE budgets for one run, from the terms the simulation computes online.
 #
-#   01_online_budgets.py   assembles <stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc from the online terms
+#   01_online_budgets.py   writes <stem>_sfs_{ke,ape}_budget_integrated.nc from the online terms
 #   02_plot_budgets.py     plots the integrated budgets, one figure per filter scale
 #
 # Usage: bash 00_get_budgets.sh [output/khi_Nz512_Ri0.10.nc] [--filter-scales 1 7]
