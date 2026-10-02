@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessin
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import load_dataset_and_grid, integrate, open_grid_group, model_grid_suffix, strip_grid_suffix, output_flag
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries, g, ρ0
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -376,14 +376,14 @@ axes = np.array([[fig.add_subplot(_gs_map0[0, i]) for i in range(n)],
 # Scale the z✶ maps to the true domain. z✶ is a height, so this is its natural range; the padded
 # offline sort assigns heights outside it, and letting those saturate the colormap is the point.
 for i, lbl in enumerate(labels):
-    snap[lbl].plot(ax=axes[0, i], x="x_caa", y="z_aac", vmin=z_bot, vmax=z_top, cmap="viridis", add_colorbar=True)
+    xz_slice(snap[lbl]).plot(ax=axes[0, i], x="x_caa", y="z_aac", vmin=z_bot, vmax=z_top, cmap="viridis", add_colorbar=True)
     axes[0, i].set_title(f"z✶ — {lbl}", fontsize=9)
 
     d = (snap[lbl] - snap["online (ThreeDimensionalSort)"]) / Lz
     # Not `robust=True`: the differences are concentrated in the tied, saturated fluid near the top and
     # bottom, which is exactly what percentile clipping would throw away.
     m = float(np.abs(d).max()) or 1.0
-    d.plot(ax=axes[1, i], x="x_caa", y="z_aac", cmap="RdBu_r", vmin=-m, vmax=m, add_colorbar=True)
+    xz_slice(d).plot(ax=axes[1, i], x="x_caa", y="z_aac", cmap="RdBu_r", vmin=-m, vmax=m, add_colorbar=True)
     axes[1, i].set_title("(− online 3D sort) / Lz", fontsize=9)
 
     if zw is not None:

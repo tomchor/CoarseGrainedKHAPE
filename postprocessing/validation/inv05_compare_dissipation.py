@@ -9,9 +9,9 @@ import xarray as xr
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
-from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities, integrate, open_grid_group
+from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, condense_velocities, integrate, open_grid_group, FILTER_DIMS
 from src.aux02_ke_functions import calculate_strain_tensor, calculate_sfs_ke_dissipation
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -64,10 +64,10 @@ print(f"Selected snapshot time = {t_sel:.3f}  (requested {args.time})")
 
 #+++ Recompute ε_Kˢ offline (mirrors calculate_sfs_ke_dissipation, the term 04 used to compute)
 # ε_Kˢ = 2ν Σᵢⱼ [filter(SⁱʲSⁱʲ) - filter(Sⁱʲ)²], with S the strain rate of the full (unfiltered) flow.
-filtered_dimensions = ["x_caa", "z_aac"]
-tensor_dimensions   = ("x_caa", "z_aac")
+filtered_dimensions = list(FILTER_DIMS)
+tensor_dimensions   = FILTER_DIMS
 
-uᵢ = condense_uw_velocities(ds, indices=(1, 3))["uᵢ"]   # keeps ds.dV / online fields available
+uᵢ = condense_velocities(ds)["uᵢ"]   # keeps ds.dV / online fields available
 S  = calculate_strain_tensor(uᵢ, dimensions=tensor_dimensions)   # full-flow strain rate tensor
 ν  = ds.ν
 
@@ -122,9 +122,9 @@ for i, ℓ in enumerate(filter_scales):
     vmax = vmax if vmax > 0 else 1.0
     kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="magma", vmin=0, vmax=vmax)   # ε_Kˢ ≥ 0
 
-    on.plot(ax=axes[i, 0], **kw);  axes[i, 0].set_title(f"Online ε_Kˢ (ℓ={ℓ:g})")
-    off.plot(ax=axes[i, 1], **kw); axes[i, 1].set_title(f"Offline ε_Kˢ (ℓ={ℓ:g})")
-    diff.plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+    xz_slice(on).plot(ax=axes[i, 0], **kw);  axes[i, 0].set_title(f"Online ε_Kˢ (ℓ={ℓ:g})")
+    xz_slice(off).plot(ax=axes[i, 1], **kw); axes[i, 1].set_title(f"Offline ε_Kˢ (ℓ={ℓ:g})")
+    xz_slice(diff).plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
     axes[i, 2].set_title("Difference (online − offline)")
 
     for k in range(3):

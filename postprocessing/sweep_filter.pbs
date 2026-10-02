@@ -13,7 +13,7 @@
 
 set -eo pipefail
 
-NZ=${NZ:-4096}
+NZ=${NZ:-512}
 N_TIME_SKIP=${N_TIME_SKIP:-2}
 # How b and b_* are extended past the walls: 'edge' repeats the wall value (the manuscript's §4 choice),
 # 'odd' reflects oddly about it. Both are admissible under §2, so running both measures how much of the

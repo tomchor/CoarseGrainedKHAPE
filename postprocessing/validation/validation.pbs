@@ -13,7 +13,7 @@
 
 set -eo pipefail
 
-NZ=${NZ:-2048}
+NZ=${NZ:-512}
 SIM=Nz${NZ}_Ri0.10
 FILE=${KHAPE_OUTPUT_DIR:-output}/khi_${SIM}.nc   # where simulation.pbs wrote the run
 PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}

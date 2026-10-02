@@ -5,9 +5,8 @@ This module contains functions for calculating kinetic energy (KE).
 """
 
 import xarray as xr
-from src.aux00_utils import (integrate, calculate_gradient,
-                         condense_uw_velocities,
-                         make_gaussian_filter, filter_fields)
+from src.aux00_utils import (integrate, calculate_gradient, condense_velocities,
+                         make_gaussian_filter, filter_fields, FILTER_DIMS)
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy,
                                 sorted_timeseries,
                                 local_potential_energies_timeseries,
@@ -263,7 +262,7 @@ def calculate_energy_transfer(ds, filter_scales,
     ----------
     ds : xr.Dataset
         Full (unfiltered) simulation dataset. Must contain velocity components
-        (u, w), buoyancy b, and grid variables dV, LxLy.
+        (u, v, w), buoyancy b, and grid variables dV, LxLy.
     filter_scales : array-like
         Physical length scales at which to compute the transfer terms.
     ds_filt : xr.Dataset, optional
@@ -293,13 +292,13 @@ def calculate_energy_transfer(ds, filter_scales,
         counterpart w̄·b_rˡ (plus their volume integrals) indexed by
         filter_scale, and Π_K (with ∫Π_K dV) when include_pi_k=True.
     """
-    filtered_dimensions = ["x_caa", "z_aac"]
-    tensor_dimensions   = ("x_caa", "z_aac")
+    filtered_dimensions = list(FILTER_DIMS)
+    tensor_dimensions   = FILTER_DIMS
 
     if ds_filt is None:
         ds_filt = filter_fields(ds, filter_scales)
 
-    ds = condense_uw_velocities(ds, indices=(1, 3))
+    ds = condense_velocities(ds)
     ds_full = ds[["b", "dV", "dV_physical", "LxLy", "uᵢ"]].copy()
 
     ds_full = calculate_density_fields_from_buoyancy(ds_full, buoyancy_name="b", density_name="ρ")

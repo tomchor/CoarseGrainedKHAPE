@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter, open_grid_group,
-                             condense_uw_velocities, integrate)
+                             condense_velocities, integrate, FILTER_DIMS)
 from src.aux02_ke_functions import (calculate_sfs_stress_tensor,
                                      calculate_strain_tensor,
                                      calculate_cross_scale_ke_flux)
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -66,10 +66,10 @@ print(f"Selected snapshot time = {t_sel:.3f}  (requested {args.time})")
 #---
 
 #+++ Recompute Π_K offline (mirrors the KE part of 03_energy_transfer.py)
-filtered_dimensions = ["x_caa", "z_aac"]
-tensor_dimensions   = ("x_caa", "z_aac")
+filtered_dimensions = list(FILTER_DIMS)
+tensor_dimensions   = FILTER_DIMS
 
-uᵢ = condense_uw_velocities(ds, indices=(1, 3))["uᵢ"]   # also leaves ds.uᵢ available, keeps ds.dV etc.
+uᵢ = condense_velocities(ds)["uᵢ"]   # also leaves ds.uᵢ available, keeps ds.dV etc.
 
 print("Recomputing Π_K offline at each filter scale...")
 offline = {}
@@ -127,9 +127,9 @@ for i, ℓ in enumerate(filter_scales):
     vmax = vmax if vmax > 0 else 1.0
     kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
 
-    on.plot(ax=axes[i, 0], **kw);  axes[i, 0].set_title(f"Online Π_K (ℓ={ℓ:g})")
-    off.plot(ax=axes[i, 1], **kw); axes[i, 1].set_title(f"Offline Π_K (ℓ={ℓ:g})")
-    diff.plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+    xz_slice(on).plot(ax=axes[i, 0], **kw);  axes[i, 0].set_title(f"Online Π_K (ℓ={ℓ:g})")
+    xz_slice(off).plot(ax=axes[i, 1], **kw); axes[i, 1].set_title(f"Offline Π_K (ℓ={ℓ:g})")
+    xz_slice(diff).plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
     axes[i, 2].set_title("Difference (online − offline)")
 
     for k in range(3):

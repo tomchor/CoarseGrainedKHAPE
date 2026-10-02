@@ -9,10 +9,10 @@ import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
-from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter, condense_uw_velocities, open_grid_group)
+from src.aux00_utils import (load_dataset_and_grid, make_gaussian_filter, condense_velocities, open_grid_group, FILTER_DIMS)
 from src.aux02_ke_functions import (calculate_sfs_stress_tensor, calculate_strain_tensor,
                                     calculate_cross_scale_ke_flux, calculate_sfs_ke_dissipation)
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -77,11 +77,11 @@ print(f"Animating {len(times)} frames (of {len(times_all)} available)")
 # For Π_K we recompute the full offline pipeline (filter → τ, S̄ → Π_K = −τⁱʲ S̄ⁱʲ); for a plain
 # filtered field we just apply the offline Gaussian filter. Both are cropped to the display window
 # and loaded into memory so the animation can index numpy arrays directly.
-filtered_dimensions = ["x_caa", "z_aac"]
-tensor_dimensions   = ("x_caa", "z_aac")
+filtered_dimensions = list(FILTER_DIMS)
+tensor_dimensions   = FILTER_DIMS
 
 if field in ("Π_K", "ε_Ks"):
-    uᵢ = condense_uw_velocities(ds, indices=(1, 3))["uᵢ"]   # drops u,w from ds; keeps everything else
+    uᵢ = condense_velocities(ds)["uᵢ"]   # drops u,w from ds; keeps everything else
 if field == "ε_Ks":
     S = calculate_strain_tensor(uᵢ, dimensions=tensor_dimensions)   # full-flow strain (scale-independent)
 
@@ -106,8 +106,8 @@ for ℓ in args.filter_scales:
 
     on = ds[on_name]
     sel = dict(time=times)
-    on  = on.sel(**sel).sel(**window).squeeze(drop=True).compute()
-    off = off.sel(**sel).sel(**window).squeeze(drop=True).compute()
+    on  = xz_slice(on.sel(**sel).sel(**window)).squeeze(drop=True).compute()
+    off = xz_slice(off.sel(**sel).sel(**window)).squeeze(drop=True).compute()
     panels[ℓ] = dict(online=on, offline=off, diff=(on - off))
     print(f"  ℓ = {ℓ:>4g}: online + offline cubes ready ({dict(on.sizes)})")
 
@@ -130,7 +130,7 @@ for ℓ in scales:
 #---
 
 #+++ Per-scale, time-mean match metric (printed for confidence)
-print(f"\nTime-mean match for '{field}' (rms over the windowed domain):")
+print(f"\nTime-mean match for '{field}' (rms over the windowed x-z plane at the first y index):")
 for ℓ in scales:
     p = panels[ℓ]
     rms_diff   = float(np.sqrt(np.nanmean(p["diff"].values**2)))

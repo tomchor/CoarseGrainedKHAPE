@@ -7,7 +7,7 @@ using ArgParse
 using CUDA: has_cuda_gpu
 
 using Oceananigans.Architectures: on_architecture
-using Oceananigans.Grids: topology, znode
+using Oceananigans.Grids: topology, znode, minimum_yspacing
 import Oceananigans.Utils: actuates_next_iteration
 
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
@@ -32,10 +32,10 @@ include("filtered_reference_profile.jl")   # ⟨b✶⟩, the vertically filtered
 let s = ArgParseSettings()
     @add_arg_table! s begin
         "--Nz"
-            help = "Number of vertical grid points (default: 512 on CPU, 4096 on GPU)"
+            help = "Number of vertical grid points (default: 128 on CPU, 512 on GPU)"
             arg_type = Int
             required = false
-            default = has_cuda_gpu() ? 4096 : 256
+            default = has_cuda_gpu() ? 512 : 128
 
         "--U"
             help = "Velocity profile amplitude U₀ (default: 1.0)"
@@ -50,10 +50,10 @@ let s = ArgParseSettings()
             default = 200.0
 
         "--Re0"
-            help = "Base Reynolds number (default: 1e-3)"
+            help = "Base Reynolds number: Re = Re0 Nz^(4/3) (default: 0.1)"
             arg_type = Float64
             required = false
-            default = 1e-3
+            default = 0.1
 
         "--Ri"
             help = "Base Richardson number (default: 0.1)"
@@ -78,6 +78,13 @@ let s = ArgParseSettings()
             arg_type = Float64
             required = false
             default = 0.05
+
+        "--output_interval"
+            help = "Time between outputs, for both writers (default: 2.0); with --offline_check, each 3D output is a \
+                    consecutive-iteration pair"
+            arg_type = Float64
+            required = false
+            default = 2.0
 
         "--filter_ls"
             help = "Filter length scales ℓ (FWHM) for the online sub-filter budgets (filtered fields and every term of the \
@@ -143,21 +150,18 @@ end
 #+++ Create grid
 if has_cuda_gpu()
     arch = GPU()
-    x_aspect_ratio = 1   # Δx / Δz ratio
-    y_aspect_ratio = Inf # Δy / Δz ratio
 else
-    @warn "No CUDA GPU detected. Running on CPU with a coarse grid and high aspect ratio."
-
+    @warn "No CUDA GPU detected. Running on CPU."
     arch = CPU()
-    x_aspect_ratio = 2   # Δx / Δz ratio
-    y_aspect_ratio = Inf # Δy / Δz ratio
 end
+x_aspect_ratio = 1   # Δx / Δz ratio
+y_aspect_ratio = 1   # Δy / Δz ratio
 
 @info "Cell aspect ratio: Δx/Δz = $(x_aspect_ratio), Δy/Δz = $(y_aspect_ratio)"
 
 # Calculate horizontal resolutions based on aspect ratios
 Nx = round(Int, params.Nz * (params.Lx / params.Lz) / x_aspect_ratio)
-Ny = isinf(y_aspect_ratio) ? 1 : round(Int, params.Nz * (params.Ly / params.Lz) / y_aspect_ratio)
+Ny = round(Int, params.Nz * (params.Ly / params.Lz) / y_aspect_ratio)
 
 # Adjust grid sizes to be factorizable by 2, 3, and 5 (for FFT performance)
 Nx = closest_factor_number((2, 3, 5), Nx)
@@ -174,11 +178,7 @@ grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
 
 #+++ Define Reynolds number, viscosity and diffusivity
 let
-    if grid.Ny == 1
-        Re = params.Re₀ * params.Nz^2
-    else
-        Re = params.Re₀ * params.Nz^(4/3) # Double check this
-    end
+    Re = params.Re₀ * params.Nz^(4/3)   # Kolmogorov scaling: Δ ∝ η ∝ Re^(-3/4) at fixed Lz
     ν = params.U * params.h / Re
     κ = ν / params.Pr
     global params = merge(params, (; ν, κ, Re))
@@ -246,8 +246,7 @@ walltime = Walltime()
 # (§6.5.3, β = 5.2, c_η = 0.4), the second-order viscous operator loses 9.8% of the dissipation at Δx = 2.5 L_K and 2.5%
 # at 1.2 L_K (3.5% and 0.8% at the spectral peak), with 37% and 5% of the dissipation at scales shorter than 6 cells,
 # where the fourth-order advection starts to lose accuracy. That model spectrum is for 3D turbulence with an inertial
-# range; these 2D billows put their dissipation in thin braids, so a convergence test at fixed Re is the real arbiter,
-# and the factor is a floor rather than a guarantee.
+# range, so a convergence test at fixed Re is the real arbiter, and the factor is a floor rather than a guarantee.
 #
 # Read the ratio over the turbulent phase (the billow's breakdown, t ≈ 60-70 here), not at t = 0: the initial w
 # perturbation carries `abs(randn())` per grid point, grid-scale noise whose gradients make ε̄ 3-8× the laminar shear's
@@ -319,24 +318,28 @@ _FWHM_to_σ(ℓ) = ℓ / (2 * sqrt(2 * log(2)))
 # of the filtered flow (FilteredKineticEnergyDissipationRate). SubFilterKineticEnergyDissipationRate assembles
 # εˢ = filter(ε) - εˡ in one diagnostic (previously done by hand). This equals 2ν Σ[filter(SⁱʲSⁱʲ) - filter(Sⁱʲ)²]
 # ≥ 0, exactly what calculate_sfs_ke_dissipation computes offline in postprocessing/src/aux02_ke_functions.py.
-# The Gaussian filter reproduces the offline post-processing filter (periodic x, edge-extended z, 4σ truncation
-# — scipy gaussian_filter1d's default; Oceanostics truncates at 2σ). 2D x–z runs (v ≡ 0) so dims=(1, 3); both
-# are per unit mass (m² s⁻³).
+# The Gaussian filter reproduces the offline post-processing filter (periodic x and y, edge-extended z, 4σ
+# truncation — scipy gaussian_filter1d's default; Oceanostics truncates at 2σ). Both are per unit mass (m² s⁻³).
 to_center(ψ) = @at (Center, Center, Center) ψ
 
-# Per-direction Gaussian stencil widths matching scipy's truncate=4 (radius = ⌊4σ/Δ + ½⌋ cells).
-_filter_N(σ) = (2 * max(1, floor(Int, 4σ / minimum_xspacing(grid) + 0.5)) + 1,
-                2 * max(1, floor(Int, 4σ / minimum_zspacing(grid) + 0.5)) + 1)
+# Per-direction Gaussian stencil widths matching scipy's truncate=4 (radius = ⌊4σ/Δ + ½⌋ cells), capped at one
+# period along a periodic direction, which is as far as the filter's wrapping reaches (the offline filter caps
+# identically).
+_stencil_radius(σ, Δ, N, periodic) = min(max(1, floor(Int, 4σ / Δ + 0.5)), periodic ? N : typemax(Int))
+function _filter_N(σ)
+    Δs = (minimum_xspacing(grid), minimum_yspacing(grid), minimum_zspacing(grid))
+    return ntuple(d -> 2 * _stencil_radius(σ, Δs[d], size(grid, d), topology(grid, d) === Periodic) + 1, 3)
+end
 
 # One reusable, offline-matched filter per scale, shared by the KE diagnostics here, the written filtered
 # fields, and the sub-filter APE terms below.
 function matched_filter(ℓ)
     σ = _FWHM_to_σ(ℓ)
-    return GaussianFilter(; dims=(1, 3), σ, boundary=:edge, N=_filter_N(σ))
+    return GaussianFilter(; dims=(1, 2, 3), σ, boundary=:edge, N=_filter_N(σ))
 end
 
 # The written filtered fields use the same offline-matched filter as every sub-filter term below, so
-# `u_ℓ<ℓ>`, `w_ℓ<ℓ>`, `b_ℓ<ℓ>` are the fields those terms are built from (Oceanostics' own defaults
+# `u_ℓ<ℓ>`, `v_ℓ<ℓ>`, `w_ℓ<ℓ>`, `b_ℓ<ℓ>` are the fields those terms are built from (Oceanostics' own defaults
 # truncate at 2σ and shrink the stencil at the walls, which is not what the offline pipeline does).
 _fields = (u=u_center, v=v_center, w=w_center, b=b)
 _filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => matched_filter(ℓ)(f) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
@@ -355,7 +358,7 @@ _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
     gf = matched_filter(ℓ)
 
-    Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 3))
+    Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 2, 3))
     ε_Ks = SubFilterKineticEnergyEquation.SubFilterKineticEnergyDissipationRate(model, gf) # εˢ = filter(ε) - εˡ
     K_s  = SubFilterKineticEnergy(model, gf)   # Kˢ = filter(K) - Kˡ = ½τⁱⁱ, the energy the budget below is of
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")        => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
@@ -368,14 +371,13 @@ for ℓ in filter_ℓs
     # online-vs-offline validation in postprocessing/validation/. Full 3D fields → gated behind
     # --save_tensors to keep production output lean.
     if save_tensors
-        ū = Field(gf(u)); w̄ = Field(gf(w))
-        S̄ = StrainRateTensor(grid, ū, v, w̄; dims=(1, 3))      # strain of the filtered velocity
-        τ = SubFilterKineticEnergyEquation.subfilter_stress_tensor(model, gf; dims=(1, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
-        push!(_ke_pairs,
-              Symbol("S11_ℓ$(ℓ)")   => to_center(S̄.S₁₁), Symbol("S33_ℓ$(ℓ)")   => to_center(S̄.S₃₃),
-              Symbol("S13_ℓ$(ℓ)")   => to_center(S̄.S₁₃),
-              Symbol("tau11_ℓ$(ℓ)") => to_center(τ.τ₁₁), Symbol("tau33_ℓ$(ℓ)") => to_center(τ.τ₃₃),
-              Symbol("tau13_ℓ$(ℓ)") => to_center(τ.τ₁₃))
+        ū = Field(gf(u)); v̄ = Field(gf(v)); w̄ = Field(gf(w))
+        S̄ = StrainRateTensor(grid, ū, v̄, w̄; dims=(1, 2, 3))      # strain of the filtered velocity
+        τ = SubFilterKineticEnergyEquation.subfilter_stress_tensor(model, gf; dims=(1, 2, 3))   # τⁱʲ = filter(uⁱuʲ) - ūⁱūʲ
+        for (ij, Sᵢⱼ, τᵢⱼ) in ((11, S̄.S₁₁, τ.τ₁₁), (22, S̄.S₂₂, τ.τ₂₂), (33, S̄.S₃₃, τ.τ₃₃),
+                               (12, S̄.S₁₂, τ.τ₁₂), (13, S̄.S₁₃, τ.τ₁₃), (23, S̄.S₂₃, τ.τ₂₃))
+            push!(_ke_pairs, Symbol("S$(ij)_ℓ$(ℓ)") => flatten(to_center(Sᵢⱼ)), Symbol("tau$(ij)_ℓ$(ℓ)") => flatten(to_center(τᵢⱼ)))
+        end
     end
 end
 ke_transfer_fields = (; _ke_pairs...)
@@ -402,7 +404,7 @@ ke_transfer_fields = (; _ke_pairs...)
 # complete budget statement. --offline_check adds the record one time step after each output: the offline
 # pipeline (postprocessing/offline/, the CI cross-check) differences that pair for its own tendencies and reads
 # nothing else from it, and it doubles the 3D output, so production runs leave it off.
-output_schedule = offline_check ? ConsecutiveIterations(TimeInterval(2)) : TimeInterval(2)
+output_schedule = offline_check ? ConsecutiveIterations(TimeInterval(params.output_interval)) : TimeInterval(params.output_interval)
 
 z✶_1dsort = reference_height(model, method=VerticalSort())
 b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
@@ -471,7 +473,7 @@ for ℓ in filter_ℓs
     Ea_flt = Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup))))   # Ē_A
     L      = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)               # L̃ = Ẽ_A(b̄, z)
     E_as   = flatten(Ea_flt - L)                                             # S̃
-    Π_A    = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
+    Π_A    = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 2, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
     ε_As   = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
                      FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
     # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
@@ -550,7 +552,7 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., budget_f
 
 output_filename_2d = joinpath(output_dir, "$(simulation_name)_2d.nc")
 simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
-                                                       schedule = TimeInterval(2),
+                                                       schedule = TimeInterval(params.output_interval),
                                                        filename = output_filename_2d,
                                                        array_type = Array{Float32},
                                                        indices = (:, 1, :),

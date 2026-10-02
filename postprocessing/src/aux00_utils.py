@@ -304,8 +304,9 @@ def extension_for_run(filtered_filename):
 # read one cell past the wall and nothing reads further, so one is enough; the filter's `nearest` mode supplies the
 # rest of the edge extension, and the padded fluid exists in the sorted column alone. A product that is not constant
 # past the wall is exact on this cell and held at that value beyond it. Of the sweep's fields that is w·b_r alone,
-# through b✶(z), which past the wall varies by the spread of b across the wall plane: at Nz=1024, w·b_r moves by
-# 1e-17 of its maximum across the whole padding. A run whose walls are not quiescent would need a wider halo.
+# through b✶(z), which past the wall varies by the spread of b across the wall plane: across the whole padding, w·b_r
+# moves by 1e-17 of its maximum in 2D at Nz=1024 and by 2e-15 in 3D at Nz=256. A run whose walls are not quiescent
+# would need a wider halo.
 SWEEP_HALO = 1
 
 
@@ -409,10 +410,6 @@ def condense(ds, vlist, varname, dimname="i", indices=(1, 2, 3)):
 def condense_velocities(ds, dimname="i", indices=(1, 2, 3)):
     """Condense velocity components into tensor form"""
     return condense(ds, ["u", "v", "w"], "uᵢ", dimname=dimname, indices=indices)
-
-def condense_uw_velocities(ds, dimname="i", indices=(1, 3)):
-    """Condense u and w velocity components into tensor form (for 2D simulations)"""
-    return condense(ds, ["u", "w"], "uᵢ", dimname=dimname, indices=indices)
 #---
 
 #+++ Spatial derivatives
@@ -455,76 +452,117 @@ def calculate_gradient(scalar, output_name="grad_scalar", dimensions=("x_caa", "
     return aux_ds[output_name]
 #---
 
-#+++ Gaussian filter (x: periodic, z: bounded)
+#+++ Gaussian filter (x, y: periodic; z: bounded)
 # FWHM = 2√(2 ln 2) · σ  →  σ = FWHM / (2√(2 ln 2))
 _FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+FILTER_DIMS = ("x_caa", "y_aca", "z_aac")   # the directions the filter acts in, online and offline
+_PERIODIC_DIMS = ("x_caa", "y_aca")
+
+def _edge_runs(a, axis):
+    """How many identical hyperplanes `a` starts and ends with along `axis` (each count at least 1)."""
+    planes = np.moveaxis(a, axis, 0)
+    n = len(planes)
+    lo = 1
+    while lo < n - 1 and np.array_equal(planes[lo], planes[0]):
+        lo += 1
+    hi = 1
+    while hi < n - lo and np.array_equal(planes[n - 1 - hi], planes[n - 1]):
+        hi += 1
+    return lo, hi
+
+
+def _filter_passes(a, passes):
+    """The 1D Gaussian passes `(axis, sigma, radius, mode)`, one after the other, on the array `a`."""
+    from scipy.ndimage import gaussian_filter1d
+    for axis, sigma, radius, mode in passes:
+        a = gaussian_filter1d(a, sigma=sigma, axis=axis, mode=mode, radius=radius)
+    return a
+
+
+def _filter_field(a, passes):
+    """`_filter_passes`, bit for bit, without filtering the z padding plane by plane.
+
+    `_pad_domain_in_z` extends a field past each wall with copies of the wall plane: half the column or more wherever
+    the whole padding is in the arrays (the offline pipeline; the sweep keeps one padded cell under the edge extension,
+    `sweep_halo`). When the last pass is the bounded one and `a` starts or ends with a run of identical
+    planes along it, the earlier passes act within a plane, so one plane of each run stands for all of them; and the
+    last pass sees a run through at most `radius + 1` of its planes, every one beyond that being all-run inside the
+    stencil and so equal to the last one computed. The same sums on the same values: the result is identical.
+    """
+    *within, (axis, sigma, radius, mode) = passes
+    n = a.shape[axis]
+    if mode != "nearest" or n < 3:
+        return _filter_passes(a, passes)
+    lo, hi = _edge_runs(a, axis)
+    if lo + hi <= 2:
+        return _filter_passes(a, passes)
+
+    index = [slice(None)] * a.ndim
+    def planes(array, start, stop):
+        index[axis] = slice(start, stop)
+        return array[tuple(index)]
+
+    core = _filter_passes(planes(a, lo - 1, n - hi + 1), within)   # one plane of each run, and everything between
+    keep_lo, keep_hi, n_core = min(lo, radius + 1), min(hi, radius + 1), core.shape[axis]
+    core = np.concatenate([np.repeat(planes(core, 0, 1), keep_lo - 1, axis=axis), core,
+                           np.repeat(planes(core, n_core - 1, n_core), keep_hi - 1, axis=axis)], axis=axis)
+    core = _filter_passes(core, [(axis, sigma, radius, mode)])
+
+    out = np.empty(a.shape, dtype=core.dtype)
+    n_core = core.shape[axis]
+    planes(out, lo - keep_lo, n - hi + keep_hi)[...] = core
+    planes(out, 0, lo - keep_lo)[...] = planes(core, 0, 1)
+    planes(out, n - hi + keep_hi, n)[...] = planes(core, n_core - 1, n_core)
+    return out
+
 
 class GaussianFilter:
-    """Gaussian filter in x (periodic) and z (bounded) directions.
+    """Separable Gaussian filter of FWHM ℓ: sequential 1D scipy convolutions, mode='wrap' in x and y (periodic)
+    and mode='nearest' in z (edge-extended past the walls).
 
-    Two sequential 1D scipy Gaussian convolutions:
-      - x: mode='wrap'    — periodic BC
-      - z: mode='nearest' — extends with boundary value beyond domain walls
-
-    ℓ is the FWHM of the kernel; σ = ℓ · _FWHM_TO_SIGMA is derived internally.
+    `spacing` maps each dimension name to its grid spacing. The stencil reaches 4σ (scipy's default truncation)
+    but never beyond one period along a periodic dimension, the same cap the online filter carries, so the two
+    filters share their weights exactly.
     """
-    def __init__(self, ℓ, dx_min, dz_min):
-        self._sigma_x = ℓ * _FWHM_TO_SIGMA / dx_min
-        self._sigma_z = ℓ * _FWHM_TO_SIGMA / dz_min
+    def __init__(self, ℓ, spacing):
+        self.ℓ = float(ℓ)
+        self.spacing = dict(spacing)
 
     def apply(self, da, dims):
-        """Apply filter in dims[0] (x, periodic) then dims[1] (z, bounded).
+        """Filter `da` along each of `dims` in turn; a singleton dimension is left alone.
 
-        Parameters
-        ----------
-        da : xr.DataArray
-        dims : list of str
-            [x_dim, z_dim], e.g. ['x_caa', 'z_aac']
+        The passes run back to back on one whole field, a single dask task per field. One `apply_ufunc` per pass made
+        dask re-chunk the field between passes (each pass wants a different dimension in one chunk, and dask splits the
+        others to keep chunks small), which cost more than the filtering and left the output in pieces that are not
+        contiguous on disk.
         """
-        from scipy.ndimage import gaussian_filter1d
-        x_dim, z_dim = dims
-        da_x = xr.apply_ufunc(
-            gaussian_filter1d, da,
-            input_core_dims=[[x_dim]],
-            output_core_dims=[[x_dim]],
-            kwargs={"sigma": self._sigma_x, "axis": -1, "mode": "wrap"},
-            dask="parallelized",
-            output_dtypes=[da.dtype],
-            dask_gufunc_kwargs={"allow_rechunk": True},
-        )
-        return xr.apply_ufunc(
-            gaussian_filter1d, da_x,
-            input_core_dims=[[z_dim]],
-            output_core_dims=[[z_dim]],
-            kwargs={"sigma": self._sigma_z, "axis": -1, "mode": "nearest"},
-            dask="parallelized",
-            output_dtypes=[da_x.dtype],
-            dask_gufunc_kwargs={"allow_rechunk": True},
-        )
+        core = [dim for dim in dims if da.sizes[dim] > 1]
+        if not core:
+            return da
+        passes = []
+        for axis, dim in enumerate(core, start=-len(core)):
+            sigma = self.ℓ * _FWHM_TO_SIGMA / self.spacing[dim]
+            radius = max(1, int(4 * sigma + 0.5))
+            periodic = dim in _PERIODIC_DIMS
+            if periodic:
+                radius = min(radius, da.sizes[dim])
+            passes.append((axis, sigma, radius, "wrap" if periodic else "nearest"))
+        return xr.apply_ufunc(_filter_field, da, input_core_dims=[core], output_core_dims=[core], kwargs={"passes": passes},
+                              dask="parallelized", output_dtypes=[da.dtype], dask_gufunc_kwargs={"allow_rechunk": True})
 
 
 def make_gaussian_filter(ℓ, ds):
-    """Return a GaussianFilter for FWHM ℓ using grid spacing from ds.
-
-    Parameters
-    ----------
-    ℓ : float
-        Filter length scale (FWHM) in physical units.
-    ds : xr.Dataset
-        Simulation dataset (must contain Δx_caa and Δz_aac).
-    """
-    dx_min = float(ds.Δx_caa.min())
-    dz_min = float(ds.Δz_aac.min())
-    return GaussianFilter(ℓ, dx_min, dz_min)
+    """Return a GaussianFilter for FWHM ℓ using the grid spacings (Δx_caa, Δy_aca, Δz_aac) of ds."""
+    return GaussianFilter(ℓ, {dim: float(ds[f"Δ{dim}"].min()) for dim in FILTER_DIMS if f"Δ{dim}" in ds})
 
 
 def filter_fields(ds, filter_scales):
-    """Filter velocity and buoyancy fields at each length scale in x and z.
+    """Filter velocity and buoyancy fields at each length scale in x, y and z.
 
     Parameters
     ----------
     ds : xr.Dataset
-        Dataset with velocity components (u, w) and buoyancy b.
+        Dataset with velocity components (u, v, w) and buoyancy b.
     filter_scales : array-like
         Filter length scales (FWHM) in physical units.
 
@@ -534,15 +572,15 @@ def filter_fields(ds, filter_scales):
         Dataset with filtered fields ūᵢ and b̄ at each filter_scale,
         plus dV (scale-independent).
     """
-    ds = condense_uw_velocities(ds, indices=(1, 3))
+    ds = condense_velocities(ds)
 
     ds_filt_list = []
     for ℓ in filter_scales:
         print(f"  filter_scale = {ℓ:.4f}...")
         gf = make_gaussian_filter(ℓ, ds)
         ds_filt_list.append(xr.Dataset({
-            "ūᵢ": gf.apply(ds["uᵢ"], dims=["x_caa", "z_aac"]),
-            "b̄":  gf.apply(ds["b"],  dims=["x_caa", "z_aac"]),
+            "ūᵢ": gf.apply(ds["uᵢ"], dims=FILTER_DIMS),
+            "b̄":  gf.apply(ds["b"],  dims=FILTER_DIMS),
         }))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
@@ -550,7 +588,7 @@ def filter_fields(ds, filter_scales):
     ds_filt = xr.concat(ds_filt_list, dim=scale_coord)
     ds_filt["dV"] = ds["dV"]
     ds_filt.attrs.update(ds.attrs)
-    ds_filt.attrs["filter_dims"] = "x_caa,z_aac"
+    ds_filt.attrs["filter_dims"] = ",".join(FILTER_DIMS)
     return ds_filt
 #---
 

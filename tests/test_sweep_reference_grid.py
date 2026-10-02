@@ -24,7 +24,7 @@ import pytest
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "postprocessing"))
-from src.aux00_utils import _pad_domain_in_z, required_pad_margin, make_gaussian_filter, sweep_halo
+from src.aux00_utils import _pad_domain_in_z, required_pad_margin, make_gaussian_filter, sweep_halo, FILTER_DIMS
 from src.aux01_pe_functions import sorted_timeseries
 from src.aux02_ke_functions import calculate_energy_transfer
 
@@ -181,22 +181,28 @@ def _physical_plus_halo(ds_full, ds_halo):
     return slice(n, ds_full.sizes["z_aac"] - n)
 
 
-def _flow_dataset(n_times=2, Nx=16, Nz=64, Lx=4.0, U=1.0, h=0.5):
-    """u, w and b of a sheared, stratified layer with a wave on it, far enough from the walls that b is flat there to
-    the last bit, as it is in the runs (tanh(Lz/2h) is 1 in double precision)."""
-    ds = _grid_dataset(Nx=Nx, Nz=Nz, Lx=Lx, h=h).drop_vars("ρ").drop_vars("time")
-    X, Z = np.meshgrid(ds.x_caa.values, ds.z_aac.values, indexing="ij")
+def _flow_dataset(n_times=2, Nx=16, Ny=4, Nz=64, Lx=4.0, Ly=2.0, U=1.0, h=0.5):
+    """u, v, w and b of a sheared, stratified layer with a wave on it that varies along y too, far enough from the walls
+    that b is flat there to the last bit, as it is in the runs (tanh(Lz/2h) is 1 in double precision)."""
+    dx, dy, dz = Lx / Nx, Ly / Ny, LZ / Nz
+    x, y, z = (np.arange(Nx) + 0.5) * dx, (np.arange(Ny) + 0.5) * dy, (np.arange(Nz) + 0.5) * dz - LZ / 2
+    X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
     interior = np.exp(-(Z / 3.0) ** 2)
-    fields = dict(u=[], w=[], b=[])
+    fields = dict(u=[], v=[], w=[], b=[])
     for k in range(n_times):
-        wave = np.sin(2 * np.pi * X / Lx + k) + 0.5 * np.sin(6 * np.pi * X / Lx)
+        wave = (np.sin(2 * np.pi * X / Lx + k) + 0.5 * np.sin(6 * np.pi * X / Lx)) * (1 + 0.3 * np.cos(2 * np.pi * Y / Ly))
         fields["u"].append(U * np.tanh(Z / h) + 0.2 * np.cos(2 * np.pi * X / Lx + k) * interior)
+        fields["v"].append(0.05 * np.sin(2 * np.pi * Y / Ly - k) * interior)
         fields["w"].append(0.1 * wave * interior)                       # in phase with the displacement, so w·b_r has a mean
         fields["b"].append(0.1 * np.tanh((Z + 0.3 * wave * interior) / h))
     dims = ("time", "x_caa", "y_aca", "z_aac")
-    coords = dict(time=np.arange(n_times, dtype=float), x_caa=ds.x_caa, y_aca=ds.y_aca, z_aac=ds.z_aac)
-    for name, frames in fields.items():
-        ds[name] = xr.DataArray(np.stack(frames)[:, :, None, :], dims=dims, coords=coords)
+    ds = xr.Dataset({name: (dims, np.stack(frames)) for name, frames in fields.items()},
+                    coords=dict(time=np.arange(n_times, dtype=float), x_caa=x, y_aca=y, z_aac=z))
+    for dim, d in (("x_caa", dx), ("y_aca", dy), ("z_aac", dz)):
+        ds[f"Δ{dim}"] = xr.DataArray(np.full(ds.sizes[dim], d), dims=[dim], coords={dim: ds[dim]})
+    ds["dV"] = ds["Δx_caa"] * ds["Δy_aca"] * ds["Δz_aac"]
+    ds["LxLy"] = xr.DataArray(Lx * Ly)
+    ds.attrs["z_min"] = float(z[0] - dz / 2)
     return ds
 
 
@@ -240,10 +246,10 @@ def test_filter_without_the_padding_matches_on_the_kept_cells(ell):
     ds_halo = _pad_domain_in_z(_flow_dataset(), min_margin=margin, halo=sweep_halo("edge"))
     kept = _physical_plus_halo(ds_full, ds_halo)
     gf = make_gaussian_filter(ell, ds_full)
-    for field in (ds_full.u, ds_full.b, ds_full.u * ds_full.w):
+    for field in (ds_full.u, ds_full.v, ds_full.b, ds_full.u * ds_full.w):
         name = field.name or "u·w"
-        full = gf.apply(field, dims=["x_caa", "z_aac"]).isel(z_aac=kept).transpose("time", "x_caa", "y_aca", "z_aac")
-        halo = gf.apply(field.isel(z_aac=kept), dims=["x_caa", "z_aac"]).transpose("time", "x_caa", "y_aca", "z_aac")
+        full = gf.apply(field, dims=FILTER_DIMS).isel(z_aac=kept).transpose("time", "x_caa", "y_aca", "z_aac")
+        halo = gf.apply(field.isel(z_aac=kept), dims=FILTER_DIMS).transpose("time", "x_caa", "y_aca", "z_aac")
         assert np.array_equal(full.values, halo.values), f"filter({name}) at ℓ={ell} changes when the padding leaves the array"
 
 

@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#PBS -N kelvin_helmholtz_1024
-#PBS -o logs/kelvin_helmholtz_1024.log
-#PBS -e logs/kelvin_helmholtz_1024.log
+#PBS -N kelvin_helmholtz_512
+#PBS -o logs/kelvin_helmholtz_512.log
+#PBS -e logs/kelvin_helmholtz_512.log
 #PBS -l walltime=23:59:00
 #PBS -q casper
 #PBS -m ae
@@ -21,7 +21,7 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-NZ=${NZ:-1024}
+NZ=${NZ:-512}
 SAVE_TENSORS=${SAVE_TENSORS:-0}
 [ "$SAVE_TENSORS" = "1" ] && TENSOR_FLAG="--save_tensors" || TENSOR_FLAG=""
 SAVE_SORTED=${SAVE_SORTED:-1}   # on by default: the validation-only sorted-state fields inv06/inv07 read (the budgets need nothing from it)

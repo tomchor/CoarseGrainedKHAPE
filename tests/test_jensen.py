@@ -13,7 +13,7 @@ height. A filter acting only in x therefore satisfies the bound, and one acting 
 of functions and need not.
 
 That is the whole reason `test_positivity.py` checks the local APE and the SFS KE but not Eₐˢ: the
-pipeline filters in x and z (`filtered_dimensions` in `05_sfs_ape_budget.py`), so its Eₐˢ is genuinely
+pipeline filters in x, y and z (`FILTER_DIMS` in `aux00_utils.py`), so its Eₐˢ is genuinely
 of either sign. Both halves are checked here, on a stratification displaced by a wave in x:
 
   * with a horizontal filter the bound must hold — this is the pointwise Jensen test, and it exercises
@@ -92,11 +92,10 @@ def synthetic():
 def subfilter_ape(synthetic, ell, dims):
     """Eₐˢ = filter(eₐ(ρ)) - eₐ(ρ̄), both terms against the full field's reference profile.
 
-    `dims` is the [x, z] pair `GaussianFilter.apply` convolves over in turn. Passing the singleton y
-    axis in the second slot makes that pass a no-op, which is how a horizontal-only filter is spelled
-    here (the same idiom `calculate_sfs_R_correction` uses by default)."""
+    `dims` are the axes `GaussianFilter.apply` convolves over in turn; it skips the singleton y axis, which
+    is how a horizontal-only filter is spelled here."""
     ds, dx, dz, sorted_state, full = synthetic
-    gf = GaussianFilter(ell, dx_min=dx, dz_min=dz)
+    gf = GaussianFilter(ell, {"x_caa": dx, "z_aac": dz})
     ds_filtered = ds.assign(ρ̄=gf.apply(ds.ρ, dims=dims))
     filtered = local_potential_energies_timeseries(ds_filtered, sorted_state.rho_sorted, sorted_state.dz_sorted,
                                                    density_name="ρ̄", verbose_level=0, n_workers=1)
@@ -158,7 +157,7 @@ def sim_output():
     return xr.open_dataset(SIM_OUTPUT, decode_times=False, chunks={"time": 1})
 
 
-ONLINE_SFS_APE_TOL = 3e-3   # as test_positivity.py's SFS_APE_TOL: -1.14e-3 measured at CI's Nz=512, -4.8e-5 at Nz=1024
+ONLINE_SFS_APE_TOL = 5e-2   # as test_positivity.py's SFS_APE_TOL: -2.6e-2 measured on CI's 3D Nz=128 run, -1.14e-3 in 2D at Nz=512
 
 
 @pytest.mark.parametrize("ell", ONLINE_FILTER_SCALES)

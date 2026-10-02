@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from src.aux03_plotting import run_label, budget_colors
+from src.aux03_plotting import run_label, budget_colors, xz_slice
 from src.aux04_online_budgets import online_budgets, online_filter_scales
 #---
 
@@ -48,10 +48,11 @@ ds_2d = ds_2d.sel(z_aac=slice(-args.zlim, args.zlim), z_aaf=slice(-args.zlim, ar
 if "b_r" not in ds_2d:
     raise SystemExit(f"'b_r' not in {filename_2d}: rerun the simulation with the current kelvin_helmholtz_instability.jl")
 
-# The 2D writer carries every per-scale term with its `_int` integral, so the panels and the time series are drawn from
-# the same records and each frame is one instant. The first record is iteration 0, where every TimeDerivative still reads
-# zero, so it states no budget; every later one does, since the 2D writer never pairs its records. (The integrated budget
-# files of an --offline_check run hold the upper record of each pair instead, one time step after these.)
+# The 2D writer carries every per-scale term on the plotted plane with its `_int` volume integral, so the panels and the
+# time series are drawn from the same records and each frame is one instant. The first record is iteration 0, where every
+# TimeDerivative still reads zero, so it states no budget; every later one does, since the 2D writer never pairs its
+# records. (The integrated budget files of an --offline_check run hold the upper record of each pair instead, one time
+# step after these.)
 ds_2d = ds_2d.isel(time=slice(1, None))
 ℓ_sel = min(online_filter_scales(ds_2d), key=lambda ℓ: abs(ℓ - args.filter_scale))
 print(f"Selected filter scale: ℓ = {ℓ_sel:.4f}  (requested {args.filter_scale})")
@@ -81,19 +82,19 @@ def global_clim_positive(da, sample_idx, pct):
 
 pct = args.clim_percentile
 
-omega_vmax = global_clim_symmetric(ds_2d["ω"].squeeze("y_aca", drop=True), sample_idx, pct)
-b_vmax = global_clim_symmetric(ds_2d["b"].squeeze("y_aca", drop=True), sample_idx, pct)
-b_r_vmax = global_clim_symmetric(ds_2d["b_r"].squeeze("y_aca", drop=True), sample_idx, pct)
-w_vmax = global_clim_symmetric(ds_2d["w"].squeeze("y_aca", drop=True), sample_idx, pct)
+omega_vmax = global_clim_symmetric(xz_slice(ds_2d["ω"]), sample_idx, pct)
+b_vmax = global_clim_symmetric(xz_slice(ds_2d["b"]), sample_idx, pct)
+b_r_vmax = global_clim_symmetric(xz_slice(ds_2d["b_r"]), sample_idx, pct)
+w_vmax = global_clim_symmetric(xz_slice(ds_2d["w"]), sample_idx, pct)
 
-Π_K_vmax = max(global_clim_symmetric(ke_budget["Π_K"].squeeze("y_aca"), sample_idx, pct),
-               global_clim_symmetric(ke_budget["SFS APE->KE exchange"].squeeze("y_aca"), sample_idx, pct))
-Π_A_vmax = global_clim_symmetric(ape_budget["Π_A"].squeeze("y_aca"), sample_idx, pct)
-ε_Aˢ_vmax = global_clim_positive(ape_budget["ε_Aˢ"].squeeze("y_aca"), sample_idx, pct)
-Rˢ_vmax = global_clim_symmetric(ape_budget["Rˢ"].squeeze("y_aca"), sample_idx, pct)
-KE_sfs_vmax = global_clim_positive(ke_budget["KE_of_sfs_flow"].squeeze("y_aca"), sample_idx, pct)
-APE_sfs_vmax = global_clim_positive(ape_budget["Eaˢ(ρ, z)"].squeeze("y_aca"), sample_idx, pct)
-ε_Kˢ_vmax = global_clim_positive(ke_budget["ε_Kˢ"].squeeze("y_aca"), sample_idx, pct)
+Π_K_vmax = max(global_clim_symmetric(xz_slice(ke_budget["Π_K"]), sample_idx, pct),
+               global_clim_symmetric(xz_slice(ke_budget["SFS APE->KE exchange"]), sample_idx, pct))
+Π_A_vmax = global_clim_symmetric(xz_slice(ape_budget["Π_A"]), sample_idx, pct)
+ε_Aˢ_vmax = global_clim_positive(xz_slice(ape_budget["ε_Aˢ"]), sample_idx, pct)
+Rˢ_vmax = global_clim_symmetric(xz_slice(ape_budget["Rˢ"]), sample_idx, pct)
+KE_sfs_vmax = global_clim_positive(xz_slice(ke_budget["KE_of_sfs_flow"]), sample_idx, pct)
+APE_sfs_vmax = global_clim_positive(xz_slice(ape_budget["Eaˢ(ρ, z)"]), sample_idx, pct)
+ε_Kˢ_vmax = global_clim_positive(xz_slice(ke_budget["ε_Kˢ"]), sample_idx, pct)
 
 print(f"  ω: ±{omega_vmax:.3e},  b: ±{b_vmax:.3e},  b_r: ±{b_r_vmax:.3e},  w: ±{w_vmax:.3e}")
 print(f"  Π_K/exchange: ±{Π_K_vmax:.3e},  Π_A: ±{Π_A_vmax:.3e},  ε_Aˢ: ±{ε_Aˢ_vmax:.3e},  Rˢ: ±{Rˢ_vmax:.3e}")
@@ -108,8 +109,8 @@ def get_xz_dims(ds, var):
     return xdim, zdim, da[xdim].values, da[zdim].values
 
 def get_frame(ds, var, xdim, zdim, idx):
-    """Return 2D array in (nz, nx) order for pcolormesh."""
-    return ds[var].isel(time=idx).squeeze().transpose(zdim, xdim).values
+    """Return 2D array in (nz, nx) order for pcolormesh, on the x-z plane at the first y index."""
+    return xz_slice(ds[var].isel(time=idx)).squeeze().transpose(zdim, xdim).values
 #---
 
 #+++ Set up figure with GridSpec (3 snapshot rows × 4 cols + 2 budget rows)

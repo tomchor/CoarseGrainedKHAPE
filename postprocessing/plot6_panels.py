@@ -8,7 +8,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from src.aux00_utils import load_dataset_and_grid
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 from src.aux04_online_budgets import online_budgets
 #---
 
@@ -55,15 +55,15 @@ print(f"Selected ℓ   = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 print("Selecting fields...")
 sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
-Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()                  # cross-scale KE flux
-exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze() # APE->KE exchange
-Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()               # cross-scale APE flux
-ε_Aˢ     = ape_budget["ε_Aˢ"].sel(**sel).squeeze()              # SFS APE dissipation
+Π_K      = xz_slice(ke_budget["Π_K"].sel(**sel)).squeeze()                  # cross-scale KE flux
+exchange = xz_slice(ke_budget["SFS APE->KE exchange"].sel(**sel)).squeeze() # APE->KE exchange
+Π_A      = xz_slice(ape_budget["Π_A"].sel(**sel)).squeeze()               # cross-scale APE flux
+ε_Aˢ     = xz_slice(ape_budget["ε_Aˢ"].sel(**sel)).squeeze()              # SFS APE dissipation
 #---
 
 #+++ Buoyancy field for contours, from the same (unpadded) simulation output
 print("Loading buoyancy field...")
-b = ds["b"].sel(time=t_sel, method="nearest").squeeze()
+b = xz_slice(ds["b"].sel(time=t_sel, method="nearest")).squeeze()
 print("Done.")
 #---
 

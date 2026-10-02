@@ -12,7 +12,7 @@ from pathlib import Path
 # kelvin_helmholtz_instability.jl), so the tests look where those wrote.
 REPO_ROOT  = Path(__file__).resolve().parent.parent
 PP_OUTPUT  = Path(os.environ.get("KHAPE_PP_OUTPUT") or REPO_ROOT / "postprocessing" / "output")
-STEM       = os.environ.get("KHAPE_TEST_STEM", "khi_Nz512_Ri0.10")   # $KHAPE_TEST_STEM points the suite at another run
+STEM       = os.environ.get("KHAPE_TEST_STEM", "khi_Nz128_Ri0.10")   # $KHAPE_TEST_STEM points the suite at another run
 SIM_OUTPUT = Path(os.environ.get("KHAPE_OUTPUT_DIR") or REPO_ROOT / "output") / f"{STEM}.nc"
 #---
 
