@@ -4,10 +4,10 @@ import logging
 import os
 from pathlib import Path
 import numpy as np
-import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from src.aux00_utils import EXTRA_FIGURES, PP_OUTPUT, load_dataset_and_grid
+from src.aux00_utils import EXTRA_FIGURES, load_dataset_and_grid
+from src.aux04_online_budgets import online_budgets
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -31,11 +31,10 @@ stem = Path(filename).stem
 ref_suffix = ""
 #---
 
-#+++ Load datasets
+#+++ Load the simulation output and assemble the budgets from its online terms (lazily, as plot6_panels.py)
 print("Loading simulation dataset and budgets...")
-ds = load_dataset_and_grid(filename)
-ke_budget  = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_fields{ref_suffix}.nc"),  decode_times=False)
-ape_budget = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_fields{ref_suffix}.nc"), decode_times=False)
+ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
+ke_budget, ape_budget = online_budgets(ds)
 
 ds         = ds.sel(z_aac=slice(-4, +4))
 ke_budget  = ke_budget.sel(z_aac=slice(-4, +4))

@@ -187,7 +187,7 @@ def _pad_along_z(da, n, kw, z_name="z_aac"):
     )
 
 
-def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
+def _pad_domain_in_z(ds, min_margin=None, extension="edge", halo=None):
     """Extend the z domain past both walls, by `extension` (see `_EXTENSIONS`).
 
     Adds cells at the bottom and the top. The fields in `EXTENSION_VARS` (the buoyancy) are extended by
@@ -195,6 +195,12 @@ def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
     Nz//2 each side, doubling the domain height; `min_margin` (a physical z distance, e.g. from
     `required_pad_margin`) widens that when a filter needs more room, and never narrows it. Assumes a
     uniform z grid. Δz_aac is extended with the same constant dz; dV and z-extent attributes are recomputed.
+
+    `halo` keeps only that many of the padded cells per side in the arrays (`n_pad_z`) and leaves the rest
+    virtual (`n_pad_z_virtual`): part of the padded domain (`z_min`, `z_max`, `Lz`) and of the column
+    `sorted_timeseries` builds, but not stored. That is exact for the edge extension, which is what the filter's
+    `nearest` mode does past the end of an array, as far as its stencil reaches: a field that repeats its wall
+    value filters to the same numbers on the cells that are kept. The odd extension has no such shortcut.
     """
     if extension not in _EXTENSIONS:
         raise ValueError(f"unknown extension {extension!r}; expected one of {sorted(_EXTENSIONS)}")
@@ -206,11 +212,14 @@ def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
     Nz_pad = Nz // 2
     if min_margin is not None:
         Nz_pad = max(Nz_pad, int(np.ceil(float(min_margin) / dz)))
+    n_keep = Nz_pad if halo is None else min(int(halo), Nz_pad)
+    if n_keep < Nz_pad and extension != "edge":
+        raise ValueError(f"halo={halo} leaves padding to the filter's nearest mode, which is the edge extension, not {extension!r}")
 
     z_orig = ds.z_aac.values
     z_bot  = z_orig[0]  - np.arange(Nz_pad, 0, -1) * dz
     z_top  = z_orig[-1] + np.arange(1, Nz_pad + 1) * dz
-    z_new  = np.concatenate([z_bot, z_orig, z_top])
+    z_new  = np.concatenate([z_bot[Nz_pad - n_keep:], z_orig, z_top[:n_keep]])
 
     new_vars = {}
     for name, da in ds.data_vars.items():
@@ -221,7 +230,7 @@ def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
         # and, importantly, pad widths larger than the axis itself (ℓ=20 needs 2784 cells of a 2048 grid),
         # which a single mirrored slab cannot express.
         kw = pad_kw if name in EXTENSION_VARS else edge_kw
-        new_vars[name] = (_pad_along_z(da, Nz_pad, kw)
+        new_vars[name] = (_pad_along_z(da, n_keep, kw)
                           .assign_coords(z_aac=z_new).transpose(*da.dims))
 
     new_vars["Δz_aac"] = xr.DataArray(
@@ -248,14 +257,15 @@ def _pad_domain_in_z(ds, min_margin=None, extension="edge"):
     physical = (ds_new.z_aac >= z_orig[0] - dz/2) & (ds_new.z_aac <= z_orig[-1] + dz/2)
     ds_new["dV_physical"] = ds_new["dV"].where(physical, 0.0)
 
-    ds_new.attrs["n_pad_z"]        = int(Nz_pad)
+    ds_new.attrs["n_pad_z"]          = int(n_keep)
+    ds_new.attrs["n_pad_z_virtual"]  = int(Nz_pad - n_keep)
     ds_new.attrs["z_extension"]      = extension
     ds_new.attrs["z_extension_vars"] = ",".join(EXTENSION_VARS)
     ds_new.attrs["z_min_physical"] = float(z_orig[0])  - dz / 2
     ds_new.attrs["z_max_physical"] = float(z_orig[-1]) + dz / 2
 
-    ds_new.attrs["z_min"] = float(z_new[0])  - dz / 2
-    ds_new.attrs["z_max"] = float(z_new[-1]) + dz / 2
+    ds_new.attrs["z_min"] = float(z_bot[0])  - dz / 2   # of the whole padded domain, virtual cells included
+    ds_new.attrs["z_max"] = float(z_top[-1]) + dz / 2
     ds_new.attrs["Lz"]    = ds_new.attrs["z_max"] - ds_new.attrs["z_min"]
 
     return ds_new
@@ -290,7 +300,32 @@ def extension_for_run(filtered_filename):
         return "edge"
 
 
-def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True):
+# The padded cells the sweep keeps in its arrays. The centred differences at the wall cells (the strain of ū, ∇Υ̃)
+# read one cell past the wall and nothing reads further, so one is enough; the filter's `nearest` mode supplies the
+# rest of the edge extension, and the padded fluid exists in the sorted column alone. A product that is not constant
+# past the wall is exact on this cell and held at that value beyond it. Of the sweep's fields that is w·b_r alone,
+# through b✶(z), which past the wall varies by the spread of b across the wall plane: at Nz=1024, w·b_r moves by
+# 1e-17 of its maximum across the whole padding. A run whose walls are not quiescent would need a wider halo.
+SWEEP_HALO = 1
+
+
+def sweep_halo(extension):
+    """The `halo` the sweep loads its fields with: `SWEEP_HALO` under the edge extension, the whole padding otherwise."""
+    return SWEEP_HALO if extension == "edge" else None
+
+
+def halo_of(ds_filt):
+    """The `halo` the filtering step loaded its fields with (None: the whole padding), so later steps load the same grid."""
+    return int(ds_filt.attrs["n_pad_z"]) if int(ds_filt.attrs.get("n_pad_z_virtual", 0)) > 0 else None
+
+
+def halo_for_run(filtered_filename):
+    """Read the halo off a run's filtered-fields file; None (the whole padding) for files written before it existed."""
+    with xr.open_dataset(filtered_filename, decode_times=False) as d:
+        return halo_of(d)
+
+
+def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True, halo=None):
     """
     Load the simulation output and grid information
 
@@ -303,6 +338,9 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True)
         its stencil stays inside the array. `pad=False` returns the simulation's own grid, with the same
         `dV`, `dV_physical` and padding attributes (`n_pad_z=0`) the padded dataset carries, so the readers
         of the online budget terms and the padded offline pipeline present one interface downstream.
+    halo : int or None
+        Keep only this many padded cells per side in the arrays and leave the rest of the padding virtual
+        (see `_pad_domain_in_z`); None keeps all of it.
 
     Returns
     -------
@@ -345,6 +383,7 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True)
         dz = float(ds.Δz_aac.isel(z_aac=0))
         ds["dV_physical"] = ds["dV"]
         ds.attrs["n_pad_z"]          = 0
+        ds.attrs["n_pad_z_virtual"]  = 0
         ds.attrs["z_extension"]      = "none"
         ds.attrs["z_extension_vars"] = ""
         ds.attrs["z_min_physical"]   = float(ds.z_aac.values[0])  - dz / 2
@@ -352,7 +391,7 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True)
         return ds
 
     # Pad domain in z: at least Nz//2 cells each side, more when a filter needs it (see _pad_domain_in_z)
-    ds = _pad_domain_in_z(ds, min_margin=min_margin, extension=extension)
+    ds = _pad_domain_in_z(ds, min_margin=min_margin, extension=extension, halo=halo)
 
     return ds
 #---

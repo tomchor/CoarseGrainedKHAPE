@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import (PP_OUTPUT, required_pad_margin, load_dataset_and_grid, filter_fields, extension_suffix,
-                             scale_subset_tag, output_flag)
+                             scale_subset_tag, output_flag, sweep_halo)
 #---
 
 #+++ Configuration
@@ -36,8 +36,10 @@ scale_tag = scale_subset_tag(args.filter_scales)   # a subset run must not overw
 #+++ Load data and grid
 print("\n" + "="*60)
 print("Loading data and grid...")
-ds = load_dataset_and_grid(filename, min_margin=required_pad_margin(filter_scales),
-                           extension=args.extension)
+# Under the edge extension the padding stays out of the arrays (`sweep_halo`): the fields keep one cell past each wall
+# and the filter's `nearest` mode supplies the rest, so what is filtered and written is the physical domain.
+ds = load_dataset_and_grid(filename, min_margin=required_pad_margin(filter_scales), extension=args.extension,
+                           halo=sweep_halo(args.extension))
 ds = ds.chunk(dict(time=1))
 
 # Records per output time: two when the simulation ran with --offline_check (consecutive-iteration pairs), else one.

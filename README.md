@@ -16,7 +16,7 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 
 | Prefix | Purpose |
 |--------|---------|
-| `01_online_budgets.py`, `02_plot_budgets.py` | **Budget pipeline.** Every term of the SFS KE and APE budgets is computed by the simulation itself; `01` assembles the budget files from those online terms (at the simulation's own filter scales, ℓ = 1 and 7 by default) and `02` plots them. |
+| `01_online_budgets.py`, `02_plot_budgets.py` | **Budget pipeline.** Every term of the SFS KE and APE budgets is computed by the simulation itself; `01` writes the integrated budgets from those online terms (at the simulation's own filter scales, ℓ = 1 and 7 by default) and `02` plots them. |
 | `offline/01_…` – `offline/05_…` | **Offline budget pipeline, kept as a test.** The independent Python implementation of every term (scipy filtering on a z-padded domain, a numpy density sort, an FFT-filtered reference profile). It is no longer a product: `offline/run_offline_budgets.sh` runs it into `output/offline/` and `pytest --offline-check` compares each term against the assembled online budgets (see [Tests](#tests)). |
 | `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
 | `plot2_…`, `plot3_…`, `plot5_…`, `plot6_…` | **Paper figure scripts.** Produce the figures used in the manuscript (cross-scale transfer spectrum, b and b_r snapshots, SFS KE/APE budget time series, local-field snapshot panels). `plots.pbs` runs every `plot*.py`. Output goes to `figures/`. |
@@ -29,7 +29,7 @@ All Python scripts accept `--filename`, and most accept `--filter-scales` and `-
 
 ### Where the budgets come from
 
-The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` writes the online terms into the four budget files (`<stem>_sfs_{ke,ape}_budget_{fields,integrated}.nc`) that `02_plot_budgets.py`, `anim1_panels.py` and the tests consume, on the simulation's own grid, one record per output time; the assembly itself is `online_budgets` in `src/aux04_online_budgets.py`, which `plot5_budgets.py` and `plot6_panels.py` call on the simulation file directly, so those two figures need no post-processing. See CLAUDE.md for the full account.
+The SFS KE budget (Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r)) and the SFS APE budget (S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ, and the same τ) are computed online by `kelvin_helmholtz_instability.jl` at each of its `--filter_ls` scales, as 3D fields and as volume integrals, and written unconditionally. The resolved APE reservoir is measured against the vertically filtered reference profile ⟨b✶⟩ (Wenegrat, Chor & Barkan, Eq. 2.3): the pipeline filters in x **and** z, and against the unfiltered b✶ the resolved reservoir would not vanish for a fluid at rest and the sub-filter remainder would go negative over much of the domain. `01_online_budgets.py` writes the volume integrals into the two integrated budget files (`<stem>_sfs_{ke,ape}_budget_integrated.nc`) that `02_plot_budgets.py` and the tests consume, one record per output time. The fields are not copied anywhere: the assembly itself is `online_budgets` in `src/aux04_online_budgets.py`, which the tests, `plot5_budgets.py`, `plot6_panels.py`, `X2_panels.py` and `X4_thumbnail.py` call on the simulation file directly (so `plot5` and `plot6` need no post-processing), and which `anim1_panels.py` calls on the `_2d.nc` file for its panels and its time series. See CLAUDE.md for the full account.
 
 The offline pipeline that used to compute these terms (`postprocessing/offline/`) recomputes every one of them independently and runs only as the CI cross-check. There is no fixed-in-time reference variant of the budgets; the sweep keeps its own (`sweep2 --fixed-reference`).
 
@@ -86,7 +86,7 @@ bash submit_all_pbs.sh PLOTS=1               # + every plot*.py after sweep_tran
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 ```
 
-Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter`. `budgeting` assembles and plots the budgets from the simulation's online terms (minutes); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
+Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter`. `budgeting` assembles and plots the integrated budgets from the simulation's online terms (about a minute); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
 
 `SAVE_SORTED` defaults to `1`, so the simulation also writes the validation-only view of the sorted reference state (the two model-grid z✶ methods, the sorted column, ∫E_b) that `inv06` and `inv07` compare against the offline sort. Every budget term is written regardless, so `SAVE_SORTED=0` gives smaller output and changes no budget number; `VALIDATE=1` turns it back on.
 
@@ -155,8 +155,8 @@ bash submit_budgeting.sh                          # default Nz=2048
 bash submit_budgeting.sh NZ=1024
 ```
 
-One small job: `01_online_budgets.py` assembles the four budget files from the simulation's online terms and
-`02_plot_budgets.py` plots them.
+One small job, about a minute: `01_online_budgets.py` writes the two integrated budget files from the simulation's online terms
+and `02_plot_budgets.py` plots them.
 
 ### Run sweep only
 
@@ -172,6 +172,8 @@ bash submit_sweep.sh NZ=2048 EXTENSION=odd   # the whole sweep with b oddly refl
 ```
 
 `submit_sweep.sh` refuses any argument it does not know, so a misspelled key cannot silently rerun the default sweep over the production files.
+
+Under the default edge extension the sweep does not build its z padding. Its fields keep one padded cell past each wall, which is what the centred gradients at the wall cells read; the filter's `nearest` mode repeats the wall value from there on, as the padding did; and only the sorted reference column still holds the padded fluid. The filtered fields come out bit for bit as on the padded grid and the integrals agree with the padded computation to roundoff, while `sweep1`'s file and the arrays `sweep2` holds are Nz + 2 levels tall instead of 3.7 Nz. `EXTENSION=odd` is a different extension of b, so it keeps the whole padding in the arrays.
 
 #### Wall-extension test
 
@@ -213,7 +215,7 @@ Set `N_WORKERS` to control the offline pipeline's parallelism (default 1).
 
 ## Tests
 
-The test suite checks SFS KE and APE budget closure (rms residual / mean rms of terms < 1%) and the sign of the energies that have one, on the budget files `01_online_budgets.py` assembles. It expects the CI run, `khi_Nz512_Ri0.10`, in `output/` with its budget files in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py` (`$KHAPE_TEST_STEM` overrides it).
+The test suite checks SFS KE and APE budget closure (rms residual / mean rms of terms < 1%) on the integrated budget files `01_online_budgets.py` writes, and the sign of the energies that have one on the fields, which it reads from the simulation output itself. It expects the CI run, `khi_Nz512_Ri0.10`, in `output/` with its integrated budget files in `postprocessing/output/`. That name is set once, as `STEM` in `tests/conftest.py` (`$KHAPE_TEST_STEM` overrides it).
 
 ```bash
 pytest tests/ -v -s                                  # closure, positivity, the synthetic filter and Jensen tests (minutes)
