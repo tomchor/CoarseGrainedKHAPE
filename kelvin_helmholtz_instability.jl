@@ -80,7 +80,8 @@ let s = ArgParseSettings()
             default = 0.05
 
         "--output_interval"
-            help = "Time between outputs, for both writers (default: 2.0); each 3D output is a consecutive-iteration pair"
+            help = "Time between outputs, for both writers (default: 2.0); with --offline_check, each 3D output is a \
+                    consecutive-iteration pair"
             arg_type = Float64
             required = false
             default = 2.0
