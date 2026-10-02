@@ -1,0 +1,58 @@
+#!/bin/bash -l
+#PBS -N merge
+#PBS -o logs/merge.log
+#PBS -e logs/merge.log
+#PBS -l walltime=12:00:00
+#PBS -q casper
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=4:mem=64GB
+#PBS -l job_priority=regular
+
+# The CPU job that follows a multi-GPU simulation (submit_simulation_job in khape_defaults.sh chains it with afterok):
+# merge_rank_output.jl stitches the per-rank files into the two files a one-GPU run writes, and then this job draws
+# what simulation.pbs draws after a one-GPU run, from them. It is I/O: an Nz=1024 run's 3D file is ~3.8 TB, read and
+# written once, which would leave the GPUs idle for hours had the simulation job done it.
+
+set -eo pipefail
+
+module --force purge
+module load ncarenv/25.10
+
+NZ=${NZ:?submit through the submit_*.sh wrappers, which pass NZ}
+PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}   # for the figures
+OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where the run is written; kelvin_helmholtz_instability.jl reads the same variable
+SIM=khi_Nz${NZ}_Ri0.10
+DELETE_RANK_FILES=${DELETE_RANK_FILES:-0}   # 1 removes the rank files once both merges have succeeded
+LOG=logs/merge_kelvin_helmholtz_${NZ}.out
+
+export JULIA_DEPOT_PATH="$WORK/.julia"
+export JULIA_CPU_TARGET="generic"
+
+# The same Julia 1.13 as simulation.pbs, found the same way
+if [ -n "${JULIA:-}" ]; then
+    echo "Using \$JULIA = $JULIA"
+elif command -v juliaup >/dev/null 2>&1; then
+    juliaup add 1.13
+    JULIA="julia +1.13"
+elif [ -x "$WORK/julia-1.13/bin/julia" ]; then
+    JULIA="$WORK/julia-1.13/bin/julia"
+else
+    echo "error: no Julia 1.13 found. Set \$JULIA, install juliaup, or unpack the 1.13 tarball to \$WORK/julia-1.13" >&2
+    exit 1
+fi
+$JULIA --version
+
+[ "$DELETE_RANK_FILES" = "1" ] && DELETE_FLAG="--delete" || DELETE_FLAG=""
+time $JULIA --project merge_rank_output.jl $OUT_DIR/$SIM $DELETE_FLAG 2>&1 | tee $LOG
+
+# The animation simulation.pbs's run draws at its end, and the three figures it draws after. A failed figure is
+# reported, not fatal: the merged run is complete, and the jobs chained on this one with afterok should still start.
+time $JULIA --project plot_kelvin_helmholtz_instability.jl $OUT_DIR/${SIM}_2d.nc 2>&1 | tee -a $LOG \
+    || echo "warning: the animation failed (see above); the merge itself completed" | tee -a $LOG
+for script in plot3_b_br_snapshots.py plot5_budgets.py plot6_panels.py; do
+    time $PYTHON -u postprocessing/$script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a $LOG \
+        || echo "warning: $script failed (see above); the merge itself completed" | tee -a $LOG
+done
+
+qstat -f $PBS_JOBID >> $LOG

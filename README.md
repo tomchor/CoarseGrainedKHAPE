@@ -4,7 +4,7 @@ Computes Available Potential Energy (APE) from three-dimensional Kelvin-Helmholt
 
 ## Pipeline overview
 
-1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then draws the three figures that need nothing else (`plot3_b_br_snapshots.py`, `plot5_budgets.py`, `plot6_panels.py`) into `figures/`
+1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then draws the three figures that need nothing else (`plot3_b_br_snapshots.py`, `plot5_budgets.py`, `plot6_panels.py`) into `figures/`. Above `NZ=512` it runs on several GPUs and a CPU job, `merge.pbs`, merges their files and draws those figures instead (see [Multi-GPU runs](#multi-gpu-runs))
 2. **Post-processing** — `postprocessing/budgeting.pbs` assembles the SFS KE and APE budgets from the terms the simulation computed online and plots them (the offline computation of those terms lives in `postprocessing/offline/` and runs only as a CI cross-check)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
@@ -67,6 +67,8 @@ The submit wrappers take the project to charge and the Python to run from two va
 | `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job and to the simulation job, for the figures it draws after the run (the path to your `py313` environment's `python`) |
 | `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
 | `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
+| `KHAPE_MPI_DEPOT` | `$WORK/.julia-mpi` | `setup_mpi_env.sh` and multi-GPU simulation jobs: the Julia depot for the packages built against the system MPI |
+| `KHAPE_MPI_ENV` | `$KHAPE_MPI_DEPOT/environments/khape-mpi` | the same: the Julia environment that sends MPI.jl to Casper's CUDA-aware OpenMPI (through MPItrampoline) |
 
 ### Run everything (simulation + post-processing + sweep, with optional validation and plots)
 
@@ -76,6 +78,9 @@ bash submit_all_pbs.sh
 
 # Custom resolution
 bash submit_all_pbs.sh NZ=256
+
+# Above Nz=512: on four GPUs by default, with a merge job before the post-processing (see Multi-GPU runs)
+bash submit_all_pbs.sh NZ=1024
 
 # Fixed-in-time reference profile for the sweep transfer (the budgets have no such variant)
 bash submit_all_pbs.sh NZ=256 FIXED_REF=1
@@ -114,6 +119,10 @@ bash submit_simulation.sh NZ=256 SAVE_SORTED=1
 
 # Also write each 3D output as a consecutive-iteration pair (for pytest --offline-check; doubles the 3D output)
 bash submit_simulation.sh NZ=256 OFFLINE_CHECK=1
+
+# Several GPUs (four by default above NZ=512; see Multi-GPU runs)
+bash submit_simulation.sh NZ=1024
+bash submit_simulation.sh NZ=1024 NGPUS=8
 ```
 
 The grid is isotropic (Δx = Δy = Δz) on a domain of one KH wavelength λ in x, λ/3 in y and 25h in z, so `NZ` sets the whole grid: 288 × 96 × 512 cells at `NZ=512`. The Reynolds number scales as Re = Re₀ Nz^(4/3) (Kolmogorov resolution at fixed domain height), with Re₀ = 0.1 by default, i.e. Re = 410 at Nz=512.
@@ -128,13 +137,47 @@ validation scripts in `postprocessing/validation/`.
 `SAVE_SORTED` (default **1**) passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
 state in the forms only the validation reads: the reference height `z✶_3dsort` (`ThreeDimensionalSort`) and
 `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, the sorted column `z✶_1dsort` / `b✶_1dsort`
-(`VerticalSort`) on its own N = Nx·Ny·Nz vertical axis, and ∫E_b. The column itself is built and used by every
+(what `VerticalSort` builds; see CLAUDE.md, Online sorted reference state) on its own N = Nx·Ny·Nz vertical axis, and ∫E_b. The column itself is built and used by every
 budget term whether or not it is written; the flag decides only whether the two extra model-grid sorts run and
 whether the column goes to the file. All of these go into the main output file, since one `NetCDFWriter` holds
 both grids; the resulting per-grid dimension suffixing is undone at load time by the post-processing loader.
 `inv06_compare_sorted_profiles.py` and `inv07_compare_local_ape.py` compare them against the offline sort.
 
 `OFFLINE_CHECK=1` passes `--offline_check`, which makes the 3D writer also write the record one time step after each output (`ConsecutiveIterations`). Only the offline pipeline reads those pairs, to form its own tendencies for `pytest --offline-check`; the online tendencies come from `TimeDerivative` and need no pair, so the default (`0`) writes one record per output time and halves the 3D output. CI's offline-check run passes the flag. The three flags are written to both output files as 0/1 global attributes (`save_tensors`, `save_sorted`, `offline_check`), which is how the post-processing tells what a run contains.
+
+### Multi-GPU runs
+
+An Nz=512 run peaks at 54 GB on one A100-80GB, and Nz=1024 has 8× the cells, so above `NZ=512` the simulation runs on
+several GPUs: `NGPUS` (default 1 up to `NZ=512`, 4 up to `NZ=1024`, required beyond) on whole Casper A100-80GB nodes
+(so a multiple of 4), one MPI rank per GPU, the domain split into x-slabs (`--ranks`). Once per machine, first:
+
+```bash
+bash setup_mpi_env.sh   # sends MPI.jl to Casper's CUDA-aware OpenMPI, from a Julia environment and depot of its own
+```
+
+Oceananigans' distributed model needs an MPI that takes GPU arrays, which the one MPI.jl bundles is not; Casper's
+OpenMPI (`intel/2025.2.1 openmpi/5.0.8`, built with CUDA and UCX) is. MPI.jl reaches it through MPItrampoline: pointed
+at the system library directly, it would have HDF5_jll (under NCDatasets) load a second OpenMPI of its own, which
+cannot share a process with Casper's. The script builds MPIwrapper against Casper's OpenMPI, writes MPIPreferences'
+choice of MPItrampoline into `$KHAPE_MPI_ENV`, and checks from the project that MPI.jl reaches Open MPI and that the
+NetCDF stack loads beside it. Only multi-GPU jobs load any of it, so one-GPU runs and CI are untouched.
+
+What changes when `NGPUS > 1`:
+- `simulation.pbs` asks for `NGPUS/4` nodes, loads OpenMPI, precompiles once and launches the ranks with `mpiexec`;
+  `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` records every GPU's memory every 10 s.
+- Every rank writes its own slab, `khi_Nz<NZ>_Ri0.10_rank<r>.nc` and `_2d_rank<r>.nc`. A CPU job chained on the
+  simulation, `merge.pbs`, stitches them into the two files a one-GPU run writes (`merge_rank_output.jl`) and draws
+  the figures and the animation the one-GPU job draws; budgeting, validation and the sweep wait on it and read the
+  merged files as always. Nz=1024 writes ~3.8 TB of 3D output at the default output interval, so the merge is hours
+  of I/O, and the rank files are kept (twice the space) unless `DELETE_RANK_FILES=1` reaches `merge.pbs`.
+- `SAVE_SORTED` and `VALIDATE` are refused: the two model-grid sorts of the validation-only view would each sort one
+  rank's slab.
+
+Every budget term is computed as on one GPU: the filter's x-pass and the sorted reference column, the two parts that
+need the whole domain, gather it across ranks (`distributed_diagnostics.jl`), and give the one-GPU numbers bit for
+bit (`tests/test_distributed_diagnostics.jl`). Every rank keeps its own copy of the sorted column, which grows 8×
+per doubling of Nz, so this tops out near Nz=1024; four A100-80GB hold an Nz=1024 run by an estimated 15 GB per GPU,
+and `NGPUS=8` (two nodes) is the fallback if they turn out not to.
 
 ### Run a simulation + online-vs-offline validation
 
@@ -205,6 +248,10 @@ For development on a workstation (no PBS scheduler), run the simulation and post
 # Julia simulation (CPU, small grid; CI's run)
 julia --project -t 8 kelvin_helmholtz_instability.jl --Nz 128 --Ri 0.1 --stop_time 70 --Re0 0.4 --output_interval 4
 
+# The same split across 2 MPI ranks (CPU, the MPI MPI.jl bundles), then the rank files stitched together
+julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 2 $(Base.julia_cmd()) --project kelvin_helmholtz_instability.jl --Nz 32 --ranks 2`)'
+julia --project merge_rank_output.jl output/khi_Nz32_Ri0.10
+
 # Budgets (assembled from the online terms) and their plots, for an existing NetCDF file
 cd postprocessing
 bash 00_get_budgets.sh output/khi_Nz128_Ri0.10.nc --filter-scales 1 7
@@ -225,7 +272,12 @@ The test suite checks SFS KE and APE budget closure (rms residual / mean rms of 
 ```bash
 pytest tests/ -v -s                                  # closure, positivity, the synthetic filter and Jensen tests (minutes)
 pytest tests/ -v -s --offline-check                  # + the offline pipeline as a cross-check (minutes at CI's Nz=128)
+julia --project tests/test_distributed_diagnostics.jl   # the multi-GPU pieces against one process, on 2 and 4 CPU ranks
 ```
+
+`tests/test_distributed_diagnostics.jl` needs no simulation output and no GPU: it runs itself under `mpiexec` and
+checks that the distributed Gaussian filter and the sorted column (`distributed_diagnostics.jl`) give the
+one-process results bit for bit.
 
 `--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped. It needs a simulation run with `--offline_check` (`OFFLINE_CHECK=1`), whose consecutive-iteration output pairs the offline pipeline differences for its tendencies; the pipeline refuses a run without them.
 
@@ -236,5 +288,6 @@ CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=128, `--Re0 0.4`
 All job logs are written to the `logs/` subdirectory next to the submit script:
 - `logs/<job_name>.log` — PBS stdout/stderr (written by PBS after job ends)
 - `logs/<job_name>.out` — Python script output (written live via `tee`)
+- for a multi-GPU run, also `logs/merge_kelvin_helmholtz_<NZ>.{log,out}` (the merge job) and `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv`
 
 Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref` (the `_fixed_ref` tag exists only for the sweep).
