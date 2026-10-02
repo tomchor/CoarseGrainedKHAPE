@@ -338,7 +338,7 @@ function matched_filter(ℓ)
 end
 
 # The written filtered fields use the same offline-matched filter as every sub-filter term below, so
-# `u_ℓ<ℓ>`, `w_ℓ<ℓ>`, `b_ℓ<ℓ>` are the fields those terms are built from (Oceanostics' own defaults
+# `u_ℓ<ℓ>`, `v_ℓ<ℓ>`, `w_ℓ<ℓ>`, `b_ℓ<ℓ>` are the fields those terms are built from (Oceanostics' own defaults
 # truncate at 2σ and shrink the stencil at the walls, which is not what the offline pipeline does).
 _fields = (u=u_center, v=v_center, w=w_center, b=b)
 _filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => matched_filter(ℓ)(f) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
