@@ -243,9 +243,16 @@ def _sort_single_timestep(rho_np, dz_flat_np, z_min):
     return rho_1d_sorted, dz_1d_sorted, z_1d_sorted
 
 
+def _with_virtual_padding(a, n_virtual, z_axis):
+    """`a` with the `n_virtual` cells past each end of z that its dataset left out of the arrays: copies of the end planes."""
+    if not n_virtual:
+        return a
+    return np.pad(a, [(n_virtual, n_virtual) if axis == z_axis else (0, 0) for axis in range(a.ndim)], mode="edge")
+
+
 def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
                       z_min_name="z_min", n_workers=None, verbose_level=1,
-                      fixed_reference=False):
+                      fixed_reference=False, z_name="z_aac"):
     """
     Compute the sorted reference-density profile for every timestep.
 
@@ -253,6 +260,11 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
     Use this when you need rho_sorted / dz_sorted to pass to
     local_potential_energies_timeseries() or calculate_energy_transfer(),
     avoiding redundant sorts across multiple callers.
+
+    The column always holds the whole padded domain. A dataset loaded with `halo` keeps only part of its
+    padding in the arrays and records the rest as `n_pad_z_virtual`; those cells repeat the end planes
+    (the edge extension), and they are put back here, one record at a time, before the sort. The result is
+    the column of the fully padded field, slot for slot.
 
     Parameters
     ----------
@@ -283,25 +295,32 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
     n_times  = len(ds.time)
     z_min    = ds.attrs[z_min_name] if isinstance(z_min_name, str) else z_min_name
     rho_all  = ds[field_to_sort].values                    # (time, …)
-    dz_flat  = (ds[dV_name] / ds[LxLy_name]).values       # (…)
+    dz_cells = ds[dV_name] / ds[LxLy_name]
+    dz_flat  = dz_cells.values                             # (…)
+
+    n_virtual = int(ds.attrs.get("n_pad_z_virtual", 0))
+    z_axis    = [d for d in ds[field_to_sort].dims if d != "time"].index(z_name) if n_virtual else None
+    dz_flat   = _with_virtual_padding(dz_flat, n_virtual, dz_cells.get_axis_num(z_name) if n_virtual else None)
+
+    def _sort(i):
+        return _sort_single_timestep(_with_virtual_padding(rho_all[i], n_virtual, z_axis), dz_flat, z_min)
 
     if fixed_reference:
         if verbose_level > 0:
             print("  Sorting t=0 only (fixed reference profile)...")
-        t0_result = _sort_single_timestep(rho_all[0], dz_flat, z_min)
+        t0_result = _sort(0)
         results = [t0_result] * n_times
     else:
         def _run(i):
             if verbose_level > 0:
                 print(f"  Sorting time step {i+1}/{n_times}", end="\r")
-            return _sort_single_timestep(rho_all[i], dz_flat, z_min)
+            return _sort(i)
 
         if n_workers == 1 or n_times == 1:
             results = [_run(i) for i in range(n_times)]
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
-                futures = {pool.submit(_sort_single_timestep, rho_all[i], dz_flat, z_min): i
-                           for i in range(n_times)}
+                futures = {pool.submit(_sort, i): i for i in range(n_times)}
                 results_unordered = {}
                 for fut in concurrent.futures.as_completed(futures):
                     i = futures[fut]

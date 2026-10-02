@@ -75,7 +75,7 @@ jobs:
           retention-days: 2
 
       # The panels animations drawn from the online 2D fields at the end of the simulation, the same
-      # figure anim1_panels.py later draws from those slices and the integrated budgets (animation-online-budgets).
+      # figure anim1_panels.py later draws from the same slices (animation-online-budgets).
       # The 2D writer is the same in both runs, so one upload is enough.
       - name: Upload online animations
         if: always() && matrix.output == 'production'

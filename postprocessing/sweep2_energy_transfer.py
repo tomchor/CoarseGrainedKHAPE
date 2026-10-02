@@ -6,7 +6,8 @@ import tempfile
 import time
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
-from src.aux00_utils import PP_OUTPUT, pad_margin_for_run, extension_for_run, extension_suffix, load_dataset_and_grid, scale_subset_tag
+from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, extension_for_run, halo_for_run, extension_suffix, load_dataset_and_grid,
+                             scale_subset_tag)
 from src.aux01_pe_functions import calculate_density_fields_from_buoyancy, sorted_timeseries
 from src.aux02_ke_functions import calculate_energy_transfer
 #---
@@ -58,10 +59,13 @@ t0 = time.time()
 # Pad exactly as sweep1 did, so the raw field and the filtered fields it is differenced against sit on
 # one grid. The margin has to come from the *sweep's* filtered file, not 01's: the sweep spans ℓ up to 20,
 # whose 4σ margin is ~3x what the budget scales need, so 01's margin would pad the raw field shallower
-# than ds_filt and xarray would quietly align the two to their intersection rather than raising.
-ds = load_dataset_and_grid(filename, min_margin=pad_margin_for_run(filtered_filename, required=True),
-                           extension=extension)
-print(f"  wall extension: {extension!r} (from {Path(filtered_filename).name})")
+# than ds_filt and xarray would quietly align the two to their intersection rather than raising. The halo
+# comes from that file for the same reason: it says how much of the padding sweep1 kept in its arrays.
+min_margin = pad_margin_for_run(filtered_filename, required=True)
+halo = halo_for_run(filtered_filename)
+ds = load_dataset_and_grid(filename, min_margin=min_margin, extension=extension, halo=halo)
+print(f"  wall extension: {extension!r}, {'the whole padding' if halo is None else f'{halo} padded cell(s) per side'} in the arrays "
+      f"(from {Path(filtered_filename).name})")
 ds = ds.chunk(chunks)
 print(f"Dataset loaded: {len(ds.time)} time steps  ({time.time()-t0:.1f}s)")
 #---
@@ -105,7 +109,8 @@ if fixed_reference:
     sorted_density = sorted_t0.isel(time=0, drop=True).expand_dims(time=ds_filt.time).chunk(chunks)
     rho_sorted = sorted_density.rho_sorted
     dz_sorted  = sorted_density.dz_sorted
-    print(f"  Reference column built on {ds.sizes['z_aac']} padded z cells (n_pad_z={int(ds.attrs['n_pad_z'])})  ({time.time()-t0:.1f}s)")
+    print(f"  Reference column built on {sorted_t0.sizes['z_1d_sorted']} slots: the padded domain, {int(ds.attrs['n_pad_z'])} padded z "
+          f"cells per side in the arrays and {int(ds.attrs['n_pad_z_virtual'])} virtual  ({time.time()-t0:.1f}s)")
 #---
 
 #+++ Calculate cross-scale transfer terms
