@@ -16,6 +16,6 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
-           -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON \
+           -v NZ=$NZ,KHAPE_PYTHON=$KHAPE_PYTHON$KHAPE_REDIRECT \
            budgeting.pbs)
 echo "Submitted budget job (Nz=$NZ): $JOB"

@@ -25,7 +25,7 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
-           -v NZ=$NZ,SCALE=$SCALE,EXTENSION=$EXTENSION,N_TIME_SKIP=$N_TIME_SKIP,KHAPE_PYTHON=$KHAPE_PYTHON \
+           -v NZ=$NZ,SCALE=$SCALE,EXTENSION=$EXTENSION,N_TIME_SKIP=$N_TIME_SKIP,KHAPE_PYTHON=$KHAPE_PYTHON$KHAPE_REDIRECT \
            extension_test.pbs)
 echo "Submitted extension test (Nz=$NZ, l=$SCALE, extension=$EXTENSION): $JOB"
 echo "Then run the compare_extension.py line at the end of logs/${NAME}.log; it carries the snapped scale."
