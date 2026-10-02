@@ -1,4 +1,12 @@
 # Kelvin-Helmholtz instability simulation
+
+# Before anything loads MPI: MPI.jl asks UCX (under the system OpenMPI of a multi-GPU run) to leave SIGSEGV to Julia,
+# which stops its threads for GC with it, and not to cache memory types, but from its __init__, after MPItrampoline has
+# loaded UCX, which reads its settings as it loads. UCX's handler then caught an idle thread's GC safepoint and aborted
+# the run. simulation.pbs exports both for its ranks; setting them here covers any other launch.
+get!(ENV, "UCX_ERROR_SIGNALS", "SIGILL,SIGBUS,SIGFPE")
+get!(ENV, "UCX_MEMTYPE_CACHE", "no")
+
 using Oceananigans
 using CairoMakie
 using Printf
