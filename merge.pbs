@@ -12,9 +12,10 @@
 # The CPU job that follows a multi-GPU simulation (submit_simulation_job in khape_defaults.sh chains it with afterok):
 # merge_rank_output.jl stitches the per-rank files into the two files a one-GPU run writes, and then this job draws
 # what simulation.pbs draws after a one-GPU run, from them. It is I/O: an Nz=1024 run's 3D file is ~3.8 TB, read and
-# written once, which would leave the GPUs idle for hours had the simulation job done it. The walltime is Casper's
-# limit: once the files' cached pages fill the job's memory limit the merge slows ~17x (measured on Nz=256 rank
-# files, 2026-10-02), which at Nz=1024 would be ~14 h.
+# written once, which would leave the GPUs idle for hours had the simulation job done it. merge_rank_output.jl drops
+# the files' pages from the cache as it goes, which keeps the merge at ~250 MB/s (60 GB in 4 min, so ~4-5 h at
+# Nz=1024); without that, the cache filled this job's memory limit and the merge ran ~17x slower. The walltime is
+# Casper's limit, as a margin.
 
 set -eo pipefail
 

@@ -11,7 +11,8 @@
 # whole and identical on every rank, since the reductions are all-reduced; and the grid of its own slab in the grid
 # metadata groups. So the merge
 #   - concatenates every variable with an x dimension in rank order, record by record (a slab at a time in memory),
-#     and checks the x coordinates come out increasing;
+#     and checks the x coordinates come out increasing, dropping the files' pages from the cache as it goes (see
+#     *The page cache*);
 #   - copies every other variable from rank 0, after checking that all ranks agree bit for bit;
 #   - rewrites each variable's `indices` attribute, which records the slab's x range, to the whole domain's;
 #   - writes the grid metadata groups for the whole domain with Oceananigans' own writer, on the CPU (a file that
@@ -116,23 +117,56 @@ function copy_whole!(out, sources, name)
     return nothing
 end
 
-# Each rank's slab into its place along x, one record at a time
+# Each rank's slab into its place along x, one record at a time, read into one buffer per rank
 function concatenate_in_x!(out, sources, name, x, t)
-    n = ndims(first(sources)[name].var)
-    records = isnothing(t) ? (nothing,) : 1:size(first(sources)[name].var, t)
+    slabs = [ds[name].var for ds in sources]
+    merged = out[name].var
+    n = ndims(first(slabs))
+    records = isnothing(t) ? (nothing,) : 1:size(first(slabs), t)
+    buffers = [Array{eltype(slab)}(undef, (size(slab, d) for d in 1:n if d != t)...) for slab in slabs]
     for record in records
+        source = ntuple(d -> d == t ? record : Colon(), n)
         offset = 0
-        for ds in sources
-            slab = ds[name].var
+        for (slab, buffer) in zip(slabs, buffers)
             nx = size(slab, x)
-            source = ntuple(d -> d == t ? record : Colon(), n)
-            target = ntuple(d -> d == x ? (offset+1:offset+nx) : d == t ? record : Colon(), n)
-            out[name].var[target...] = slab[source...]
+            NCDatasets.load!(slab, buffer, source...)
+            merged[ntuple(d -> d == x ? (offset+1:offset+nx) : d == t ? record : Colon(), n)...] = buffer
             offset += nx
+            moved!(out, sources, sizeof(buffer))
         end
     end
     return nothing
 end
+
+#+++ The page cache
+# The job's memory limit counts the page cache its own reads and writes fill, and a merge moves far more than the limit
+# (an Nz=1024 run's 3D file is ~3.8 TB, read and written). Once the cache had filled it, every further page waited on
+# reclaim: on the Nz=256 rank files the merge ran 17x slower from that point on (64 GB job, 2026-10-02). So every
+# RELEASE_EVERY bytes the merged file is written back and the pages of it and of the rank files are dropped
+# (posix_fadvise drops clean pages only, hence the write-back first).
+const RELEASE_EVERY = 2^31
+const POSIX_FADV_DONTNEED = Cint(4)
+const MOVED_SINCE_RELEASE = Ref(0)
+
+function release_pages(path; writeback)
+    open(path, "r") do io
+        descriptor = reinterpret(Cint, fd(io))
+        writeback && ccall(:fsync, Cint, (Cint,), descriptor)
+        ccall(:posix_fadvise, Cint, (Cint, Int64, Int64, Cint), descriptor, 0, 0, POSIX_FADV_DONTNEED)
+    end
+    return nothing
+end
+
+function moved!(out, sources, bytes)
+    MOVED_SINCE_RELEASE[] += bytes
+    MOVED_SINCE_RELEASE[] < RELEASE_EVERY && return nothing
+    NCDatasets.sync(out)   # what HDF5 still buffers, into the page cache, so the write-back below covers it
+    release_pages(NCDatasets.path(out); writeback = true)
+    foreach(ds -> release_pages(NCDatasets.path(ds); writeback = false), sources)
+    MOVED_SINCE_RELEASE[] = 0
+    return nothing
+end
+#---
 
 function check_increasing(out)
     for name in keys(out.dim)
