@@ -177,8 +177,9 @@ What changes when `NGPUS > 1`:
 Every budget term is computed as on one GPU: the filter's x-pass and the sorted reference column, the two parts that
 need the whole domain, gather it across ranks (`distributed_diagnostics.jl`), and give the one-GPU numbers bit for
 bit (`tests/test_distributed_diagnostics.jl`). Every rank keeps its own copy of the sorted column, which grows 8×
-per doubling of Nz, so this tops out near Nz=1024; four A100-80GB hold an Nz=1024 run by an estimated 15 GB per GPU,
-and `NGPUS=8` (two nodes) is the fallback if they turn out not to.
+per doubling of Nz, so this tops out near Nz=1024. Four A100-80GB hold an Nz=1024 run: 67 GiB per GPU at the peak, of
+80, measured over the first outputs, where a time step takes 125 ms and an output ~67 s, after about an hour of setup
+and compilation, so a run to t=200 takes ~4–4.5 h. `NGPUS=8` (two nodes) is the fallback should a run need more.
 
 ### Run a simulation + online-vs-offline validation
 
