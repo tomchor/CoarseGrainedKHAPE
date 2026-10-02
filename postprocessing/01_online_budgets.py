@@ -6,8 +6,8 @@ Every term of both sub-filter budgets is written by `kelvin_helmholtz_instabilit
 `--filter_ls` scales: Kˢ, ∂ₜKˢ, Π_K, ε_Kˢ, τ(w,b_r) for the KE budget and S̃, ∂ₜS̃, Π_A, ε_Aˢ, Rˢ (with the
 same τ) for the APE one, each as a 3D field and as a volume integral. `online_budgets` (src/aux04_online_budgets.py)
 assembles them under the variable names the offline pipeline used to write, so nothing downstream knows which
-pipeline produced them, and this script writes the volume integrals and the residual to the two files the tests,
-`02_plot_budgets.py` and `anim1_panels.py` consume:
+pipeline produced them, and this script writes the volume integrals and the residual to the two files the tests
+and `02_plot_budgets.py` consume:
 
     <stem>_sfs_ke_budget_integrated.nc    <stem>_sfs_ape_budget_integrated.nc
 

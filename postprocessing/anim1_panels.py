@@ -9,9 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
 from matplotlib.animation import FuncAnimation, FFMpegWriter
-from src.aux00_utils import PP_OUTPUT
 from src.aux03_plotting import run_label, budget_colors
-from src.aux04_online_budgets import online_budgets
+from src.aux04_online_budgets import online_budgets, online_filter_scales
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -39,36 +38,28 @@ filename_2d = filename.replace(".nc", "_2d.nc")
 ref_suffix = ""
 #---
 
-#+++ Load datasets
+#+++ Load the 2D output: every panel and both time series come from it
 print("Loading 2D simulation output...")
 ds_2d = xr.open_dataset(filename_2d, decode_times=False, chunks={})
 ds_2d = ds_2d.sel(z_aac=slice(-args.zlim, args.zlim), z_aaf=slice(-args.zlim, args.zlim))
-
-print("Loading integrated budgets...")
-ke_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ke_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
-ape_int = xr.open_dataset(str(PP_OUTPUT / f"{stem}_sfs_ape_budget_integrated{ref_suffix}.nc"), decode_timedelta=False)
-ℓ_sel = float(ke_int.filter_scale.sel(filter_scale=args.filter_scale, method="nearest"))
-print(f"Selected filter scale: ℓ = {ℓ_sel:.4f}  (requested {args.filter_scale})")
-ke_int = ke_int.sel(filter_scale=ℓ_sel)
-ape_int = ape_int.sel(filter_scale=ℓ_sel)
 
 # b_r = b - b✶(z) comes from the simulation itself (the 2D writer carries it), measured against the same
 # sorted column as every online budget term.
 if "b_r" not in ds_2d:
     raise SystemExit(f"'b_r' not in {filename_2d}: rerun the simulation with the current kelvin_helmholtz_instability.jl")
-#---
 
-#+++ Reindex 2D data to budget time coordinate
-print("Reindexing 2D data to budget time coordinate...")
-ds_2d = ds_2d.reindex(time=ke_int.time, method="nearest")
-times = ke_int.time.values
-print(f"Aligned {len(times)} time steps")
-#---
-
-#+++ The budget panels, from the same file: the 2D writer carries every per-scale term
+# The 2D writer carries every per-scale term with its `_int` integral, so the panels and the time series are drawn from
+# the same records and each frame is one instant. The first record is iteration 0, where every TimeDerivative still reads
+# zero, so it states no budget; every later one does, since the 2D writer never pairs its records. (The integrated budget
+# files of an --offline_check run hold the upper record of each pair instead, one time step after these.)
+ds_2d = ds_2d.isel(time=slice(1, None))
+ℓ_sel = min(online_filter_scales(ds_2d), key=lambda ℓ: abs(ℓ - args.filter_scale))
+print(f"Selected filter scale: ℓ = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 ke_budget, ape_budget = online_budgets(ds_2d, filter_scales=[ℓ_sel], records="all")
 ke_budget = ke_budget.sel(filter_scale=ℓ_sel)
 ape_budget = ape_budget.sel(filter_scale=ℓ_sel)
+times = ke_budget.time.values
+print(f"{len(times)} records")
 #---
 
 #+++ Extract coordinate arrays
@@ -199,11 +190,11 @@ ape_terms = {
 }
 
 for ax, budget_ds, terms, ylabel in [
-    (ax_ke_budget,  ke_int,  ke_terms,  "SFS KE budget"),
-    (ax_ape_budget, ape_int, ape_terms, "SFS APE budget"),
+    (ax_ke_budget,  ke_budget,  ke_terms,  "SFS KE budget"),
+    (ax_ape_budget, ape_budget, ape_terms, "SFS APE budget"),
 ]:
     for label_str, (var, color) in terms.items():
-        data = budget_ds[var].dropna("time")
+        data = budget_ds[var].compute().dropna("time")
         ls = "--" if "residual" in var else "-"
         lw = 1.0 if "residual" in var else 1.5
         ax.plot(data.time, data.values, label=label_str, color=color, ls=ls, lw=lw)
@@ -229,7 +220,7 @@ ax_ape_budget.text(0.01, 0.95, "(n)", transform=ax_ape_budget.transAxes, fontsiz
 #---
 
 #+++ Suptitle
-label = run_label(ke_int.attrs)
+label = run_label(ke_budget.attrs)
 suptitle_base = f"ℓ = {ℓ_sel:.4f}"
 if label:
     suptitle_base = f"{label},  {suptitle_base}"
