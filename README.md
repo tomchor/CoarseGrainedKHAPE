@@ -163,8 +163,9 @@ choice of MPItrampoline into `$KHAPE_MPI_ENV`, and checks from the project that 
 NetCDF stack loads beside it. Only multi-GPU jobs load any of it, so one-GPU runs and CI are untouched.
 
 What changes when `NGPUS > 1`:
-- `simulation.pbs` asks for `NGPUS/4` nodes, loads OpenMPI, precompiles once and launches the ranks with `mpiexec`;
-  `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` records every GPU's memory every 10 s.
+- `simulation.pbs` asks for `NGPUS/4` nodes, loads OpenMPI (and takes the CUDA toolkit it brings back off
+  `LD_LIBRARY_PATH`, where it would shadow CUDA.jl's own libraries), precompiles once and launches the ranks with
+  `mpiexec`; `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` records every GPU's memory every 10 s.
 - Every rank writes its own slab, `khi_Nz<NZ>_Ri0.10_rank<r>.nc` and `_2d_rank<r>.nc`. A CPU job chained on the
   simulation, `merge.pbs`, stitches them into the two files a one-GPU run writes (`merge_rank_output.jl`) and draws
   the figures and the animation the one-GPU job draws; budgeting, validation and the sweep wait on it and read the

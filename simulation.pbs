@@ -19,7 +19,15 @@ module --force purge
 module load ncarenv/25.10
 # Several ranks run under Casper's CUDA-aware OpenMPI (built with CUDA and UCX); its compiler module comes first, and
 # it brings cuda and ucx along. MPI.jl reaches it through MPItrampoline and the MPIwrapper setup_mpi_env.sh built.
-if [ "$RANKS" -gt 1 ]; then module load intel/2025.2.1 openmpi/5.0.8; fi
+if [ "$RANKS" -gt 1 ]; then
+    module load intel/2025.2.1 openmpi/5.0.8
+    # The cuda module puts its toolkit (12.9) on LD_LIBRARY_PATH, which the dynamic linker searches before a library's
+    # own RUNPATH, so CUDA.jl's libraries (its artifacts, 12.6) would pick up some of their dependencies there, two CUDA
+    # versions in one process ("loaded from a system path"). OpenMPI, UCX and MPIwrapper need only the driver
+    # (/usr/lib64) and find the rest through their RPATHs, so the toolkit comes off the path again.
+    LD_LIBRARY_PATH=$(tr ':' '\n' <<< "$LD_LIBRARY_PATH" | { grep -v "/cuda/" || true; } | paste -sd: -)
+    export LD_LIBRARY_PATH
+fi
 module li
 
 #/glade/u/apps/ch/opt/usr/bin/dumpenv # Dumps environment (for debugging with CISL support)
@@ -76,22 +84,29 @@ if [ "$RANKS" -gt 1 ]; then
     export JULIA_CUDA_MEMORY_POOL=none
     export MPITRAMPOLINE_LIB=$(ls $KHAPE_MPI_DEPOT/mpiwrapper/lib*/libmpiwrapper.so)
     export MPITRAMPOLINE_MPIEXEC=$KHAPE_MPI_DEPOT/mpiwrapper/bin/mpiwrapperexec
+    # MPI.jl asks UCX to leave SIGSEGV to Julia, which stops its threads for GC with it, and not to cache memory types,
+    # but from its __init__, after MPItrampoline has loaded UCX, which has read its settings by then ("unused environment
+    # variables"). So they are set before Julia starts.
+    export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
+    export UCX_MEMTYPE_CACHE=no
     # Compile once, before the ranks start, or every rank compiles at once
-    $JULIA_BIN --project -e 'using MPI, CUDA, Oceananigans, Oceanostics, NCDatasets, CairoMakie, ArgParse; println("MPI.jl uses ", MPI.MPIPreferences.binary)'
+    $JULIA_BIN --project -e 'using MPI, CUDA, Oceananigans, Oceanostics, NCDatasets, CairoMakie, ArgParse
+                             println("MPI.jl uses ", MPI.MPIPreferences.binary)'
     # The GPUs' memory every 10 s, for the per-rank peak a multi-GPU run is sized by
     nvidia-smi --query-gpu=timestamp,index,memory.used,memory.total --format=csv -l 10 > logs/kelvin_helmholtz_${NZ}_gpu_memory.csv &
     GPU_MEMORY_LOG=$!
     # One rank per GPU, four per node; Oceananigans binds each rank to GPU (node-local rank) % 4. A node other than this
     # one gets the environment from PBS rather than from this script, so what the ranks need is forwarded.
     FORWARD=""
-    for name in MPITRAMPOLINE_LIB JULIA_DEPOT_PATH JULIA_LOAD_PATH JULIA_CUDA_MEMORY_POOL JULIA_CPU_TARGET KHAPE_OUTPUT_DIR PATH LD_LIBRARY_PATH; do
+    for name in MPITRAMPOLINE_LIB JULIA_DEPOT_PATH JULIA_LOAD_PATH JULIA_CUDA_MEMORY_POOL JULIA_CPU_TARGET KHAPE_OUTPUT_DIR \
+                PATH LD_LIBRARY_PATH UCX_ERROR_SIGNALS UCX_MEMTYPE_CACHE; do
         if [ -n "${!name:-}" ]; then FORWARD="$FORWARD -x $name"; fi
     done
     LAUNCH="mpiexec -n $RANKS --map-by ppr:4:node --bind-to none $FORWARD"
 fi
 
-time $LAUNCH $JULIA_BIN --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ --ranks $RANKS $TENSOR_FLAG $SORTED_FLAG $OFFLINE_FLAG 2>&1 \
-    | tee logs/kelvin_helmholtz_${NZ}.out
+time $LAUNCH $JULIA_BIN --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ --ranks $RANKS $TENSOR_FLAG $SORTED_FLAG $OFFLINE_FLAG \
+    2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
 if [ -n "${GPU_MEMORY_LOG:-}" ]; then kill $GPU_MEMORY_LOG || true; fi
 
 # The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot3 reads the

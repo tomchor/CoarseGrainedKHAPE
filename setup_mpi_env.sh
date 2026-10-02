@@ -71,6 +71,12 @@ export MPITRAMPOLINE_MPIEXEC="$MPIWRAPPER/bin/mpiwrapperexec"
 #---
 
 #+++ The environment, and the depot its packages are compiled into
+# Julia runs without the cuda module's toolkit on the library path, and with UCX's settings for Julia given before it
+# starts, as simulation.pbs launches it (see there)
+LD_LIBRARY_PATH=$(tr ':' '\n' <<< "$LD_LIBRARY_PATH" | { grep -v "/cuda/" || true; } | paste -sd: -)
+export LD_LIBRARY_PATH
+export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
+export UCX_MEMTYPE_CACHE=no
 export JULIA_DEPOT_PATH="$KHAPE_MPI_DEPOT:$WORK/.julia"
 export JULIA_CPU_TARGET="generic"   # as simulation.pbs, so what this compiles is reused there
 mkdir -p "$KHAPE_MPI_ENV"
