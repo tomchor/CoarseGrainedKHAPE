@@ -16,6 +16,7 @@ GitHub remote: `git@github.com:tomchor/CoarseGrainedKHAPE.git`
 ```bash
 bash submit_all_pbs.sh                        # default Nz=512, the largest 3D run one A100 holds
 bash submit_all_pbs.sh NZ=256 FIXED_REF=1    # custom resolution; FIXED_REF applies to the sweep transfer only
+bash submit_all_pbs.sh SIMULATION=0 PLOTS=1   # the same chain from budgeting on, on the run already in $KHAPE_OUTPUT_DIR
 ```
 Jobs are chained via PBS `afterok` dependencies. Always use `submit_*.sh` wrappers, never submit `*.pbs` files directly.
 

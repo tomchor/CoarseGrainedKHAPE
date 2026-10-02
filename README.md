@@ -84,9 +84,12 @@ bash submit_all_pbs.sh NZ=256 FIXED_REF=1
 bash submit_all_pbs.sh VALIDATE=1            # + validation (figures + animations); runs the sim with --save_tensors and --save_sorted
 bash submit_all_pbs.sh PLOTS=1               # + every plot*.py after sweep_transfer
 bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
+
+# The same chain from budgeting on, on the run already in $KHAPE_OUTPUT_DIR (no simulation job)
+bash submit_all_pbs.sh SIMULATION=0 PLOTS=1
 ```
 
-Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter`. `budgeting` assembles and plots the integrated budgets from the simulation's online terms (about a minute); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
+Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter`. With `SIMULATION=0` there is no simulation job and `budgeting` starts at once, on the run already in `$KHAPE_OUTPUT_DIR` (the wrapper stops if that run does not exist). `budgeting` assembles and plots the integrated budgets from the simulation's online terms (about a minute); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
 
 `SAVE_SORTED` defaults to `1`, so the simulation also writes the validation-only view of the sorted reference state (the two model-grid z✶ methods, the sorted column, ∫E_b) that `inv06` and `inv07` compare against the offline sort. Every budget term is written regardless, so `SAVE_SORTED=0` gives smaller output and changes no budget number; `VALIDATE=1` turns it back on.
 
