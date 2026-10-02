@@ -7,10 +7,10 @@ loaded run into the two budgets under the variable names the offline pipeline us
 along a `filter_scale` dimension, the budget's sign on every integral and the residual formed, so nothing downstream
 knows which pipeline produced them. It is lazy (dask), so a caller that wants one slice pays for one slice.
 
-`01_online_budgets.py` writes the integrals it returns to the two integrated budget files that the tests,
-`02_plot_budgets.py` and `anim1_panels.py` read. The 3D terms are never copied: the tests, `plot5_budgets.py`,
-`plot6_panels.py`, `X2_panels.py` and `X4_thumbnail.py` call it on the simulation file directly, and `anim1_panels.py`
-on the x–z slices of the `_2d.nc` file.
+`01_online_budgets.py` writes the integrals it returns to the two integrated budget files that the tests and
+`02_plot_budgets.py` read. The 3D terms are never copied: the tests, `plot5_budgets.py`, `plot6_panels.py`,
+`X2_panels.py` and `X4_thumbnail.py` call it on the simulation file directly, and `anim1_panels.py` on the x–z slices
+of the `_2d.nc` file, for its panels and its time series alike.
 """
 #+++ Imports
 import re
@@ -120,8 +120,10 @@ def online_budgets(ds, filter_scales=None, records="differenced"):
     among the scales the simulation wrote (default: all of them). `records` keeps the differenced records (default,
     see `differenced_records`) or "all" of them. `integrated_variables` names the integrals and the residual.
 
-    The `_2d.nc` slice file works too, with `records="all"`: it holds the same terms on one x–z plane (bar `E_a` and
-    the two halves of S̃, which only the 3D writer has), and its records are never paired, whatever `offline_check` says.
+    The `_2d.nc` slice file works too, with `records="all"`: it holds the same terms on one x–z plane, and their volume
+    integrals (bar `E_a` and the two halves of S̃, which only the 3D writer has), and its records are never paired,
+    whatever `offline_check` says. Its first record is iteration 0, whose TimeDerivatives read zero: drop it, as
+    `anim1_panels.py` does.
     """
     if records not in ("differenced", "all"):
         raise ValueError(f"records must be 'differenced' or 'all', not {records!r}")
