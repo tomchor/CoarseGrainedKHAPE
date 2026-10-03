@@ -44,6 +44,9 @@ zlim    = parse(Float64, get(opts, "zlim", "4.0"))
 pct     = parse(Float64, get(opts, "clim-percentile", "99.0"))
 nlevels = parse(Int,     get(opts, "levels", "6"))
 alpha   = parse(Float64, get(opts, "alpha", "0.35"))
+# The diverging map every panel is drawn on. :balance (cmocean) by default; the perceptually uniform
+# Scientific Colour Maps (:vik, :broc, :berlin, :cork, ...) and the ColorBrewer names also work.
+cmap_name = Symbol(get(opts, "colormap", "balance"))
 # Camera, in units of π, as Makie's Axis3 takes it. Azimuth π looks straight down +x, so the streamwise
 # direction is fully into the page; 1.5π looks along +y and gives x the full width but puts y edge-on and
 # collides its labels. 1.3π is where x still spans nearly the whole frame and y keeps enough depth to read.
@@ -233,7 +236,7 @@ function prepare(bare)
     # reads as a number instead of having to be decoded off a bar of five-digit ticks.
     hi     = absq(pct)
     crange = (-1.0, 1.0)
-    cmap   = cgrad(:balance)
+    cmap   = cgrad(cmap_name)
 
     # For a signed field take a symmetric pair per level so both senses show; for a positive one the upper
     # tail, where the structures are. Levels are kept inside crange: a level past its end renders saturated
@@ -350,7 +353,7 @@ end
 
 # One colourbar for the figure: every panel is on the same normalised scale, so six of them said the same
 # thing six times. Its ticks are fractions of each panel's own range; the ranges themselves are in the titles.
-Colorbar(fig[1:nrows, ncols + 1]; colormap = cgrad(:balance), colorrange = (-1.0, 1.0),
+Colorbar(fig[1:nrows, ncols + 1]; colormap = cgrad(cmap_name), colorrange = (-1.0, 1.0),
          ticks = ([-1, -0.5, 0, 0.5, 1], ["-1", "-0.5", "0", "0.5", "1"]),
          label = "fraction of each panel's range", height = Relative(0.5), width = 14)
 
