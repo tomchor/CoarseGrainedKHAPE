@@ -169,8 +169,14 @@ What changes when `NGPUS > 1`:
 - Every rank writes its own slab, `khi_Nz<NZ>_Ri0.10_rank<r>.nc` and `_2d_rank<r>.nc`. A CPU job chained on the
   simulation, `merge.pbs`, stitches them into the two files a one-GPU run writes (`merge_rank_output.jl`) and draws
   the figures and the animation the one-GPU job draws; budgeting, validation and the sweep wait on it and read the
-  merged files as always. Nz=1024 writes ~3.8 TB of 3D output at the default output interval, so the merge is hours
-  of I/O, and the rank files are kept (twice the space) unless `DELETE_RANK_FILES=1` reaches `merge.pbs`.
+  merged files as always.
+- The 3D file is merged **virtually**, in seconds: its fields are HDF5 virtual datasets that read each rank's slab
+  from the rank file it is in, so the merged file takes almost no space and **the rank files must stay beside it**
+  (the directory can move as a whole). A missing rank file would read as fill values, so the Python loader refuses a
+  merged file whose rank files are not all there. The 2D file (9 GB at Nz=1024) is copied, so Julia reads it as any
+  file; Julia readers of the virtual 3D file need `allow_virtual_storage!()` from `merge_rank_output.jl` first.
+- `COPY=1` reaching `merge.pbs` copies the 3D file instead (~4 TB, ~7 h at Nz=1024), and only then does
+  `DELETE_RANK_FILES=1` delete the rank files.
 - `SAVE_SORTED` and `VALIDATE` are refused: the two model-grid sorts of the validation-only view would each sort one
   rank's slab.
 
