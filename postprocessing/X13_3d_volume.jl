@@ -9,12 +9,11 @@
 #   ... --field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale 1 --mode isosurface --time 108
 #
 # GLMakie rather than CairoMakie: a volume render is GPU raymarching, which Cairo cannot do at all, and
-# Makie's 3D `contour` wants the same backend. It needs OpenGL, so this runs on a workstation or an HPC
-# node with VirtualGL/EGL -- not in a plain batch job. X12_3d_snapshot.py is the no-display counterpart.
+# Makie's 3D `contour` wants the same backend. It needs an OpenGL context but no GPU: on Casper, Xvfb
+# plus Mesa's software rasteriser gives one on a plain CPU node, which is what render3d.pbs sets up.
 #
-# The companion to X12: that one cuts planes, this one looks through the volume. For the KH run the
-# isosurface is the more useful of the two -- Q or enstrophy picks out the streamwise vortices that
-# braid the billow, which is the whole reason the simulation went 3D.
+# The isosurface is the more useful of the two modes for this flow -- Q or enstrophy picks out the
+# streamwise vortices that braid the billow, which is the whole reason the simulation went 3D.
 
 using NCDatasets
 using GLMakie

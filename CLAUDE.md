@@ -52,6 +52,24 @@ bash submit_budgeting.sh NZ=512        # writes the integrated budgets from the 
 bash submit_sweep.sh NZ=512 FIXED_REF=both
 ```
 
+### 3D isosurface figures
+```bash
+cd postprocessing
+bash submit_render3d.sh TIMES=100,120,140              # X13 at each time; default panels are the six budget terms at ℓ=1
+bash submit_render3d.sh TIMES=120 LEVELS=2             # fewer isosurfaces: much faster under software rendering
+bash submit_render3d.sh TIMES=120 FILE=/glade/.../khi_Nz1024_Ri0.10.nc
+```
+`render3d.pbs` asks for **no GPU**. GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has
+neither a display nor the NVIDIA driver exposed to one; `/usr/bin/Xvfb` plus Mesa's software rasteriser
+(`LIBGL_ALWAYS_SOFTWARE=1`) gives one on a plain CPU node, so this is an ordinary batch job needing no modules,
+no VirtualGL and no FastX session. The job starts its own Xvfb on a free display, smoke-tests the context before
+rendering (a long software render should not be how a broken display announces itself) and kills the server from
+an EXIT trap. Two traps: `xvfb-run` is **not** installed on Casper, only the `Xvfb` binary it wraps, and
+`julia +1.13` is a juliaup feature that Casper's `julia` reads as a filename, so the job finds 1.13 the way
+`simulation.pbs` does. `TIMES` and `FIELDS` travel colon-separated because `qsub -v` splits its own list on
+commas. Software rendering costs minutes per panel at Nz=1024, so `subset_for_plots.py` is the better loop for
+tuning camera, levels and colours locally.
+
 ### Local post-processing (no PBS)
 ```bash
 cd postprocessing
@@ -107,6 +125,8 @@ Standalone visualization scripts (not part of the numbered pipeline; `plots.pbs`
 - `plot5_budgets.py` -- 2x2 panel of SFS KE and APE budget time series (assembled from the simulation output by `online_budgets`; no post-processing needed, and `simulation.pbs` draws it right after the run)
 - `plot6_panels.py` -- 4-panel snapshot of local SFS budget fields (likewise straight from the simulation output, and likewise drawn by `simulation.pbs`)
 - `anim1_panels.py` -- animated version of plot6 panels (requires ffmpeg); reads everything from the `_2d.nc` file, so it needs no post-processing: every panel (the budget terms through `online_budgets`, and the online `b_r`, on the x–z plane the 2D writer slices) and the time series (the `_int` volume integrals of the same records)
+- `X13_3d_volume.jl` -- GLMakie volume render and isosurfaces of one snapshot, the only 3D-rendering script (the run is three-dimensional but every other figure reduces it to an x–z slice at the first y index). One `--field` lays the panels out by `--mode` (volume and isosurface of it), a comma-separated list by field, one panel each; `--scale` appends the `_ℓ<ℓ>` every budget term carries, so the six-term figure is one line. `--overlay b` draws a reference field as contours on the two vertical bounding walls -- lines rather than a second set of isosurfaces, which no colour or opacity makes readable (GLMakie ignores `alpha` on a volume contour). Q, enstrophy and speed are derived here from u, v, w, all written at cell centres: the file's own `ω` is the spanwise component alone. Needs an OpenGL context but **no GPU** -- see `render3d.pbs`
+- `subset_for_plots.py` -- not a figure: cuts a run down to a laptop-sized NetCDF (chosen fields, chosen records, z cropped, float32) that `X13` reads unchanged, for tuning a figure locally rather than over `qsub`. It copies the grid reconstruction groups, rewriting the z extent to the crop, and drops `virtual_rank_files`
 - `X1_…` – `X11_…` -- the extra figures (X for extra), outside the manuscript set: Π hovmöllers, snapshot panels, a thumbnail, sweep-spectrum diagnostics. They write to `postprocessing/extra_figures/` (`EXTRA_FIGURES` in `aux00_utils.py`), never to `figures/`, which is left to the `plot*` scripts; `plots.pbs` does not run them
 
 Shared utilities:

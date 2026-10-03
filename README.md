@@ -270,7 +270,7 @@ Software rendering is the cost: a 576 × 192 × 410 volume over six panels of si
 
 ### Subset a run for local plotting
 
-`subset_for_plots.py` writes a small NetCDF of selected fields, times and a z crop, in float32, that `X12_3d_snapshot.py` and `X13_3d_volume.jl` read unchanged. It copies the grid reconstruction groups (rewriting the z extent to the crop) and drops `virtual_rank_files`, both of which a plain `to_netcdf` of a sliced dataset would get wrong.
+`subset_for_plots.py` writes a small NetCDF of selected fields, times and a z crop, in float32, that `X13_3d_volume.jl` reads unchanged. It copies the grid reconstruction groups (rewriting the z extent to the crop) and drops `virtual_rank_files`, both of which a plain `to_netcdf` of a sliced dataset would get wrong.
 
 ```bash
 cd postprocessing

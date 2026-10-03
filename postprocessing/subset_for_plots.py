@@ -1,18 +1,18 @@
 #!/usr/bin/env python
-# Cut a 3D run down to something that fits on a laptop, for plotting with X12/X13 locally.
+# Cut a 3D run down to something that fits on a laptop, for plotting with X13 locally.
 #
 #   python postprocessing/subset_for_plots.py --filename output/khi_Nz1024_Ri0.10.nc --times 100 120 140 --scale 1
 #
 # Named neither plot*.py nor X*.py on purpose: it writes data, not a figure, so neither plots.pbs's glob
-# nor the extra-figures family picks it up. Run it on the HPC, scp the result, point X12/X13 at it.
+# nor the extra-figures family picks it up. Run it on the HPC, scp the result, point X13 at it.
 #
 # Four reductions, in the order they matter: keep only the fields asked for, only the records asked for,
 # crop z to the active layer (Lz = 25h is mostly quiescent), and store float32. On an Nz=1024 run that is
 # about 0.91 GB per field per record down to 0.145 GB, and far less once z is cropped.
 #
-# The output has to stay readable by both plotting scripts, which means two things a plain `to_netcdf`
+# The output has to stay readable by the plotting scripts, which means two things a plain `to_netcdf`
 # of a sliced dataset would get wrong:
-#   - X12 goes through load_dataset_and_grid, which reconstructs the grid from the NetCDF *groups*. Those
+#   - load_dataset_and_grid reconstructs the grid from the NetCDF *groups*, which a plain rewrite drops. Those
 #     are copied here, with the z extent and size in `underlying_grid_reconstruction_kwargs` rewritten to
 #     match the crop -- otherwise Lz, z_min/z_max and dV would describe the uncropped domain.
 #   - `virtual_rank_files` is dropped. A merged file on the HPC carries it and check_rank_files refuses
@@ -38,7 +38,7 @@ parser.add_argument("--filename", required=True, help="Path to the full 3D simul
 parser.add_argument("--output", default=None, help="Output path; default is <stem>_subset.nc beside the input")
 parser.add_argument("--fields", default="u,v,w,b,wb_rs,Π_K,Π_A,ε_Ks,ε_As",
                     help="Comma-separated variables to keep. Bare budget names get the _ℓ<scale> suffix (see --scale). "
-                         "u, v and w are what X12/X13 derive Q, enstrophy and speed from, so keep them unless sure")
+                         "u, v and w are what X13 derives Q, enstrophy and speed from, so keep them unless sure")
 parser.add_argument("--scale", default="1", help="Filter scale ℓ whose per-scale budget terms to keep ('' to disable the suffixing)")
 parser.add_argument("--times", type=float, nargs="+", default=None, help="Target times to keep (nearest record each); default every record")
 parser.add_argument("--every", type=int, default=None, help="Instead of --times, keep every Nth record")
@@ -77,7 +77,7 @@ wanted = [resolve(f) for f in args.fields.split(",")]
 print(f"Keeping {len(wanted)} fields: {', '.join(wanted)}")
 
 # Every time-independent variable comes along: these are the grid's own (Δx_caa, Δy_aca, Δz_aac, ...), which
-# load_dataset_and_grid builds dV from, so X12 fails on a file without them. They are 1D and cost nothing.
+# load_dataset_and_grid builds dV from, so it fails on a file without them. They are 1D and cost nothing.
 grid_vars = [v for v in ds.data_vars if "time" not in ds[v].dims and ds[v].size <= ds.sizes.get("z_aaf", 0) + 1]
 wanted += [v for v in grid_vars if v not in wanted]
 print(f"Keeping {len(grid_vars)} grid variables: {', '.join(grid_vars)}")
@@ -111,7 +111,7 @@ z_lo = float(z_faces[k0]) if z_faces is not None else float(z_c[k0] - 0.5 * (z_c
 z_hi = float(z_faces[k1 + 1]) if z_faces is not None else float(z_c[k1] + 0.5 * (z_c[1] - z_c[0]))
 print(f"Cropping z to {k1 - k0 + 1} of {z_c.size} cells: faces {z_lo:.4f} to {z_hi:.4f}")
 if args.zlim <= 4.0:
-    print(f"  note: X12/X13 default to plotting |z| < 4 and derive Q by centred differences, so a subset cropped to "
+    print(f"  note: X13 defaults to plotting |z| < 4 and derives Q by centred differences, so a subset cropped to "
           f"{args.zlim} leaves them one-sided at the boundary. Plot with a smaller --zlim, or subset with a larger one.")
 #---
 
