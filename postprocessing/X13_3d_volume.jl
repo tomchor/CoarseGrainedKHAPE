@@ -2,6 +2,12 @@
 #
 #   julia --project postprocessing/X13_3d_volume.jl <3d_output_filepath> [--field b] [--mode both] ...
 #
+# One --field lays the panels out by mode (volume and isosurface of it); a comma-separated list lays them
+# out by field, one panel each, in the single --mode given. --scale appends the _ℓ<ℓ> every budget term
+# carries, so the six-term budget figure is one readable line:
+#
+#   ... --field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale 1 --mode isosurface --time 108
+#
 # GLMakie rather than CairoMakie: a volume render is GPU raymarching, which Cairo cannot do at all, and
 # Makie's 3D `contour` wants the same backend. It needs OpenGL, so this runs on a workstation or an HPC
 # node with VirtualGL/EGL -- not in a plain batch job. X12_3d_snapshot.py is the no-display counterpart.
@@ -27,8 +33,12 @@ for i in 2:2:length(ARGS)-1
     startswith(ARGS[i], "--") || error("expected a --flag at argument $i, got $(ARGS[i])")
     opts[ARGS[i][3:end]] = ARGS[i+1]
 end
-field   = get(opts, "field", "b")
+# --field takes one name or a comma-separated list. One name lays the panels out by --mode (volume and/or
+# isosurface of that field); several lay them out by field, one panel each, in the single --mode given.
+fields  = String.(split(get(opts, "field", "b"), ","))
+scale   = get(opts, "scale", "")               # appended as _ℓ<scale> to any name that needs it (see resolve)
 mode    = get(opts, "mode", "both")            # volume | isosurface | both
+cols    = parse(Int, get(opts, "cols", "3"))
 tsel    = haskey(opts, "time") ? parse(Float64, opts["time"]) : nothing
 zlim    = parse(Float64, get(opts, "zlim", "4.0"))
 pct     = parse(Float64, get(opts, "clim-percentile", "99.0"))
@@ -40,6 +50,8 @@ alpha   = parse(Float64, get(opts, "alpha", "0.35"))
 azim    = parse(Float64, get(opts, "azimuth", "1.30"))
 elev    = parse(Float64, get(opts, "elevation", "0.12"))
 mode in ("volume", "isosurface", "both") || error("--mode must be volume, isosurface or both; got $mode")
+length(fields) == 1 || mode != "both" ||
+    error("--mode both lays panels out by mode, so it takes one --field; got $(length(fields)). Pick --mode isosurface or volume.")
 
 repo_root = dirname(@__DIR__)
 figures   = joinpath(@__DIR__, "extra_figures")
@@ -100,6 +112,8 @@ function velocity_gradient()
     return [∂(a, j, coords[j]) for a in (u, v, w), j in 1:3]   # A[i, j] = ∂uⁱ/∂xʲ
 end
 
+const DERIVED_NAMES = ("Q", "enstrophy", "speed")
+
 function derived(name)
     if name == "speed"
         u, v, w = read3d("u"), read3d("v"), read3d("w")
@@ -119,59 +133,95 @@ function derived(name)
 end
 #---
 
-data = field in ("Q", "enstrophy", "speed") ? derived(field) : read3d(field)
+# The budget fields are all per-scale, written as <name>_ℓ<ℓ>. --scale lets them be named bare, so the
+# six-panel budget figure is a readable command line rather than six copies of the suffix.
+function resolve(name)
+    name in DERIVED_NAMES && return name
+    haskey(ds, name) && return name
+    suffixed = isempty(scale) ? name : "$(name)_ℓ$(scale)"
+    haskey(ds, suffixed) && return suffixed
+    error("neither $name nor $suffixed is in $(basename(filepath)), and it is not one of $(join(DERIVED_NAMES, ", "))")
+end
 
-# Drop the one-cell margin the z derivative needed, leaving the slab that was asked for.
-z, data = z_read[kz], data[:, :, kz]
+# Pretty panel titles. Anything not listed falls back to the variable's own name.
+const TITLES = Dict("Q" => "Q  (vortex criterion)", "enstrophy" => "|ω|²", "speed" => "|u|",
+                    "wb_rs" => "τ(w, b_r)  conversion", "Π_K" => "Π_K  KE flux", "Π_A" => "Π_A  APE flux",
+                    "ε_Ks" => "ε_Kˢ  KE dissipation", "ε_As" => "ε_Aˢ  APE dissipation", "b" => "b")
+pretty(bare, resolved) = get(TITLES, bare, resolved)
+
+"""Read or derive one field, cropped, with its colour scale and isosurface levels."""
+function prepare(bare)
+    name = resolve(bare)
+    a = name in DERIVED_NAMES ? derived(name) : read3d(name)
+    a = a[:, :, kz]   # drop the one-cell margin the z derivative needed
+
+    signed = minimum(a) < 0 < maximum(a)
+    absq(p) = quantile(abs.(vec(a)), p / 100)
+    crange = signed ? (-absq(pct), absq(pct)) : (quantile(vec(a), 1 - pct / 100), quantile(vec(a), pct / 100))
+    cmap   = signed ? :balance : :magma
+
+    # For a signed field take a symmetric pair per level so both senses show; for a positive one the upper
+    # tail, where the structures are. Levels are kept inside crange: a level past its end renders saturated
+    # and the outermost shell becomes indistinguishable from the next one in.
+    levels = if signed
+        f = collect(range(0.3, 0.85, max(nlevels ÷ 2, 1)))
+        sort(vcat(-crange[2] .* f, crange[2] .* f))
+    else
+        clamp.([quantile(vec(a), q) for q in range(0.90, 0.995, nlevels)], crange[1], crange[2])
+    end
+    @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s), levels %s", bare, name, crange[1], crange[2],
+                   signed ? "signed" : "positive", join((@sprintf("%.3g", l) for l in levels), ", "))
+    return (; name, bare, data = a, colorrange = crange, colormap = cmap, levels)
+end
+
+@info @sprintf("t = %.1f, |z| < %.1f, %d x %d x %d", t, zlim, length(x), length(y), length(kz))
+prepared = [prepare(f) for f in fields]
+z = z_read[kz]
 Re, Ri = Float64(ds.attrib["Re"]), Float64(ds.attrib["Ri"])
 close(ds)
-@info @sprintf("%s at t = %.1f, |z| < %.1f: %s", field, t, zlim, size(data))
-#---
-
-#+++ Colour range
-signed = minimum(data) < 0 < maximum(data)
-absq(p) = quantile(abs.(vec(data)), p / 100)
-colorrange = signed ? (-absq(pct), absq(pct)) :
-                      (quantile(vec(data), 1 - pct / 100), quantile(vec(data), pct / 100))
-colormap = signed ? :balance : :magma
-@info @sprintf("colour range [%.3g, %.3g] (%s)", colorrange[1], colorrange[2], signed ? "signed" : "positive")
-
-# Isosurface levels. For a signed field take a symmetric pair per level so both rotation senses show;
-# for a positive one (enstrophy, speed) take the upper tail, where the structures are.
-levels = if signed
-    f = collect(range(0.3, 0.85, max(nlevels ÷ 2, 1)))
-    sort(vcat(-colorrange[2] .* f, colorrange[2] .* f))
-else
-    [quantile(vec(data), q) for q in range(0.90, 0.995, nlevels)]
-end
-@info "isosurface levels: " * join((@sprintf("%.3g", l) for l in levels), ", ")
 #---
 
 #+++ Figure
 Lx, Ly, Lz = x[end] - x[1], y[end] - y[1], z[end] - z[1]
-panels = mode == "both" ? ("volume", "isosurface") : (mode,)
-# Wide and shallow: the domain is Lx:Ly:Lz ≈ 14:4.7:8 after the z crop, and viewed near side-on that
-# leaves a tall figure mostly empty above and below the box.
-fig = Figure(size = (820 * length(panels), 560))
+xr, yr, zr = x[1] .. x[end], y[1] .. y[end], z[1] .. z[end]
 
-for (col, kind) in enumerate(panels)
-    ax = Axis3(fig[1, col]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
-               title = kind == "volume" ? "volume (MIP)" : "isosurfaces", azimuth = azim * π, elevation = elev * π)
+# One field: panels are the modes. Several: panels are the fields, in the one mode given.
+panels = length(prepared) == 1 && mode == "both" ?
+         [(kind, only(prepared), kind == "volume" ? "volume (MIP)" : "isosurfaces") for kind in ("volume", "isosurface")] :
+         [(mode, p, pretty(p.bare, p.name)) for p in prepared]
+
+# Each panel carries its own colorbar: the budget terms differ by orders of magnitude (Π_K ~ 1e-3 against
+# Q ~ 1e-1 on the test run), so one shared scale would flatten all but the largest.
+ncols = min(cols, length(panels))
+nrows = cld(length(panels), ncols)
+# Wide and shallow per panel: after the z crop the domain is about 14:4.7:8, and viewed near side-on a
+# square panel is mostly empty above and below the box. The colorbar column adds its own width.
+fig = Figure(size = (720 * ncols, 520 * nrows))
+
+for (i, (kind, p, title)) in enumerate(panels)
+    row, col = fldmod1(i, ncols)
+    gl = fig[row, col] = GridLayout()
+    ax = Axis3(gl[1, 1]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
+               title, titlesize = 15, azimuth = azim * π, elevation = elev * π)
     if kind == "volume"
         # Maximum-intensity projection: no transfer function to tune, and it shows where the extremes
         # are. :absorption looks better but needs an opacity curve matched to the field's range.
-        volume!(ax, x[1] .. x[end], y[1] .. y[end], z[1] .. z[end], data;
-                algorithm = :mip, colormap, colorrange)
+        volume!(ax, xr, yr, zr, p.data; algorithm = :mip, colormap = p.colormap, colorrange = p.colorrange)
     else
-        contour!(ax, x[1] .. x[end], y[1] .. y[end], z[1] .. z[end], data;
-                 levels, colormap, colorrange, alpha, transparency = true)
+        contour!(ax, xr, yr, zr, p.data; levels = p.levels, colormap = p.colormap,
+                 colorrange = p.colorrange, alpha, transparency = true)
     end
+    Colorbar(gl[1, 2]; colormap = p.colormap, colorrange = p.colorrange, height = Relative(0.6),
+             ticklabelsize = 10, width = 12)
+    colgap!(gl, 4)
 end
 
-Colorbar(fig[1, length(panels) + 1]; colormap, colorrange, label = field, height = Relative(0.6))
-Label(fig[0, :], @sprintf("%s   t = %.1f      Re = %d,  Ri = %.2f", field, t, round(Int, Re), Ri), fontsize = 16)
+Label(fig[0, :], @sprintf("t = %.1f      Re = %d,  Ri = %.2f%s", t, round(Int, Re), Ri,
+                          isempty(scale) ? "" : @sprintf("      ℓ = %s", scale)), fontsize = 17)
 
-outfile = joinpath(figures, @sprintf("%s_3dvol_%s_t%.1f.png", stem, field, t))
+# One field keeps its name in the filename; several would make it unreadable, so they become "budget6".
+tag = length(fields) == 1 ? only(fields) : "$(length(fields))panel"
+outfile = joinpath(figures, @sprintf("%s_3dvol_%s%s_t%.1f.png", stem, tag, isempty(scale) ? "" : "_l$scale", t))
 save(outfile, fig; px_per_unit = 2)
 @info "Figure saved to: $outfile"
 #---
