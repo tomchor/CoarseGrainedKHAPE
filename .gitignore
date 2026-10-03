@@ -15,6 +15,7 @@ slurm-*.out
 *.err
 *.out
 *.log
+logs/*_gpu_memory.csv
 */anims/*png
 output.out
 __pycache__/*

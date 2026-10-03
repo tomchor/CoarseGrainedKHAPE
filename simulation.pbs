@@ -11,10 +11,23 @@
 
 set -eo pipefail
 
+RANKS=${RANKS:-1}   # MPI ranks, one GPU each; the submit wrappers set it, and ask PBS for that many GPUs
+
 # Clear the environment from any previously loaded modules
 module li
 module --force purge
 module load ncarenv/25.10
+# Several ranks run under Casper's CUDA-aware OpenMPI (built with CUDA and UCX); its compiler module comes first, and
+# it brings cuda and ucx along. MPI.jl reaches it through MPItrampoline and the MPIwrapper setup_mpi_env.sh built.
+if [ "$RANKS" -gt 1 ]; then
+    module load intel/2025.2.1 openmpi/5.0.8
+    # The cuda module puts its toolkit (12.9) on LD_LIBRARY_PATH, which the dynamic linker searches before a library's
+    # own RUNPATH, so CUDA.jl's libraries (its artifacts, 12.6) would pick up some of their dependencies there, two CUDA
+    # versions in one process ("loaded from a system path"). OpenMPI, UCX and MPIwrapper need only the driver
+    # (/usr/lib64) and find the rest through their RPATHs, so the toolkit comes off the path again.
+    LD_LIBRARY_PATH=$(tr ':' '\n' <<< "$LD_LIBRARY_PATH" | { grep -v "/cuda/" || true; } | paste -sd: -)
+    export LD_LIBRARY_PATH
+fi
 module li
 
 #/glade/u/apps/ch/opt/usr/bin/dumpenv # Dumps environment (for debugging with CISL support)
@@ -52,18 +65,68 @@ else
     exit 1
 fi
 $JULIA --version
+# The binary itself, which mpiexec launches below: the juliaup launcher reads the depot path, which several ranks change.
+JULIA_BIN=$($JULIA --startup-file=no -e 'print(joinpath(Sys.BINDIR, "julia"))')
 
 # The Julia depot ($WORK/.julia) is shared across branches, so a checkout on a different Manifest can leave
 # this one uninstantiated -- which fails the run at `using Oceananigans`. Instantiate first; idempotent and
 # fast once the packages are present.
-$JULIA --project -e 'using Pkg; Pkg.instantiate()'
+$JULIA_BIN --project -e 'using Pkg; Pkg.instantiate()'
 
-time $JULIA --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ $TENSOR_FLAG $SORTED_FLAG $OFFLINE_FLAG 2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
+LAUNCH=""
+if [ "$RANKS" -gt 1 ]; then
+    # MPI.jl uses MPItrampoline, by the environment setup_mpi_env.sh made, stacked on the load path, and forwards its
+    # calls to the system OpenMPI through MPIwrapper (MPITRAMPOLINE_LIB); the packages compiled for it are cached in a
+    # depot of their own, ahead of the shared one. None of this touches a one-GPU run. The CUDA memory pool is off for
+    # CUDA-aware MPI (MPI.jl's known issues: CUDA IPC of pooled memory).
+    export JULIA_DEPOT_PATH="$KHAPE_MPI_DEPOT:$WORK/.julia"
+    export JULIA_LOAD_PATH="@:$KHAPE_MPI_ENV:@stdlib"
+    export JULIA_CUDA_MEMORY_POOL=none
+    export MPITRAMPOLINE_LIB=$(ls $KHAPE_MPI_DEPOT/mpiwrapper/lib*/libmpiwrapper.so)
+    export MPITRAMPOLINE_MPIEXEC=$KHAPE_MPI_DEPOT/mpiwrapper/bin/mpiwrapperexec
+    # MPI.jl asks UCX to leave SIGSEGV to Julia, which stops its threads for GC with it, and not to cache memory types,
+    # but from its __init__, after MPItrampoline has loaded UCX, which has read its settings by then ("unused environment
+    # variables"). So they are set before Julia starts.
+    export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
+    export UCX_MEMTYPE_CACHE=no
+    # Compile once, before the ranks start, or every rank compiles at once
+    $JULIA_BIN --project -e 'using MPI, CUDA, Oceananigans, Oceanostics, NCDatasets, CairoMakie, ArgParse
+                             println("MPI.jl uses ", MPI.MPIPreferences.binary)'
+    # The GPUs' memory every 10 s, for the per-rank peak a multi-GPU run is sized by
+    nvidia-smi --query-gpu=timestamp,index,memory.used,memory.total --format=csv -l 10 > logs/kelvin_helmholtz_${NZ}_gpu_memory.csv &
+    GPU_MEMORY_LOG=$!
+    # One rank per GPU, four per node; Oceananigans binds each rank to GPU (node-local rank) % 4. A node other than this
+    # one gets the environment from PBS rather than from this script, so what the ranks need is forwarded.
+    FORWARD=""
+    for name in MPITRAMPOLINE_LIB JULIA_DEPOT_PATH JULIA_LOAD_PATH JULIA_CUDA_MEMORY_POOL JULIA_CPU_TARGET KHAPE_OUTPUT_DIR \
+                PATH LD_LIBRARY_PATH UCX_ERROR_SIGNALS UCX_MEMTYPE_CACHE; do
+        if [ -n "${!name:-}" ]; then FORWARD="$FORWARD -x $name"; fi
+    done
+    LAUNCH="mpiexec -n $RANKS --map-by ppr:4:node --bind-to none $FORWARD"
+fi
+
+time $LAUNCH $JULIA_BIN --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ --ranks $RANKS $TENSOR_FLAG $SORTED_FLAG $OFFLINE_FLAG \
+    2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
+if [ -n "${GPU_MEMORY_LOG:-}" ]; then kill $GPU_MEMORY_LOG || true; fi
+
+# Several ranks leave one file per rank: merge_rank_output.jl stitches them into the two files a one-GPU run writes
+# (the 3D one virtually, ~3 min at Nz=1024 with the 2D copy), and the animation a one-GPU run draws at its end is drawn
+# from the merged 2D file. Both run in the environment a one-GPU job runs in, without MPI. A failed merge fails the
+# job, since nothing downstream can read the run without it; a failed animation is reported, not fatal.
+if [ "$RANKS" -gt 1 ]; then
+    module --force purge
+    module load ncarenv/25.10
+    export JULIA_DEPOT_PATH="$WORK/.julia"
+    unset JULIA_LOAD_PATH JULIA_CUDA_MEMORY_POOL MPITRAMPOLINE_LIB MPITRAMPOLINE_MPIEXEC UCX_ERROR_SIGNALS UCX_MEMTYPE_CACHE
+    time $JULIA_BIN --project merge_rank_output.jl $OUT_DIR/$SIM 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out
+    time $JULIA_BIN --project plot_kelvin_helmholtz_instability.jl $OUT_DIR/${SIM}_2d.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
+        || echo "warning: the animation failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
+fi
 
 # The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot3 reads the
-# _2d.nc file, plot5 and plot6 assemble the SFS budgets from the 3D file themselves (plot2 and plot4 need the sweep
-# and stay in plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this
-# one with afterok should still start.
+# _2d.nc file, plot5 and plot6 assemble the SFS budgets from the 3D file themselves (plot4 needs the sweep and stays in
+# plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this one with
+# afterok should still start.
 for script in plot3_b_br_snapshots.py plot5_budgets.py plot6_panels.py; do
     time $PYTHON -u postprocessing/$script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
         || echo "warning: $script failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
