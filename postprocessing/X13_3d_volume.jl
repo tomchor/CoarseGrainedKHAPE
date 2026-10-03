@@ -22,11 +22,6 @@ using Statistics
 
 GLMakie.activate!(visible = false)   # render offscreen; `save` still works
 
-# The positive half of :balance (its white midpoint through to red). A positive-definite field used :magma,
-# whose dark, fully saturated ramp made it the loudest panel of a figure whose other panels are :balance --
-# near-white wherever the field is small. On the same ramp the panels carry the same visual weight, and a
-# positive field reads as "the red half of the signed scale", which is what it is.
-const BALANCE_POS = cgrad(Makie.to_colormap(:balance)[(end ÷ 2 + 1):end])
 
 #+++ Arguments
 # Deliberately hand-rolled rather than ArgParse: this is called by hand, and keeping it dependency-light
@@ -189,11 +184,17 @@ function prepare(bare)
     a = name in DERIVED_NAMES ? derived(name) : read3d(name)
     a = a[:, :, kz]   # drop the one-cell margin the z derivative needed
 
-    signed = minimum(a) < 0 < maximum(a)
+    signed = minimum(a) < 0 < maximum(a)   # still decides the *levels*: a symmetric pair, or one-sided
     absq(p) = quantile(abs.(vec(a)), p / 100)
-    # Zero anchors the white end of the ramp in both cases, so "pale" means "small" in every panel.
-    crange = signed ? (-absq(pct), absq(pct)) : (0.0, quantile(vec(a), pct / 100))
-    cmap   = signed ? cgrad(:balance) : BALANCE_POS
+    # Every panel gets the same symmetric :balance scale, white at zero, including the positive-definite
+    # ones. For those the lower half goes unused, which is the point twice over: the colourbars become the
+    # same object, so magnitudes compare across panels without rescaling by eye, and the empty half states
+    # that the quantity never changes sign -- true of ε_Kˢ by construction and of nothing else here.
+    # The alternative, the upper half of the ramp over (0, hi), renders identically (v maps to 0.5 + v/2hi
+    # either way) and differs only in showing no empty half, so it says less for the same picture.
+    hi     = absq(pct)
+    crange = (-hi, hi)
+    cmap   = cgrad(:balance)
 
     # For a signed field take a symmetric pair per level so both senses show; for a positive one the upper
     # tail, where the structures are. Levels are kept inside crange: a level past its end renders saturated
