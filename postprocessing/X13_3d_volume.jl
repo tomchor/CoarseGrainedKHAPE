@@ -42,7 +42,7 @@ cols    = parse(Int, get(opts, "cols", "3"))
 tsel    = haskey(opts, "time") ? parse(Float64, opts["time"]) : nothing
 zlim    = parse(Float64, get(opts, "zlim", "4.0"))
 pct     = parse(Float64, get(opts, "clim-percentile", "99.0"))
-nlevels = parse(Int,     get(opts, "levels", "4"))
+nlevels = parse(Int,     get(opts, "levels", "6"))
 alpha   = parse(Float64, get(opts, "alpha", "0.35"))
 # Camera, in units of π, as Makie's Axis3 takes it. Azimuth π looks straight down +x, so the streamwise
 # direction is fully into the page; 1.5π looks along +y and gives x the full width but puts y edge-on and
@@ -193,10 +193,10 @@ function prepare(bare)
     # tail, where the structures are. Levels are kept inside crange: a level past its end renders saturated
     # and the outermost shell becomes indistinguishable from the next one in.
     levels = if signed
-        f = fractions(0.3, 0.85, nlevels ÷ 2)
+        f = fractions(0.18, 0.85, nlevels ÷ 2)
         sort(vcat(-crange[2] .* f, crange[2] .* f))
     else
-        clamp.([quantile(vec(a), q) for q in range(0.90, 0.995, nlevels)], crange[1], crange[2])
+        clamp.([quantile(vec(a), q) for q in range(0.80, 0.995, nlevels)], crange[1], crange[2])
     end
     @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s), levels %s", bare, name, crange[1], crange[2],
                    signed ? "signed" : "positive", join((@sprintf("%.3g", l) for l in levels), ", "))
