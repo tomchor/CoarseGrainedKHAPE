@@ -137,9 +137,23 @@ function velocity_gradient()
     return [∂(a, j, coords[j]) for a in (u, v, w), j in 1:3]   # A[i, j] = ∂uⁱ/∂xʲ
 end
 
-const DERIVED_NAMES = ("Q", "enstrophy", "speed")
+const DERIVED_NAMES = ("Q", "enstrophy", "speed", "b_r")
+
+# b_r = b - b✶(z), the buoyancy relative to the Winters sorted reference state. Only the 2D writer emits
+# it, and that is one x-z slice, so it is rebuilt here. On a uniform grid the sort is exact and needs no
+# iteration: order every cell by buoyancy, and since each model level holds Nx·Ny cells of equal volume,
+# the k-th group of Nx·Ny sorted values is the fluid that comes to rest at level k. The sort has to see the
+# *whole* column, not the z crop -- a reference state built from a slab is a different reference state --
+# so this is the one derived field that reads beyond `kz_read`.
+function reference_buoyancy_anomaly()
+    b_full = Float64.(ds["b"][:, :, :, n])
+    nx, ny, nz = size(b_full)
+    b_star = vec(mean(reshape(sort(vec(b_full)), nx * ny, nz), dims = 1))   # ascending: lightest on top
+    return b_full[:, :, kz_read] .- reshape(b_star[kz_read], 1, 1, :)
+end
 
 function derived(name)
+    name == "b_r" && return reference_buoyancy_anomaly()
     if name == "speed"
         u, v, w = read3d("u"), read3d("v"), read3d("w")
         return sqrt.(u.^2 .+ v.^2 .+ w.^2)
@@ -169,7 +183,7 @@ function resolve(name)
 end
 
 # Pretty panel titles. Anything not listed falls back to the variable's own name.
-const TITLES = Dict("Q" => "Q  (vortex criterion)", "enstrophy" => "|ω|²", "speed" => "|u|",
+const TITLES = Dict("Q" => "Q  (vortex criterion)", "enstrophy" => "|ω|²", "speed" => "|u|", "b_r" => "b_r  buoyancy anomaly",
                     "wb_rs" => "τ(w, b_r)  conversion", "Π_K" => "Π_K  KE flux", "Π_A" => "Π_A  APE flux",
                     "ε_Ks" => "ε_Kˢ  KE dissipation", "ε_As" => "ε_Aˢ  APE dissipation", "b" => "b")
 pretty(bare, resolved) = get(TITLES, bare, resolved)
