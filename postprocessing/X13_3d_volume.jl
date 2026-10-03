@@ -33,6 +33,8 @@ for i in 2:2:length(ARGS)-1
     startswith(ARGS[i], "--") || error("expected a --flag at argument $i, got $(ARGS[i])")
     opts[ARGS[i][3:end]] = ARGS[i+1]
 end
+# A field may be prefixed "-" to negate it, for a term that enters two budgets with opposite sign, and a
+# lone "." leaves a cell empty, so a row with fewer terms than the grid is wide keeps its alignment.
 # --field takes one name or a comma-separated list. One name lays the panels out by --mode (volume and/or
 # isosurface of that field); several lay them out by field, one panel each, in the single --mode given.
 fields  = String.(split(get(opts, "field", "b"), ","))
@@ -202,6 +204,8 @@ const TITLES = Dict(
     "K_s"       => rich("K", superscript("s"), "  sub-filter KE"),
     "E_as"      => rich("E", subscript("a"), superscript("s"), "  sub-filter APE"),
     "R_s"       => rich("R", superscript("s"), "  reference tendency"),
+    "dKs_dt"    => rich("∂", subscript("t"), "K", superscript("s"), "  KE tendency"),
+    "dEas_dt"   => rich("∂", subscript("t"), "E", subscript("a"), superscript("s"), "  APE tendency"),
 )
 pretty(bare, resolved) = get(TITLES, bare, rich(resolved))
 
@@ -217,13 +221,21 @@ end
 fractions(lo, hi, n) = n <= 1 ? [hi] : collect(range(lo, hi, n))
 
 """Read or derive one field, cropped, with its colour scale and isosurface levels."""
-function prepare(bare)
+function prepare(spec)
+    neg  = startswith(spec, "-")
+    bare = neg ? spec[2:end] : spec
     name = resolve(bare)
     a = name in DERIVED_NAMES ? derived(name) : read3d(name)
     a = a[:, :, kz]   # drop the one-cell margin the z derivative needed
+    neg && (a = -a)
 
-    signed = minimum(a) < 0 < maximum(a)   # still decides the *levels*: a symmetric pair, or one-sided
-    absq(p) = quantile(abs.(vec(a)), p / 100)
+    # The tendencies come from Oceananigans' deferred TimeDerivative, whose last record of a run is NaN
+    # (its differencing window never closes), so the quantile is taken over the finite values only.
+    finite = filter(isfinite, vec(a))
+    isempty(finite) && error("every value of $name at t = $t is non-finite; the last record of a run is " *
+                             "NaN for the tendencies and anything built on them -- pick an earlier --time")
+    signed = minimum(finite) < 0 < maximum(finite)   # still decides the *levels*: a symmetric pair, or one-sided
+    absq(p) = quantile(abs.(finite), p / 100)
     # Every panel gets the same symmetric :balance scale, white at zero, including the positive-definite
     # ones. For those the lower half goes unused, which is the point twice over: the colourbars become the
     # same object, so magnitudes compare across panels without rescaling by eye, and the empty half states
@@ -256,16 +268,18 @@ function prepare(bare)
     # budget's number rather than a sum over what is drawn. Derived fields have none and get no annotation.
     int_name = name * "_int"
     integral = haskey(ds, int_name) ? Float64(ds[int_name][n]) : nothing
+    neg && !isnothing(integral) && (integral = -integral)
     # ±hi, not crange: crange is the normalised (-1, 1) every panel is drawn on, which says nothing.
     @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s)%s", bare, name, -hi, hi,
                    signed ? "signed" : "positive",
                    isnothing(integral) ? "" : @sprintf("  ∫dV = %.3g", integral))
-    return (; name, bare, data = a, colorrange = crange, colormap = cmap, levels, integral, scale = hi)
+    return (; name, bare, neg, data = a, colorrange = crange, colormap = cmap, levels, integral, scale = hi)
 end
 
 @info @sprintf("t = %.1f, |z| < %.1f, %d x %d x %d", t, zlim, length(x), length(y), length(kz))
-prepared = [prepare(f) for f in fields]
+prepared = [f == "." ? nothing : prepare(f) for f in fields]
 ov = isempty(overlay) ? nothing : prepare(overlay)
+any(!isnothing, prepared) || error("--field is all blanks")
 z = z_read[kz]
 Re, Ri = Float64(ds.attrib["Re"]), Float64(ds.attrib["Ri"])
 close(ds)
@@ -292,7 +306,9 @@ edge_pad(a) = (b = vcat(a[1:1, :], a, a[end:end, :]); hcat(b[:, 1:1], b, b[:, en
 # One field: panels are the modes. Several: panels are the fields, in the one mode given.
 panels = length(prepared) == 1 && mode == "both" ?
          [(kind, only(prepared), rich(kind == "volume" ? "volume (MIP)" : "isosurfaces")) for kind in ("volume", "isosurface")] :
-         [(mode, p, rich(pretty(p.bare, p.name), "\n", rich(scale_line(p), fontsize = 13))) for p in prepared]
+         [(mode, p, isnothing(p) ? nothing :
+                    rich(p.neg ? rich("−", pretty(p.bare, p.name)) : pretty(p.bare, p.name),
+                         "\n", rich(scale_line(p), fontsize = 13))) for p in prepared]
 
 # Each panel carries its own colorbar: the budget terms differ by orders of magnitude (Π_K ~ 1e-3 against
 # Q ~ 1e-1 on the test run), so one shared scale would flatten all but the largest.
@@ -308,6 +324,7 @@ fig = Figure(size = (640 * ncols + 120, 520 * nrows), figure_padding = 4)
 
 for (i, (kind, p, title)) in enumerate(panels)
     row, col = fldmod1(i, ncols)
+    isnothing(p) && continue   # a "." in --field: the cell stays empty so the row keeps its alignment
     # The title is a Label above the axis, not Axis3's own `title`: that attribute takes a plain string or
     # a LaTeXString but rejects rich text, and no form of it accepts a line break, so neither the typeset
     # subscripts nor the second line of scale and integral would survive it.
