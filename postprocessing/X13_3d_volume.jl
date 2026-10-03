@@ -50,6 +50,14 @@ stem = replace(basename(filepath), ".nc" => "")
 #---
 
 #+++ Read the snapshot
+# A multi-GPU run's merged 3D file is HDF5 virtual datasets over the rank files, which netCDF-C reports with a
+# storage code NCDatasets does not map, so a read throws a KeyError until the codes are registered. The canonical
+# definition is `allow_virtual_storage!` in merge_rank_output.jl, which says "any Julia reader of a virtual file
+# calls this first"; copied rather than included, since that file pulls in Oceananigans and HDF5_jll for what is
+# one line. Harmless on an ordinary file, and a no-op if NCDatasets ever maps the codes itself.
+allow_virtual_storage!() = foreach(code -> get!(NCDatasets.NCSymbols, code, :contiguous), 2:4)
+allow_virtual_storage!()
+
 # NCDatasets indexes in the file's own order, which is the reverse of Python's: (x, y, z, time).
 ds = NCDataset(filepath, "r")
 x, y, z = ds["x_caa"][:], ds["y_aca"][:], ds["z_aac"][:]
@@ -57,7 +65,16 @@ times   = ds["time"][:]
 n = isnothing(tsel) ? length(times) : argmin(abs.(times .- tsel))
 t = times[n]
 
-read3d(name) = Float64.(ds[name][:, :, :, n])
+# Lz = 25h is mostly quiescent, so everything is read and differentiated on the cropped slab alone: at Nz=1024 a
+# single field is 0.91 GB and the gradient tensor is nine of them, so cropping after the fact would peak around
+# 15-25 GB to render a third of it. One cell of margin each side keeps the centred z difference exact over the
+# slab proper -- `kz` below trims it off again -- and collapses to the true walls when the crop spans the domain.
+kz      = findall(zi -> abs(zi) <= zlim, z)
+kz_read = max(1, first(kz) - 1):min(length(z), last(kz) + 1)
+kz      = (first(kz) - first(kz_read) + 1):(last(kz) - first(kz_read) + 1)   # the slab proper, within what is read
+z_read  = z[kz_read]
+
+read3d(name) = Float64.(ds[name][:, :, kz_read, n])
 
 #+++ Derived fields
 # The file's ω is the spanwise component alone. u, v and w are all written at cell centres, so the
@@ -79,7 +96,7 @@ end
 
 function velocity_gradient()
     u, v, w = read3d("u"), read3d("v"), read3d("w")
-    coords = (x, y, z)
+    coords = (x, y, z_read)
     return [∂(a, j, coords[j]) for a in (u, v, w), j in 1:3]   # A[i, j] = ∂uⁱ/∂xʲ
 end
 
@@ -104,9 +121,8 @@ end
 
 data = field in ("Q", "enstrophy", "speed") ? derived(field) : read3d(field)
 
-# Lz = 25h is mostly quiescent: crop before rendering, or the billow is a sliver in an empty box.
-kz = findall(zi -> abs(zi) <= zlim, z)
-z, data = z[kz], data[:, :, kz]
+# Drop the one-cell margin the z derivative needed, leaving the slab that was asked for.
+z, data = z_read[kz], data[:, :, kz]
 Re, Ri = Float64(ds.attrib["Re"]), Float64(ds.attrib["Ri"])
 close(ds)
 @info @sprintf("%s at t = %.1f, |z| < %.1f: %s", field, t, zlim, size(data))
