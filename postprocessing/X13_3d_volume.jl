@@ -199,15 +199,14 @@ function prepare(bare)
     # For a signed field take a symmetric pair per level so both senses show; for a positive one the upper
     # tail, where the structures are. Levels are kept inside crange: a level past its end renders saturated
     # and the outermost shell becomes indistinguishable from the next one in.
-    # The same fractions of the colour range either way, so a positive field gets the signed panels' pale
-    # outer shells instead of a stack of levels crowded into the top of the ramp. Quantile-chosen levels put
-    # every surface above the 80th percentile, which rendered uniformly dark however the colours were scaled.
-    levels = if signed
-        f = fractions(0.18, 0.85, nlevels ÷ 2)
-        sort(vcat(-crange[2] .* f, crange[2] .* f))
-    else
-        crange[2] .* fractions(0.18, 0.85, nlevels)
-    end
+    # One set of fractions for every panel, so a surface means the same thing wherever it appears: this
+    # much of the panel's own range. A positive field gets exactly the magnitudes the signed panels put
+    # their red surfaces at, and simply has no blue counterparts -- so `--levels n` is n surfaces when the
+    # field changes sign and n/2 when it does not. Earlier revisions placed positive levels by quantile of
+    # the field's own distribution, which put them where the data was but at magnitudes unrelated to any
+    # other panel's, so nothing could be read across the figure.
+    f = fractions(0.18, 0.85, nlevels ÷ 2)
+    levels = signed ? sort(vcat(-crange[2] .* f, crange[2] .* f)) : crange[2] .* f
     @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s), levels %s", bare, name, crange[1], crange[2],
                    signed ? "signed" : "positive", join((@sprintf("%.3g", l) for l in levels), ", "))
     return (; name, bare, data = a, colorrange = crange, colormap = cmap, levels)
