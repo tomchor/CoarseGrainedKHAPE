@@ -256,7 +256,8 @@ function prepare(bare)
     # budget's number rather than a sum over what is drawn. Derived fields have none and get no annotation.
     int_name = name * "_int"
     integral = haskey(ds, int_name) ? Float64(ds[int_name][n]) : nothing
-    @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s)%s", bare, name, crange[1], crange[2],
+    # ±hi, not crange: crange is the normalised (-1, 1) every panel is drawn on, which says nothing.
+    @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s)%s", bare, name, -hi, hi,
                    signed ? "signed" : "positive",
                    isnothing(integral) ? "" : @sprintf("  ∫dV = %.3g", integral))
     return (; name, bare, data = a, colorrange = crange, colormap = cmap, levels, integral, scale = hi)
