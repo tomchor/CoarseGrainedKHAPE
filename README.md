@@ -250,6 +250,36 @@ A run over a subset of scales (`sweep1 --filter-scales`, as `extension_test.pbs`
 
 When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it sorts t=0 on the grid it loaded and broadcasts that row over the time axis. **The sweep does not need the budgeting pipeline to have run**, and does not read `_sorted_density_fixed_ref.nc`. It cannot: the column's z✶ are the padded grid's own heights, and the sweep pads to 4σ of its widest scale (ℓ=20) while `02_sort_density.py` pads to the budget scales — at Nz=2048, 2784 cells per side against 1024 — so the budgeting pipeline's column belongs to a different grid. Sorting t=0 costs one sort, and is bit-identical to `02`'s output whenever the two paddings do coincide.
 
+### Render 3D isosurfaces
+
+`submit_render3d.sh` (which submits `render3d.pbs`) runs `X13_3d_volume.jl` at one or more output times, one figure per time, into `postprocessing/extra_figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default, and the default panels are the six-term budget set at ℓ = 1.
+
+```bash
+cd postprocessing
+bash submit_render3d.sh TIMES=100,120,140                      # default Nz=1024, the six budget terms at l=1
+bash submit_render3d.sh FROM=60 TO=160 EVERY=10                # a strided range instead of a list: 11 figures
+bash submit_render3d.sh TIMES=120 LEVELS=2                     # one time, fewer isosurfaces: much faster
+bash submit_render3d.sh TIMES=100,140 FIELDS=Q,enstrophy       # other panels; bare names pick up _l<SCALE>
+bash submit_render3d.sh TIMES=120 FILE=/glade/derecho/scratch/someone/khi_Nz1024_Ri0.10.nc
+```
+
+`TIMES` and `FIELDS` are comma-separated here and travel to the job colon-separated, because `qsub -v` splits its own variable list on commas — which is also why a range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. `EVERY` has no default: the wrapper does not open the run to find its output interval.
+
+**The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
+
+Software rendering costs about **90 seconds per six-panel figure** at Nz=1024, measured on a Casper CPU node, so the job is sequential in the times and a full 101-record set is roughly 2.5 h — comfortably inside the 6 h walltime it asks for. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `subset_for_plots.py` (below) is for.
+
+### Subset a run for local plotting
+
+`subset_for_plots.py` writes a small NetCDF of selected fields, times and a z crop, in float32, that `X13_3d_volume.jl` reads unchanged. It copies the grid reconstruction groups (rewriting the z extent to the crop) and drops `virtual_rank_files`, both of which a plain `to_netcdf` of a sliced dataset would get wrong.
+
+```bash
+cd postprocessing
+$KHAPE_PYTHON subset_for_plots.py --filename $KHAPE_OUTPUT_DIR/khi_Nz1024_Ri0.10.nc --times 100 120 140
+```
+
+`--zlim` defaults to 5, wider than the plotting scripts' own 4, because they derive Q by centred differences: cropping to exactly what gets plotted leaves them one-sided on the boundary.
+
 ## Running locally (without PBS)
 
 For development on a workstation (no PBS scheduler), run the simulation and post-processing pipeline directly.

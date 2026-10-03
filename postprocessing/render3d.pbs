@@ -1,0 +1,108 @@
+#!/bin/bash -l
+#PBS -N render3d_Nz1024_Ri0.10
+#PBS -o logs/render3d_Nz1024_Ri0.10.log
+#PBS -e logs/render3d_Nz1024_Ri0.10.log
+# Note: job name above is a default; qalter below updates it at runtime based on NZ
+# Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
+#PBS -l walltime=06:00:00
+#PBS -q casper
+#PBS -m ae
+#PBS -r n
+#PBS -l select=1:ncpus=4:mem=64GB:ngpus=0
+#PBS -l job_priority=regular
+
+# X13_3d_volume.jl (GLMakie isosurfaces) at one or more output times.
+#
+# No GPU: GLMakie needs an OpenGL context, not a GPU, and Casper's compute nodes have neither a display nor
+# the NVIDIA driver exposed to one. Xvfb (/usr/bin/Xvfb, present without the usual xvfb-run wrapper) plus
+# Mesa's software rasteriser (/usr/lib64/dri/swrast_dri.so, forced with LIBGL_ALWAYS_SOFTWARE) gives a
+# context on a plain CPU node, so this is an ordinary batch job. Verified on crhtc73, 2026-10-03.
+# vglrun is also installed and would render in hardware, but it needs an X server bound to a GPU, which is
+# a separate piece of setup; the software path needs nothing and is fast enough for stills -- measured at
+# about 90 s per six-panel figure at Nz=1024. The times render sequentially, so a full 101-record set is
+# about 2.5 h and the 6 h walltime covers it with room to spare.
+set -eo pipefail
+
+[ -n "${PBS_O_WORKDIR:-}" ] && cd "$PBS_O_WORKDIR"   # postprocessing/, where the wrapper submits from
+REPO=$(cd .. && pwd)
+
+NZ=${NZ:-1024}
+# Colon-separated, because `qsub -v` splits its own list on commas and a space would not survive it.
+TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
+# Colon-separated on the way in, for the same reason TIMES is; X13 wants commas.
+FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
+SCALE=${SCALE:-1}
+LEVELS=${LEVELS:-6}
+ZLIM=${ZLIM:-4}
+OVERLAY=${OVERLAY:-b}
+OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
+FILE=${FILE:-$OUT_DIR/khi_Nz${NZ}_Ri0.10.nc}
+JOB_NAME="render3d_Nz${NZ}_Ri0.10"
+qalter -N "$JOB_NAME" "$PBS_JOBID" || true
+
+module li
+module --force purge
+module load ncarenv/25.10
+module li
+
+#+++ Julia 1.13, found the way simulation.pbs finds it
+# How you get 1.13 is per-user, so find it rather than assume. Note `julia +1.13` is a juliaup feature and
+# Casper's julia is usually not juliaup, where it would be read as a filename.
+if [ -n "${JULIA:-}" ]; then
+    echo "Using \$JULIA = $JULIA"
+elif command -v juliaup >/dev/null 2>&1; then
+    juliaup add 1.13
+    JULIA="julia +1.13"
+elif [ -x "$WORK/julia-1.13/bin/julia" ]; then
+    JULIA="$WORK/julia-1.13/bin/julia"
+else
+    echo "error: no Julia 1.13 found. Set \$JULIA, install juliaup, or unpack the 1.13 tarball to" >&2
+    echo "       \$WORK/julia-1.13 (https://julialang-s3.julialang.org/bin/linux/x64/1.13/julia-1.13.1-linux-x86_64.tar.gz)" >&2
+    exit 1
+fi
+$JULIA --version
+# The depot is shared across branches, so a checkout on a different Manifest can leave this one
+# uninstantiated. Idempotent and fast once the packages are there.
+$JULIA --project="$REPO" -e 'using Pkg; Pkg.instantiate()'
+#---
+
+#+++ Virtual display
+# A free display number, so two of these on one node do not collide. Killed on exit however the job ends.
+for n in $(seq 99 160); do
+    [ -e "/tmp/.X11-unix/X$n" ] || { DISPLAY_NUM=$n; break; }
+done
+: "${DISPLAY_NUM:?no free X display between 99 and 160}"
+Xvfb ":$DISPLAY_NUM" -screen 0 1920x1080x24 > "/tmp/xvfb_$PBS_JOBID.log" 2>&1 &
+XVFB_PID=$!
+trap 'kill $XVFB_PID 2>/dev/null || true' EXIT
+sleep 3
+export DISPLAY=":$DISPLAY_NUM"
+export LIBGL_ALWAYS_SOFTWARE=1
+echo "Xvfb on $DISPLAY (pid $XVFB_PID), software OpenGL"
+
+# Fail here rather than after a long render if the context cannot be made.
+$JULIA --project="$REPO" -e 'using GLMakie; GLMakie.activate!(visible=false)
+fig = Figure(size=(200,150)); Axis(fig[1,1]); lines!(1:10, rand(10))
+save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK")'
+#---
+
+#+++ Render
+LOG=logs/${JOB_NAME}.out
+: > "$LOG"
+echo "file=$FILE  fields=$FIELDS  scale=$SCALE  levels=$LEVELS  zlim=$ZLIM  overlay=$OVERLAY" | tee -a "$LOG"
+echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
+
+# One invocation per time: each writes its own figure, named by the time, and a failure at one time is
+# reported rather than losing the rest of the run.
+for T in $(echo "$TIMES" | tr ':' ' '); do
+    echo "=== t = $T ===" | tee -a "$LOG"
+    time $JULIA --project="$REPO" "$REPO/postprocessing/X13_3d_volume.jl" "$FILE" \
+        --field "$FIELDS" --scale "$SCALE" --mode isosurface --levels "$LEVELS" \
+        --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
+        || echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"
+done
+
+echo "Figures in $REPO/postprocessing/extra_figures/" | tee -a "$LOG"
+ls -la "$REPO"/postprocessing/extra_figures/*6panel* 2>/dev/null | tee -a "$LOG" || true
+qstat -f "$PBS_JOBID" >> "$LOG"
+#---
