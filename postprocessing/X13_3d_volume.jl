@@ -49,6 +49,31 @@ alpha   = parse(Float64, get(opts, "alpha", "0.35"))
 # collides its labels. 1.3π is where x still spans nearly the whole frame and y keeps enough depth to read.
 azim    = parse(Float64, get(opts, "azimuth", "1.30"))
 elev    = parse(Float64, get(opts, "elevation", "0.12"))
+# A second field drawn as isosurfaces over every panel, in grey, as a shared reference: b traces the
+# deformed interface the budget terms live on, which is otherwise invisible in a Q or Π panel.
+overlay   = get(opts, "overlay", "")
+ov_alpha  = parse(Float64, get(opts, "overlay-alpha", "0.45"))
+# One flat colour, not a colormap, and deliberately not grey: the panels use :balance (blue-white-red), whose
+# middle *is* grey, so a grey overlay reads as washed-out data rather than as context. A saturated hue off that
+# axis stays legibly separate. Any Makie colour name works.
+ov_color  = Symbol(get(opts, "overlay-color", "seagreen"))
+ov_clip   = parse(Float64, get(opts, "overlay-clip", "0.45"))
+# How the overlay is drawn. `wall` paints it on the bounding planes behind the data, `iso` draws it as
+# isosurfaces in the box.
+#
+# `wall` is the default because `iso` does not work here, for a reason no amount of tuning fixes: two sets
+# of interpenetrating isosurfaces always fight. Transparency cannot separate them, because GLMakie ignores
+# alpha on a volume contour (--overlay-alpha 0.05 and 1.0 render byte-identically), so the overlay is a
+# solid sheet across whatever the panel is about. Clipping it to a curtain helps a little and still looks
+# cluttered. On the wall the same field is context, not a competing object, and occludes nothing.
+ov_style  = get(opts, "overlay-style", "wall")
+# Lines on a wall want more of them than surfaces in the volume want of themselves, so the default differs.
+ov_levels = parse(Int, get(opts, "overlay-levels", ov_style == "wall" ? "10" : "1"))
+# A deliberately low-contrast ramp for the walls: no black, no white. A full-range map (:bone, :grays)
+# bottoms out at black, and a big black panel behind the data reads as a rendering fault rather than as
+# background. Named maps still work via --overlay-colormap.
+ov_cmap   = haskey(opts, "overlay-colormap") ? Symbol(opts["overlay-colormap"]) : cgrad([:gray88, :gray52])
+ov_style in ("wall", "iso") || error("--overlay-style must be wall or iso; got $ov_style")
 mode in ("volume", "isosurface", "both") || error("--mode must be volume, isosurface or both; got $mode")
 length(fields) == 1 || mode != "both" ||
     error("--mode both lays panels out by mode, so it takes one --field; got $(length(fields)). Pick --mode isosurface or volume.")
@@ -149,6 +174,10 @@ const TITLES = Dict("Q" => "Q  (vortex criterion)", "enstrophy" => "|ω|²", "sp
                     "ε_Ks" => "ε_Kˢ  KE dissipation", "ε_As" => "ε_Aˢ  APE dissipation", "b" => "b")
 pretty(bare, resolved) = get(TITLES, bare, resolved)
 
+# Level fractions of the colour range. `range(lo, hi, 1)` throws when the endpoints differ, so a single
+# pair takes the upper fraction alone -- the strongest surface, which is what one pair should show.
+fractions(lo, hi, n) = n <= 1 ? [hi] : collect(range(lo, hi, n))
+
 """Read or derive one field, cropped, with its colour scale and isosurface levels."""
 function prepare(bare)
     name = resolve(bare)
@@ -164,7 +193,7 @@ function prepare(bare)
     # tail, where the structures are. Levels are kept inside crange: a level past its end renders saturated
     # and the outermost shell becomes indistinguishable from the next one in.
     levels = if signed
-        f = collect(range(0.3, 0.85, max(nlevels ÷ 2, 1)))
+        f = fractions(0.3, 0.85, nlevels ÷ 2)
         sort(vcat(-crange[2] .* f, crange[2] .* f))
     else
         clamp.([quantile(vec(a), q) for q in range(0.90, 0.995, nlevels)], crange[1], crange[2])
@@ -176,6 +205,7 @@ end
 
 @info @sprintf("t = %.1f, |z| < %.1f, %d x %d x %d", t, zlim, length(x), length(y), length(kz))
 prepared = [prepare(f) for f in fields]
+ov = isempty(overlay) ? nothing : prepare(overlay)
 z = z_read[kz]
 Re, Ri = Float64(ds.attrib["Re"]), Float64(ds.attrib["Ri"])
 close(ds)
@@ -210,6 +240,32 @@ for (i, (kind, p, title)) in enumerate(panels)
     else
         contour!(ax, xr, yr, zr, p.data; levels = p.levels, colormap = p.colormap,
                  colorrange = p.colorrange, alpha, transparency = true)
+    end
+    # The overlay goes on last so Makie sorts it in front; grey keeps it off the panel's own colour scale,
+    # and its levels are a symmetric pair about the field's middle, which for b is the interface either side.
+    if ov !== nothing && ov_style == "wall"
+        # Two bounding planes, textured with the overlay: the far spanwise wall and the floor. `surface!`
+        # with one coordinate held constant is the only way to put a 2D field on an arbitrary plane in a
+        # 3D axis -- Makie's `heatmap!` is xy-only. They sit at the box edges, so nothing in the volume is
+        # hidden, and a pale sequential map keeps them visibly background against the panel's own data.
+        # Line contours, not shading: a filled wall is a second data layer competing with the panel's own,
+        # and no colormap makes it recede enough. Lines read as annotation. They go on the two *vertical*
+        # walls only -- b at fixed z is nearly uniform, so a floor is one flat colour carrying nothing.
+        # `transformation` is how Makie puts a 2D recipe on a plane of a 3D axis.
+        wall_lv = collect(range(ov.colorrange[1], ov.colorrange[2], ov_levels + 2))[2:end-1]
+        wall_kw = (; levels = wall_lv, color = :gray40, linewidth = 1.0)
+        contour!(ax, x, z, ov.data[:, end, :]; transformation = (:xz, y[end]), wall_kw...)
+        contour!(ax, y, z, ov.data[end, :, :]; transformation = (:yz, x[end]), wall_kw...)
+    elseif ov !== nothing
+        # One surface means the field's own middle, which for b is the interface itself. More than one
+        # takes a symmetric pair about it, which for a rolled-up billow quickly becomes opaque.
+        ov_lv = ov_levels <= 1 ? [0.0] :
+                sort(vcat(-ov.colorrange[2] .* fractions(0.25, 0.7, ov_levels ÷ 2),
+                           ov.colorrange[2] .* fractions(0.25, 0.7, ov_levels ÷ 2)))
+        jmax = clamp(round(Int, ov_clip * length(y)), 2, length(y))
+        contour!(ax, xr, y[1] .. y[jmax], zr, ov.data[:, 1:jmax, :]; levels = ov_lv,
+                 colormap = [ov_color, ov_color], colorrange = ov.colorrange,
+                 alpha = ov_alpha, transparency = true)
     end
     Colorbar(gl[1, 2]; colormap = p.colormap, colorrange = p.colorrange, height = Relative(0.6),
              ticklabelsize = 10, width = 12)
