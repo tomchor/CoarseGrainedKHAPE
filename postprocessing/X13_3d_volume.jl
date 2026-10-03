@@ -34,7 +34,10 @@ zlim    = parse(Float64, get(opts, "zlim", "4.0"))
 pct     = parse(Float64, get(opts, "clim-percentile", "99.0"))
 nlevels = parse(Int,     get(opts, "levels", "4"))
 alpha   = parse(Float64, get(opts, "alpha", "0.35"))
-azim    = parse(Float64, get(opts, "azimuth", "1.15"))    # in units of π, as Makie's Axis3 takes it
+# Camera, in units of π, as Makie's Axis3 takes it. Azimuth π looks straight down +x, so the streamwise
+# direction is fully into the page; 1.5π looks along +y and gives x the full width but puts y edge-on and
+# collides its labels. 1.3π is where x still spans nearly the whole frame and y keeps enough depth to read.
+azim    = parse(Float64, get(opts, "azimuth", "1.30"))
 elev    = parse(Float64, get(opts, "elevation", "0.12"))
 mode in ("volume", "isosurface", "both") || error("--mode must be volume, isosurface or both; got $mode")
 
@@ -131,7 +134,9 @@ end
 #+++ Figure
 Lx, Ly, Lz = x[end] - x[1], y[end] - y[1], z[end] - z[1]
 panels = mode == "both" ? ("volume", "isosurface") : (mode,)
-fig = Figure(size = (720 * length(panels), 640))
+# Wide and shallow: the domain is Lx:Ly:Lz ≈ 14:4.7:8 after the z crop, and viewed near side-on that
+# leaves a tall figure mostly empty above and below the box.
+fig = Figure(size = (820 * length(panels), 560))
 
 for (col, kind) in enumerate(panels)
     ax = Axis3(fig[1, col]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
