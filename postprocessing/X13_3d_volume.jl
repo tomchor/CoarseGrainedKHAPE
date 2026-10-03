@@ -22,6 +22,12 @@ using Statistics
 
 GLMakie.activate!(visible = false)   # render offscreen; `save` still works
 
+# The positive half of :balance (its white midpoint through to red). A positive-definite field used :magma,
+# whose dark, fully saturated ramp made it the loudest panel of a figure whose other panels are :balance --
+# near-white wherever the field is small. On the same ramp the panels carry the same visual weight, and a
+# positive field reads as "the red half of the signed scale", which is what it is.
+const BALANCE_POS = cgrad(Makie.to_colormap(:balance)[(end ÷ 2 + 1):end])
+
 #+++ Arguments
 # Deliberately hand-rolled rather than ArgParse: this is called by hand, and keeping it dependency-light
 # means it also runs under `julia --project` with nothing precompiled beyond Makie and NCDatasets.
@@ -185,17 +191,21 @@ function prepare(bare)
 
     signed = minimum(a) < 0 < maximum(a)
     absq(p) = quantile(abs.(vec(a)), p / 100)
-    crange = signed ? (-absq(pct), absq(pct)) : (quantile(vec(a), 1 - pct / 100), quantile(vec(a), pct / 100))
-    cmap   = signed ? :balance : :magma
+    # Zero anchors the white end of the ramp in both cases, so "pale" means "small" in every panel.
+    crange = signed ? (-absq(pct), absq(pct)) : (0.0, quantile(vec(a), pct / 100))
+    cmap   = signed ? cgrad(:balance) : BALANCE_POS
 
     # For a signed field take a symmetric pair per level so both senses show; for a positive one the upper
     # tail, where the structures are. Levels are kept inside crange: a level past its end renders saturated
     # and the outermost shell becomes indistinguishable from the next one in.
+    # The same fractions of the colour range either way, so a positive field gets the signed panels' pale
+    # outer shells instead of a stack of levels crowded into the top of the ramp. Quantile-chosen levels put
+    # every surface above the 80th percentile, which rendered uniformly dark however the colours were scaled.
     levels = if signed
         f = fractions(0.18, 0.85, nlevels ÷ 2)
         sort(vcat(-crange[2] .* f, crange[2] .* f))
     else
-        clamp.([quantile(vec(a), q) for q in range(0.80, 0.995, nlevels)], crange[1], crange[2])
+        crange[2] .* fractions(0.18, 0.85, nlevels)
     end
     @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s), levels %s", bare, name, crange[1], crange[2],
                    signed ? "signed" : "positive", join((@sprintf("%.3g", l) for l in levels), ", "))
