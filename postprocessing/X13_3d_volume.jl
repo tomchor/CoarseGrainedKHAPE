@@ -267,7 +267,7 @@ edge_pad(a) = (b = vcat(a[1:1, :], a, a[end:end, :]); hcat(b[:, 1:1], b, b[:, en
 # One field: panels are the modes. Several: panels are the fields, in the one mode given.
 panels = length(prepared) == 1 && mode == "both" ?
          [(kind, only(prepared), kind == "volume" ? "volume (MIP)" : "isosurfaces") for kind in ("volume", "isosurface")] :
-         [(mode, p, pretty(p.bare, p.name) * @sprintf("\n±%.3g", p.scale) *
+         [(mode, p, pretty(p.bare, p.name) * @sprintf("\nrange = ±%.3g", p.scale) *
                     (isnothing(p.integral) ? "" : @sprintf("    ∫dV = %.3g", p.integral))) for p in prepared]
 
 # Each panel carries its own colorbar: the budget terms differ by orders of magnitude (Π_K ~ 1e-3 against
