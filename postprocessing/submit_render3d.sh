@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Submit the 3D isosurface rendering job: X13_3d_volume.jl at one or more output times.
 # Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [ZLIM=4] [OVERLAY=b]
+#    or: bash submit_render3d.sh FROM=60 TO=160 EVERY=10 [...]
 #   TIMES    output times to render, comma- or space-separated (quote if spaces). One figure per time
+#   FROM/TO/EVERY  a strided range instead of a list: FROM to TO inclusive in steps of EVERY, which has no
+#            default (the wrapper does not open the run to find its output interval). Exclusive with TIMES
 #   NZ       vertical resolution, used to name the job and find the run
 #   FILE     the 3D file to read; default $KHAPE_OUTPUT_DIR/khi_Nz<NZ>_Ri0.10.nc. Give it to render a run
 #            that lives somewhere else, e.g. a colleague's scratch
@@ -14,6 +17,9 @@
 # No GPU is requested: the job makes its own OpenGL context with Xvfb and Mesa's software rasteriser.
 # See render3d.pbs.
 TIMES=""
+FROM=""
+TO=""
+EVERY=""
 NZ=1024
 FILE=""
 FIELDS="Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As"
@@ -24,6 +30,9 @@ OVERLAY=b
 # An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
 for arg in "$@"; do case $arg in
   TIMES=*)   TIMES="${arg#*=}";;
+  FROM=*)    FROM="${arg#*=}";;
+  TO=*)      TO="${arg#*=}";;
+  EVERY=*)   EVERY="${arg#*=}";;
   NZ=*)      NZ="${arg#*=}";;
   FILE=*)    FILE="${arg#*=}";;
   FIELDS=*)  FIELDS="${arg#*=}";;
@@ -31,9 +40,26 @@ for arg in "$@"; do case $arg in
   LEVELS=*)  LEVELS="${arg#*=}";;
   ZLIM=*)    ZLIM="${arg#*=}";;
   OVERLAY=*) OVERLAY="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, NZ=, FILE=, FIELDS=, SCALE=, LEVELS=, ZLIM= or OVERLAY=)" >&2; exit 2;;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, SCALE=, LEVELS=, ZLIM= or OVERLAY=)" >&2; exit 2;;
 esac; done
-[ -n "$TIMES" ] || { echo "error: TIMES is required, e.g. TIMES=100,120,140" >&2; exit 2; }
+# A list or a range, not both: silently preferring one would hide a typo in the other.
+if [ -n "$TIMES" ] && { [ -n "$FROM" ] || [ -n "$TO" ]; }; then
+    echo "error: give TIMES= or FROM=/TO=, not both" >&2; exit 2
+fi
+if [ -z "$TIMES" ]; then
+    { [ -n "$FROM" ] && [ -n "$TO" ] && [ -n "$EVERY" ]; } ||
+        { echo "error: give TIMES=100,120,140, or all of FROM=60 TO=160 EVERY=10" >&2; exit 2; }
+    # awk, not seq: the times are floats and seq's output format depends on the locale.
+    TIMES=$(awk -v a="$FROM" -v b="$TO" -v s="$EVERY" 'BEGIN {
+        if (s <= 0) { print "BADSTEP"; exit }
+        if (b < a)  { print "EMPTY"; exit }
+        n = 0
+        for (t = a; t <= b + 1e-9; t += s) { printf "%s%g", (n++ ? "," : ""), t }
+        printf "\n"
+    }')
+    [ "$TIMES" != "BADSTEP" ] || { echo "error: EVERY=$EVERY must be positive" >&2; exit 2; }
+    [ "$TIMES" != "EMPTY" ]   || { echo "error: TO=$TO is before FROM=$FROM" >&2; exit 2; }
+fi
 # The allocation to charge: default in khape_defaults.sh, overridden from the environment. No Python here --
 # this job is Julia only -- but KHAPE_OUTPUT_DIR still has to reach it, which $KHAPE_REDIRECT carries.
 source "$(dirname "$0")/../khape_defaults.sh"

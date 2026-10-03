@@ -252,17 +252,18 @@ When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it 
 
 ### Render 3D isosurfaces
 
-`submit_render3d.sh` (which submits `render3d.pbs`) runs `X13_3d_volume.jl` at one or more output times, one figure per time, into `postprocessing/extra_figures/`. `TIMES` is required; everything else has a default, and the default panels are the six-term budget set at ℓ = 1.
+`submit_render3d.sh` (which submits `render3d.pbs`) runs `X13_3d_volume.jl` at one or more output times, one figure per time, into `postprocessing/extra_figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default, and the default panels are the six-term budget set at ℓ = 1.
 
 ```bash
 cd postprocessing
 bash submit_render3d.sh TIMES=100,120,140                      # default Nz=1024, the six budget terms at l=1
+bash submit_render3d.sh FROM=60 TO=160 EVERY=10                # a strided range instead of a list: 11 figures
 bash submit_render3d.sh TIMES=120 LEVELS=2                     # one time, fewer isosurfaces: much faster
 bash submit_render3d.sh TIMES=100,140 FIELDS=Q,enstrophy       # other panels; bare names pick up _l<SCALE>
 bash submit_render3d.sh TIMES=120 FILE=/glade/derecho/scratch/someone/khi_Nz1024_Ri0.10.nc
 ```
 
-`TIMES` and `FIELDS` are comma-separated here and travel to the job colon-separated, because `qsub -v` splits its own variable list on commas.
+`TIMES` and `FIELDS` are comma-separated here and travel to the job colon-separated, because `qsub -v` splits its own variable list on commas — which is also why a range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. `EVERY` has no default: the wrapper does not open the run to find its output interval.
 
 **The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
 

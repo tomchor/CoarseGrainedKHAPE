@@ -56,6 +56,7 @@ bash submit_sweep.sh NZ=512 FIXED_REF=both
 ```bash
 cd postprocessing
 bash submit_render3d.sh TIMES=100,120,140              # X13 at each time; default panels are the six budget terms at ℓ=1
+bash submit_render3d.sh FROM=60 TO=160 EVERY=10       # a strided range instead of a list (EVERY has no default)
 bash submit_render3d.sh TIMES=120 LEVELS=2             # fewer isosurfaces: much faster under software rendering
 bash submit_render3d.sh TIMES=120 FILE=/glade/.../khi_Nz1024_Ri0.10.nc
 ```
@@ -67,7 +68,7 @@ rendering (a long software render should not be how a broken display announces i
 an EXIT trap. Two traps: `xvfb-run` is **not** installed on Casper, only the `Xvfb` binary it wraps, and
 `julia +1.13` is a juliaup feature that Casper's `julia` reads as a filename, so the job finds 1.13 the way
 `simulation.pbs` does. `TIMES` and `FIELDS` travel colon-separated because `qsub -v` splits its own list on
-commas. Software rendering costs minutes per panel at Nz=1024, so `subset_for_plots.py` is the better loop for
+commas, which is also why a strided range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. Software rendering costs minutes per panel at Nz=1024, so `subset_for_plots.py` is the better loop for
 tuning camera, levels and colours locally.
 
 ### Local post-processing (no PBS)
