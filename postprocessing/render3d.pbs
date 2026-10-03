@@ -4,7 +4,7 @@
 #PBS -e logs/render3d_Nz1024_Ri0.10.log
 # Note: job name above is a default; qalter below updates it at runtime based on NZ
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
-#PBS -l walltime=06:00:00
+#PBS -l walltime=12:00:00
 #PBS -q casper
 #PBS -m ae
 #PBS -r n
@@ -18,7 +18,9 @@
 # Mesa's software rasteriser (/usr/lib64/dri/swrast_dri.so, forced with LIBGL_ALWAYS_SOFTWARE) gives a
 # context on a plain CPU node, so this is an ordinary batch job. Verified on crhtc73, 2026-10-03.
 # vglrun is also installed and would render in hardware, but it needs an X server bound to a GPU, which is
-# a separate piece of setup; the software path needs nothing and is fast enough for stills.
+# a separate piece of setup; the software path needs nothing and is fast enough for stills -- measured at
+# about 3 min per six-panel figure at Nz=1024. The times render sequentially, so the 12 h walltime covers
+# a full 101-record set with room to spare.
 set -eo pipefail
 
 [ -n "${PBS_O_WORKDIR:-}" ] && cd "$PBS_O_WORKDIR"   # postprocessing/, where the wrapper submits from

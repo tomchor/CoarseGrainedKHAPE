@@ -267,7 +267,7 @@ bash submit_render3d.sh TIMES=120 FILE=/glade/derecho/scratch/someone/khi_Nz1024
 
 **The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
 
-Software rendering is the cost: a 576 × 192 × 410 volume over six panels of six nested shells takes minutes per panel, so `LEVELS=2` is the way to a quick look and `ZLIM` trims the volume. For tuning camera angle, levels and colours, `subset_for_plots.py` (below) is the better loop — cut a few records down to a laptop-sized file, iterate locally, then render the final set here.
+Software rendering costs about **3 minutes per six-panel figure** at Nz=1024, measured on a Casper CPU node, so the job is sequential in the times and a full 101-record set is roughly 5 h — within the 12 h walltime it asks for. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `subset_for_plots.py` (below) is for.
 
 ### Subset a run for local plotting
 
