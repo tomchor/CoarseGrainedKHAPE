@@ -31,6 +31,7 @@ NZ=${NZ:-1024}
 TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
 # Colon-separated on the way in, for the same reason TIMES is; X13 wants commas.
 FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
+COLS=${COLS:-3}
 SCALE=${SCALE:-1}
 LEVELS=${LEVELS:-6}
 ZLIM=${ZLIM:-4}
@@ -89,7 +90,7 @@ save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK
 #+++ Render
 LOG=logs/${JOB_NAME}.out
 : > "$LOG"
-echo "file=$FILE  fields=$FIELDS  scale=$SCALE  levels=$LEVELS  zlim=$ZLIM  overlay=$OVERLAY" | tee -a "$LOG"
+echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  levels=$LEVELS  zlim=$ZLIM  overlay=$OVERLAY" | tee -a "$LOG"
 echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
 
 # One invocation per time: each writes its own figure, named by the time, and a failure at one time is
@@ -97,7 +98,7 @@ echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
 for T in $(echo "$TIMES" | tr ':' ' '); do
     echo "=== t = $T ===" | tee -a "$LOG"
     time $JULIA --project="$REPO" "$REPO/postprocessing/X13_3d_volume.jl" "$FILE" \
-        --field "$FIELDS" --scale "$SCALE" --mode isosurface --levels "$LEVELS" \
+        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface --levels "$LEVELS" \
         --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
         || echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"
 done

@@ -8,7 +8,9 @@
 #   NZ       vertical resolution, used to name the job and find the run
 #   FILE     the 3D file to read; default $KHAPE_OUTPUT_DIR/khi_Nz<NZ>_Ri0.10.nc. Give it to render a run
 #            that lives somewhere else, e.g. a colleague's scratch
-#   FIELDS   comma-separated panels; default is the six-term budget set
+#   COLS     panels per row (X13 default 3). A two-row budget figure of eight fields wants COLS=4
+#   FIELDS   comma-separated panels; default is the six-term budget set. A "-" prefix negates a field
+#            (a term entering two budgets with opposite sign) and a lone "." leaves a cell empty
 #   SCALE    filter scale ℓ whose per-scale terms to draw (the _ℓ<ℓ> suffix the bare names pick up)
 #   LEVELS   isosurfaces per panel; 2 is much faster to a first look, 6 shows the nested structure
 #   ZLIM     crop to |z| < ZLIM
@@ -23,6 +25,7 @@ EVERY=""
 NZ=1024
 FILE=""
 FIELDS="Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As"
+COLS=3
 SCALE=1
 LEVELS=6
 ZLIM=4
@@ -36,11 +39,12 @@ for arg in "$@"; do case $arg in
   NZ=*)      NZ="${arg#*=}";;
   FILE=*)    FILE="${arg#*=}";;
   FIELDS=*)  FIELDS="${arg#*=}";;
+  COLS=*)    COLS="${arg#*=}";;
   SCALE=*)   SCALE="${arg#*=}";;
   LEVELS=*)  LEVELS="${arg#*=}";;
   ZLIM=*)    ZLIM="${arg#*=}";;
   OVERLAY=*) OVERLAY="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, SCALE=, LEVELS=, ZLIM= or OVERLAY=)" >&2; exit 2;;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, ZLIM= or OVERLAY=)" >&2; exit 2;;
 esac; done
 # A list or a range, not both: silently preferring one would hide a typo in the other.
 if [ -n "$TIMES" ] && { [ -n "$FROM" ] || [ -n "$TO" ]; }; then
@@ -73,6 +77,6 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
-           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,SCALE=$SCALE,LEVELS=$LEVELS,ZLIM=$ZLIM,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
+           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,ZLIM=$ZLIM,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
            render3d.pbs)
 echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS): $JOB"
