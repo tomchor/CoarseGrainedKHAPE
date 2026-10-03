@@ -182,11 +182,32 @@ function resolve(name)
     error("neither $name nor $suffixed is in $(basename(filepath)), and it is not one of $(join(DERIVED_NAMES, ", "))")
 end
 
-# Pretty panel titles. Anything not listed falls back to the variable's own name.
-const TITLES = Dict("Q" => "Q  (vortex criterion)", "enstrophy" => "|ω|²", "speed" => "|u|", "b_r" => "b_r  buoyancy anomaly",
-                    "wb_rs" => "τ(w, b_r)  conversion", "Π_K" => "Π_K  KE flux", "Π_A" => "Π_A  APE flux",
-                    "ε_Ks" => "ε_Kˢ  KE dissipation", "ε_As" => "ε_Aˢ  APE dissipation", "b" => "b")
-pretty(bare, resolved) = get(TITLES, bare, resolved)
+# Panel titles as Makie rich text, so the sub- and superscripts that name these terms are typeset rather
+# than spelled out in lookalike unicode: ε with a subscript K and a superscript s, not "ε_Kˢ". Anything
+# unlisted falls back to the variable's own name.
+const TITLES = Dict(
+    "Q"         => rich("Q", "  vortex criterion"),
+    "enstrophy" => rich("|ω|", superscript("2")),
+    "speed"     => rich("|u|"),
+    "b"         => rich("b"),
+    "b_r"       => rich("b", subscript("r"), "  buoyancy anomaly"),
+    "wb_rs"     => rich("τ(w, b", subscript("r"), ")  conversion"),
+    "Π_K"       => rich("Π", subscript("K"), "  KE flux"),
+    "Π_A"       => rich("Π", subscript("A"), "  APE flux"),
+    "ε_Ks"      => rich("ε", subscript("K"), superscript("s"), "  KE dissipation"),
+    "ε_As"      => rich("ε", subscript("A"), superscript("s"), "  APE dissipation"),
+    "K_s"       => rich("K", superscript("s"), "  sub-filter KE"),
+    "E_as"      => rich("E", subscript("a"), superscript("s"), "  sub-filter APE"),
+    "R_s"       => rich("R", superscript("s"), "  reference tendency"),
+)
+pretty(bare, resolved) = get(TITLES, bare, rich(resolved))
+
+"""The second title line: the panel's own range, and its volume integral where the file carries one."""
+function scale_line(p)
+    s = @sprintf("range = ±%.3g", p.scale)
+    isnothing(p.integral) || (s *= @sprintf("    ∫dV = %.3g", p.integral))
+    return s
+end
 
 # Level fractions of the colour range. `range(lo, hi, 1)` throws when the endpoints differ, so a single
 # pair takes the upper fraction alone -- the strongest surface, which is what one pair should show.
@@ -266,9 +287,8 @@ edge_pad(a) = (b = vcat(a[1:1, :], a, a[end:end, :]); hcat(b[:, 1:1], b, b[:, en
 
 # One field: panels are the modes. Several: panels are the fields, in the one mode given.
 panels = length(prepared) == 1 && mode == "both" ?
-         [(kind, only(prepared), kind == "volume" ? "volume (MIP)" : "isosurfaces") for kind in ("volume", "isosurface")] :
-         [(mode, p, pretty(p.bare, p.name) * @sprintf("\nrange = ±%.3g", p.scale) *
-                    (isnothing(p.integral) ? "" : @sprintf("    ∫dV = %.3g", p.integral))) for p in prepared]
+         [(kind, only(prepared), rich(kind == "volume" ? "volume (MIP)" : "isosurfaces")) for kind in ("volume", "isosurface")] :
+         [(mode, p, rich(pretty(p.bare, p.name), "\n", rich(scale_line(p), fontsize = 13))) for p in prepared]
 
 # Each panel carries its own colorbar: the budget terms differ by orders of magnitude (Π_K ~ 1e-3 against
 # Q ~ 1e-1 on the test run), so one shared scale would flatten all but the largest.
@@ -280,8 +300,14 @@ fig = Figure(size = (640 * ncols + 120, 520 * nrows))
 
 for (i, (kind, p, title)) in enumerate(panels)
     row, col = fldmod1(i, ncols)
+    # The title is a Label above the axis, not Axis3's own `title`: that attribute takes a plain string or
+    # a LaTeXString but rejects rich text, and no form of it accepts a line break, so neither the typeset
+    # subscripts nor the second line of scale and integral would survive it.
+    # `fig[row, col, Top()]` hangs the label in the cell's top protrusion rather than taking a grid row,
+    # so the axis keeps the whole cell. A nested GridLayout with a label row shrinks the axis to a corner.
+    Label(fig[row, col, Top()], title; fontsize = 15, font = :bold, padding = (0, 0, 6, 0))
     ax = Axis3(fig[row, col]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
-               title, titlesize = 15, azimuth = azim * π, elevation = elev * π, limits = box_limits)
+               azimuth = azim * π, elevation = elev * π, limits = box_limits)
     if kind == "volume"
         # Maximum-intensity projection: no transfer function to tune, and it shows where the extremes
         # are. :absorption looks better but needs an opacity curve matched to the field's range.
