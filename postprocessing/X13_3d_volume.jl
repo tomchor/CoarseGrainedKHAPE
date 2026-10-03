@@ -299,7 +299,11 @@ ncols = min(cols, length(panels))
 nrows = cld(length(panels), ncols)
 # Wide and shallow per panel: after the z crop the domain is about 14:4.7:8, and viewed near side-on a
 # square panel is mostly empty above and below the box. The colorbar column adds its own width.
-fig = Figure(size = (640 * ncols + 120, 520 * nrows))
+# figure_padding and the inter-panel gaps below are the binding constraint on how large the boxes are
+# drawn, not the cell size: with Makie's defaults the box fills about half its cell. `viewmode = :fitzoom`
+# on each axis then zooms the box to the space that frees up -- on its own, at default padding, it does
+# nothing visible.
+fig = Figure(size = (640 * ncols + 120, 520 * nrows), figure_padding = 4)
 
 for (i, (kind, p, title)) in enumerate(panels)
     row, col = fldmod1(i, ncols)
@@ -310,7 +314,7 @@ for (i, (kind, p, title)) in enumerate(panels)
     # so the axis keeps the whole cell. A nested GridLayout with a label row shrinks the axis to a corner.
     Label(fig[row, col, Top()], title; fontsize = 15, font = :bold, padding = (0, 0, 6, 0))
     ax = Axis3(fig[row, col]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
-               azimuth = azim * π, elevation = elev * π, limits = box_limits)
+               azimuth = azim * π, elevation = elev * π, limits = box_limits, viewmode = :fitzoom)
     if kind == "volume"
         # Maximum-intensity projection: no transfer function to tune, and it shows where the extremes
         # are. :absorption looks better but needs an opacity curve matched to the field's range.
@@ -357,6 +361,8 @@ Colorbar(fig[1:nrows, ncols + 1]; colormap = cgrad(cmap_name), colorrange = (-1.
          ticks = ([-1, -0.5, 0, 0.5, 1], ["-1", "-0.5", "0", "0.5", "1"]),
          label = "fraction of each panel's range", height = Relative(0.5), width = 14)
 
+colgap!(fig.layout, 0)
+rowgap!(fig.layout, 0)
 Label(fig[0, :], @sprintf("t = %.1f      Re = %d,  Ri = %.2f%s", t, round(Int, Re), Ri,
                           isempty(scale) ? "" : @sprintf("      ℓ = %s", scale)),
       fontsize = 17, padding = (0, 0, 0, 10))
