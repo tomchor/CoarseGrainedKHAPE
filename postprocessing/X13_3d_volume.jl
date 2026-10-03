@@ -223,6 +223,20 @@ close(ds)
 #+++ Figure
 Lx, Ly, Lz = x[end] - x[1], y[end] - y[1], z[end] - z[1]
 xr, yr, zr = x[1] .. x[end], y[1] .. y[end], z[1] .. z[end]
+# Makie's Axis3 autoscales its limits to the data extent plus 5% on every side, which is what makes the
+# box read as a box rather than as the surface of the field. Those limits are reproduced explicitly here,
+# unchanged, so the padding is a known number rather than an implementation detail -- `aspect` stays on the
+# data extents, as it was, so the panel looks exactly as it did.
+pad_x, pad_y, pad_z = 0.05Lx, 0.05Ly, 0.05Lz
+x_wall, y_wall = x[end] + pad_x, y[end] + pad_y
+box_limits = (x[1] - pad_x, x_wall, y[1] - pad_y, y_wall, z[1] - pad_z, z[end] + pad_z)
+# A wall contour drawn over the data's own coordinates covers only the data footprint, leaving a bare strip
+# along each edge of the wall where the box is wider -- most visible as a gap at the far end of the back
+# wall. Extending the coordinates to the box and repeating the edge slice into the padding runs every
+# contour flat out to the corners.
+x_span, y_span = vcat(x[1] - pad_x, x, x_wall), vcat(y[1] - pad_y, y, y_wall)
+z_span = vcat(z[1] - pad_z, z, z[end] + pad_z)
+edge_pad(a) = (b = vcat(a[1:1, :], a, a[end:end, :]); hcat(b[:, 1:1], b, b[:, end:end]))
 
 # One field: panels are the modes. Several: panels are the fields, in the one mode given.
 panels = length(prepared) == 1 && mode == "both" ?
@@ -241,7 +255,7 @@ for (i, (kind, p, title)) in enumerate(panels)
     row, col = fldmod1(i, ncols)
     gl = fig[row, col] = GridLayout()
     ax = Axis3(gl[1, 1]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
-               title, titlesize = 15, azimuth = azim * π, elevation = elev * π)
+               title, titlesize = 15, azimuth = azim * π, elevation = elev * π, limits = box_limits)
     if kind == "volume"
         # Maximum-intensity projection: no transfer function to tune, and it shows where the extremes
         # are. :absorption looks better but needs an opacity curve matched to the field's range.
@@ -263,8 +277,8 @@ for (i, (kind, p, title)) in enumerate(panels)
         # `transformation` is how Makie puts a 2D recipe on a plane of a 3D axis.
         wall_lv = collect(range(ov.colorrange[1], ov.colorrange[2], ov_levels + 2))[2:end-1]
         wall_kw = (; levels = wall_lv, color = :gray40, linewidth = 1.0)
-        contour!(ax, x, z, ov.data[:, end, :]; transformation = (:xz, y[end]), wall_kw...)
-        contour!(ax, y, z, ov.data[end, :, :]; transformation = (:yz, x[end]), wall_kw...)
+        contour!(ax, x_span, z_span, edge_pad(ov.data[:, end, :]); transformation = (:xz, y_wall), wall_kw...)
+        contour!(ax, y_span, z_span, edge_pad(ov.data[end, :, :]); transformation = (:yz, x_wall), wall_kw...)
     elseif ov !== nothing
         # One surface means the field's own middle, which for b is the interface itself. More than one
         # takes a symmetric pair about it, which for a rolled-up billow quickly becomes opaque.
