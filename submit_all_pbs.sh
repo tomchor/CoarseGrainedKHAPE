@@ -3,7 +3,6 @@
 # each stage only runs if the previous one succeeds. Optional validation and plotting stages.
 #
 #   simulation → budgeting → sweep_filter → sweep_transfer                      (always)
-#   simulation → merge → budgeting → …                                          (NGPUS > 1)
 #   + validation  (online-vs-offline figures + animations; parallel after sim)  (VALIDATE=1)
 #   + plots       (plot2 transfer spectrum, plot3 budgets, plot4 panels)        (PLOTS=1)
 #
@@ -13,8 +12,8 @@
 # Usage: bash submit_all_pbs.sh [NZ=512] [NGPUS=] [VALIDATE=0] [PLOTS=0] [SAVE_SORTED=1] [FIXED_REF=0] [SIMULATION=1]
 #   NZ         vertical resolution
 #   NGPUS      GPUs to run the simulation on (default: 1 up to NZ=512, 4 up to NZ=1024). More than one splits the
-#              domain across MPI ranks and puts a merge job (merge.pbs) between the simulation and everything that
-#              reads it; see submit_simulation.sh and the README, Multi-GPU runs
+#              domain across MPI ranks, whose files the simulation job merges after the run; see submit_simulation.sh
+#              and the README, Multi-GPU runs
 #   SIMULATION run the simulation (1), or start the chain at budgeting on the run already in ${KHAPE_OUTPUT_DIR:-output} (0)
 #   VALIDATE   also run the online-vs-offline validation (adds --save_tensors for the tensor comparison and
 #              forces --save_sorted, which inv06-inv07 read): 0 or 1
@@ -59,8 +58,7 @@ SAVE_SORTED=${SAVE_SORTED:-1}
 if [ "$VALIDATE" = "1" ]; then SAVE_SORTED=1; fi          # inv06-inv07 read the sorted state
 [ "$VALIDATE" = "1" ] && SAVE_TENSORS=1 || SAVE_TENSORS=0   # inv03 reads the per-scale tensors
 
-# AFTER_SIM is what the jobs that read the simulation output wait for: the simulation job (on several GPUs, the merge
-# job that follows it), or nothing with SIMULATION=0.
+# AFTER_SIM is what the jobs that read the simulation output wait for: the simulation job, or nothing with SIMULATION=0.
 AFTER_SIM=()
 if [ "$SIMULATION" = "1" ]; then
     SIM_JOB=$(submit_simulation_job kelvin_helmholtz_${NZ} $NZ $NGPUS \

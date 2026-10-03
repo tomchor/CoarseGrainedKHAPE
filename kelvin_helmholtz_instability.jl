@@ -693,8 +693,8 @@ run!(simulation)
 #---
 
 #+++ Plot results
-# A distributed run's 2D output is one file per rank until merge_rank_output.jl stitches them together, so merge.pbs
-# draws its animation after the merge.
+# A distributed run's 2D output is one file per rank until merge_rank_output.jl stitches them together, so
+# simulation.pbs draws its animation after the merge.
 if params.ranks == 1
     @info "Creating animation..."
     plot_filepath = output_filename_2d

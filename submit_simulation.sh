@@ -3,8 +3,8 @@
 #   NZ            vertical resolution
 #   NGPUS         GPUs to run on (default: 1 up to NZ=512, 4 up to NZ=1024; see default_ngpus in khape_defaults.sh).
 #                 One GPU runs as always; more split the domain into x-slabs, one MPI rank per GPU (whole 4-GPU
-#                 Casper nodes, so a multiple of 4), and chain a merge job that stitches the rank files into the
-#                 one-GPU layout and draws the figures (see the README, Multi-GPU runs)
+#                 Casper nodes, so a multiple of 4), whose files the job stitches into the one-GPU layout after the
+#                 run (see the README, Multi-GPU runs)
 #   SAVE_TENSORS  also write the per-scale strain/stress tensor components (0 or 1, for online-vs-offline validation)
 #   SAVE_SORTED   also write the validation-only view of the Winters (1995) sorted reference state (0 or 1;
 #                 default 1 on one GPU -- the validation scripts and the online panels animation use them; the budget

@@ -109,16 +109,28 @@ time $LAUNCH $JULIA_BIN --project -t 8 kelvin_helmholtz_instability.jl --Nz $NZ 
     2>&1 | tee logs/kelvin_helmholtz_${NZ}.out
 if [ -n "${GPU_MEMORY_LOG:-}" ]; then kill $GPU_MEMORY_LOG || true; fi
 
-# The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot3 reads the
-# _2d.nc file, plot5 and plot6 assemble the SFS budgets from the 3D file themselves (plot2 and plot4 need the sweep
-# and stay in plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this
-# one with afterok should still start. Several ranks leave one file per rank, so merge.pbs draws them after the merge.
-if [ "$RANKS" = "1" ]; then
-    for script in plot3_b_br_snapshots.py plot5_budgets.py plot6_panels.py; do
-        time $PYTHON -u postprocessing/$script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
-            || echo "warning: $script failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
-    done
+# Several ranks leave one file per rank: merge_rank_output.jl stitches them into the two files a one-GPU run writes
+# (the 3D one virtually, ~3 min at Nz=1024 with the 2D copy), and the animation a one-GPU run draws at its end is drawn
+# from the merged 2D file. Both run in the environment a one-GPU job runs in, without MPI. A failed merge fails the
+# job, since nothing downstream can read the run without it; a failed animation is reported, not fatal.
+if [ "$RANKS" -gt 1 ]; then
+    module --force purge
+    module load ncarenv/25.10
+    export JULIA_DEPOT_PATH="$WORK/.julia"
+    unset JULIA_LOAD_PATH JULIA_CUDA_MEMORY_POOL MPITRAMPOLINE_LIB MPITRAMPOLINE_MPIEXEC UCX_ERROR_SIGNALS UCX_MEMTYPE_CACHE
+    time $JULIA_BIN --project merge_rank_output.jl $OUT_DIR/$SIM 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out
+    time $JULIA_BIN --project plot_kelvin_helmholtz_instability.jl $OUT_DIR/${SIM}_2d.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
+        || echo "warning: the animation failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
 fi
+
+# The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot3 reads the
+# _2d.nc file, plot5 and plot6 assemble the SFS budgets from the 3D file themselves (plot4 needs the sweep and stays in
+# plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this one with
+# afterok should still start.
+for script in plot3_b_br_snapshots.py plot5_budgets.py plot6_panels.py; do
+    time $PYTHON -u postprocessing/$script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
+        || echo "warning: $script failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
+done
 
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.log
 qstat -f $PBS_JOBID >> logs/kelvin_helmholtz_${NZ}.out

@@ -38,11 +38,10 @@ default_ngpus() {
 
 # submit_simulation_job NAME NZ NGPUS VARS
 # Submit simulation.pbs as job NAME, on NGPUS GPUs, with VARS (a comma-separated KEY=VALUE list) in its environment,
-# and print the id of the job everything that reads the run must wait for.
-#   NGPUS=1   the one-GPU request in simulation.pbs; the job draws its own figures. Prints its id.
+# and print its id, which everything that reads the run waits for. The job draws its own figures.
+#   NGPUS=1   the one-GPU request in simulation.pbs.
 #   NGPUS>1   whole Casper A100-80GB nodes (NGPUS a multiple of 4), one MPI rank per GPU, each writing its own files,
-#             then merge.pbs, a CPU job, to stitch them into the one-GPU layout and draw the figures. Prints the
-#             merge job's id.
+#             which the job stitches into the one-GPU layout after the run.
 # The job learns its rank count as RANKS, not NGPUS: PBS and NCAR's set_gpu_rank use NGPUS for the per-node count.
 submit_simulation_job() {
     local name=$1 nz=$2 ngpus=$3 vars=$4
@@ -56,13 +55,8 @@ submit_simulation_job() {
     if [ ! -f "$KHAPE_MPI_ENV/LocalPreferences.toml" ] || ! ls "$KHAPE_MPI_DEPOT"/mpiwrapper/lib*/libmpiwrapper.so >/dev/null 2>&1; then
         echo "error: no MPI environment in $KHAPE_MPI_DEPOT; run setup_mpi_env.sh once (see the README, Multi-GPU runs)" >&2; return 2
     fi
-    local sim_job merge_job
-    sim_job=$(qsub -N "$name" -A "$KHAPE_ACCOUNT" -o "logs/${name}.log" -e "logs/${name}.log" \
-                   -l select=$((ngpus / 4)):ncpus=32:mpiprocs=4:ompthreads=8:ngpus=4:gpu_type=a100_80gb:mem=200GB \
-                   -l walltime=08:00:00 \
-                   -v "$vars,RANKS=$ngpus,KHAPE_MPI_DEPOT=$KHAPE_MPI_DEPOT,KHAPE_MPI_ENV=$KHAPE_MPI_ENV" simulation.pbs) || return
-    merge_job=$(qsub -N "merge_${name}" -A "$KHAPE_ACCOUNT" -o "logs/merge_${name}.log" -e "logs/merge_${name}.log" \
-                     -W depend=afterok:$sim_job -v "$vars" merge.pbs) || return
-    echo "Submitted the simulation on $ngpus GPUs ($sim_job) and its merge ($merge_job)" >&2
-    echo "$merge_job"
+    qsub -N "$name" -A "$KHAPE_ACCOUNT" -o "logs/${name}.log" -e "logs/${name}.log" \
+         -l select=$((ngpus / 4)):ncpus=32:mpiprocs=4:ompthreads=8:ngpus=4:gpu_type=a100_80gb:mem=200GB \
+         -l walltime=08:00:00 \
+         -v "$vars,RANKS=$ngpus,KHAPE_MPI_DEPOT=$KHAPE_MPI_DEPOT,KHAPE_MPI_ENV=$KHAPE_MPI_ENV" simulation.pbs
 }

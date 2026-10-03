@@ -4,7 +4,7 @@ Computes Available Potential Energy (APE) from three-dimensional Kelvin-Helmholt
 
 ## Pipeline overview
 
-1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then draws the three figures that need nothing else (`plot3_b_br_snapshots.py`, `plot5_budgets.py`, `plot6_panels.py`) into `figures/`. Above `NZ=512` it runs on several GPUs and a CPU job, `merge.pbs`, merges their files and draws those figures instead (see [Multi-GPU runs](#multi-gpu-runs))
+1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then draws the three figures that need nothing else (`plot3_b_br_snapshots.py`, `plot5_budgets.py`, `plot6_panels.py`) into `figures/`. Above `NZ=512` it runs on several GPUs, and the same job merges their files before it draws those figures (see [Multi-GPU runs](#multi-gpu-runs))
 2. **Post-processing** — `postprocessing/budgeting.pbs` assembles the SFS KE and APE budgets from the terms the simulation computed online and plots them (the offline computation of those terms lives in `postprocessing/offline/` and runs only as a CI cross-check)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
@@ -79,7 +79,7 @@ bash submit_all_pbs.sh
 # Custom resolution
 bash submit_all_pbs.sh NZ=256
 
-# Above Nz=512: on four GPUs by default, with a merge job before the post-processing (see Multi-GPU runs)
+# Above Nz=512: on four GPUs by default (see Multi-GPU runs)
 bash submit_all_pbs.sh NZ=1024
 
 # Fixed-in-time reference profile for the sweep transfer (the budgets have no such variant)
@@ -166,9 +166,10 @@ What changes when `NGPUS > 1`:
 - `simulation.pbs` asks for `NGPUS/4` nodes, loads OpenMPI (and takes the CUDA toolkit it brings back off
   `LD_LIBRARY_PATH`, where it would shadow CUDA.jl's own libraries), precompiles once and launches the ranks with
   `mpiexec`; `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` records every GPU's memory every 10 s.
-- Every rank writes its own slab, `khi_Nz<NZ>_Ri0.10_rank<r>.nc` and `_2d_rank<r>.nc`. A CPU job chained on the
-  simulation, `merge.pbs`, stitches them into the two files a one-GPU run writes (`merge_rank_output.jl`) and draws
-  the figures and the animation the one-GPU job draws; budgeting, validation and the sweep wait on it and read the
+- Every rank writes its own slab, `khi_Nz<NZ>_Ri0.10_rank<r>.nc` and `_2d_rank<r>.nc`. Once the ranks have finished,
+  the same job, back in the one-GPU environment (no MPI), stitches them into the two files a one-GPU run writes
+  (`merge_rank_output.jl`, ~3 min at Nz=1024) and draws the figures and the animation the one-GPU job draws. A failed
+  merge fails the job. Budgeting, validation and the sweep wait on the simulation job, as on one GPU, and read the
   merged files as always.
 - The 3D file is merged **virtually**, in seconds: its fields are HDF5 virtual datasets that read each rank's slab
   from the rank file it is in, so the merged file takes almost no space and **the rank files must stay beside it**
@@ -297,6 +298,6 @@ CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=128, `--Re0 0.4`
 All job logs are written to the `logs/` subdirectory next to the submit script:
 - `logs/<job_name>.log` — PBS stdout/stderr (written by PBS after job ends)
 - `logs/<job_name>.out` — Python script output (written live via `tee`)
-- for a multi-GPU run, also `logs/merge_kelvin_helmholtz_<NZ>.{log,out}` (the merge job) and `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv`
+- for a multi-GPU run, also `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` (every GPU's memory every 10 s); the merge writes to the simulation's own `.out`
 
 Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref` (the `_fixed_ref` tag exists only for the sweep).

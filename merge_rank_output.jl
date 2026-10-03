@@ -21,7 +21,7 @@
 #   - copies every other variable from rank 0, after checking that all ranks agree bit for bit;
 #   - rewrites each variable's `indices` attribute, which records the slab's x range, to the whole domain's;
 #   - writes the grid metadata groups for the whole domain with Oceananigans' own writer, on the CPU (a file that
-#     says `GPU()` cannot be read back where CUDA is not loaded, e.g. by the merge job's own animation).
+#     says `GPU()` cannot be read back where CUDA is not loaded, e.g. by the animation on a CPU node).
 
 using NCDatasets
 using HDF5_jll: libhdf5, libhdf5_hl
