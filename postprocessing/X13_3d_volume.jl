@@ -206,8 +206,12 @@ function prepare(bare)
     # that the quantity never changes sign -- true of ε_Kˢ by construction and of nothing else here.
     # The alternative, the upper half of the ramp over (0, hi), renders identically (v maps to 0.5 + v/2hi
     # either way) and differs only in showing no empty half, so it says less for the same picture.
+    # Each panel is normalised by its own 99th percentile and drawn on one (-1, 1) scale, so the figure
+    # carries a single colourbar instead of one per panel, and a surface at a given colour means the same
+    # fraction of the local range wherever it appears. The physical scale moves into the title, where it
+    # reads as a number instead of having to be decoded off a bar of five-digit ticks.
     hi     = absq(pct)
-    crange = (-hi, hi)
+    crange = (-1.0, 1.0)
     cmap   = cgrad(:balance)
 
     # For a signed field take a symmetric pair per level so both senses show; for a positive one the upper
@@ -220,10 +224,18 @@ function prepare(bare)
     # the field's own distribution, which put them where the data was but at magnitudes unrelated to any
     # other panel's, so nothing could be read across the figure.
     f = fractions(0.18, 0.85, nlevels ÷ 2)
-    levels = signed ? sort(vcat(-crange[2] .* f, crange[2] .* f)) : crange[2] .* f
-    @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s), levels %s", bare, name, crange[1], crange[2],
-                   signed ? "signed" : "positive", join((@sprintf("%.3g", l) for l in levels), ", "))
-    return (; name, bare, data = a, colorrange = crange, colormap = cmap, levels)
+    levels = signed ? sort(vcat(-f, f)) : f
+    a = a ./ hi
+    # The budget terms carry their own volume integral, which is the number the closure is stated in and
+    # the one thing a self-scaled panel cannot show: without it the panels are six shapes with no sense of
+    # which dominates. Note it is over the *whole* domain while the panel is cropped in z, so it is the
+    # budget's number rather than a sum over what is drawn. Derived fields have none and get no annotation.
+    int_name = name * "_int"
+    integral = haskey(ds, int_name) ? Float64(ds[int_name][n]) : nothing
+    @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s)%s", bare, name, crange[1], crange[2],
+                   signed ? "signed" : "positive",
+                   isnothing(integral) ? "" : @sprintf("  ∫dV = %.3g", integral))
+    return (; name, bare, data = a, colorrange = crange, colormap = cmap, levels, integral, scale = hi)
 end
 
 @info @sprintf("t = %.1f, |z| < %.1f, %d x %d x %d", t, zlim, length(x), length(y), length(kz))
@@ -255,7 +267,8 @@ edge_pad(a) = (b = vcat(a[1:1, :], a, a[end:end, :]); hcat(b[:, 1:1], b, b[:, en
 # One field: panels are the modes. Several: panels are the fields, in the one mode given.
 panels = length(prepared) == 1 && mode == "both" ?
          [(kind, only(prepared), kind == "volume" ? "volume (MIP)" : "isosurfaces") for kind in ("volume", "isosurface")] :
-         [(mode, p, pretty(p.bare, p.name)) for p in prepared]
+         [(mode, p, pretty(p.bare, p.name) * @sprintf("\n±%.3g", p.scale) *
+                    (isnothing(p.integral) ? "" : @sprintf("    ∫dV = %.3g", p.integral))) for p in prepared]
 
 # Each panel carries its own colorbar: the budget terms differ by orders of magnitude (Π_K ~ 1e-3 against
 # Q ~ 1e-1 on the test run), so one shared scale would flatten all but the largest.
@@ -263,12 +276,11 @@ ncols = min(cols, length(panels))
 nrows = cld(length(panels), ncols)
 # Wide and shallow per panel: after the z crop the domain is about 14:4.7:8, and viewed near side-on a
 # square panel is mostly empty above and below the box. The colorbar column adds its own width.
-fig = Figure(size = (720 * ncols, 520 * nrows))
+fig = Figure(size = (640 * ncols + 120, 520 * nrows))
 
 for (i, (kind, p, title)) in enumerate(panels)
     row, col = fldmod1(i, ncols)
-    gl = fig[row, col] = GridLayout()
-    ax = Axis3(gl[1, 1]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
+    ax = Axis3(fig[row, col]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
                title, titlesize = 15, azimuth = azim * π, elevation = elev * π, limits = box_limits)
     if kind == "volume"
         # Maximum-intensity projection: no transfer function to tune, and it shows where the extremes
@@ -304,13 +316,21 @@ for (i, (kind, p, title)) in enumerate(panels)
                  colormap = [ov_color, ov_color], colorrange = ov.colorrange,
                  alpha = ov_alpha, transparency = true)
     end
-    Colorbar(gl[1, 2]; colormap = p.colormap, colorrange = p.colorrange, height = Relative(0.6),
-             ticklabelsize = 10, width = 12)
-    colgap!(gl, 4)
+    # Every panel shares one grid and one camera, so repeating the axis labels and tick labels six times is
+    # ink that says nothing. They stay on the first panel and come off the rest; the box and grid stay
+    # everywhere, so each panel still reads as the same volume.
+    i == 1 || hidedecorations!(ax; grid = false)
 end
 
+# One colourbar for the figure: every panel is on the same normalised scale, so six of them said the same
+# thing six times. Its ticks are fractions of each panel's own range; the ranges themselves are in the titles.
+Colorbar(fig[1:nrows, ncols + 1]; colormap = cgrad(:balance), colorrange = (-1.0, 1.0),
+         ticks = ([-1, -0.5, 0, 0.5, 1], ["-1", "-0.5", "0", "0.5", "1"]),
+         label = "fraction of each panel's range", height = Relative(0.5), width = 14)
+
 Label(fig[0, :], @sprintf("t = %.1f      Re = %d,  Ri = %.2f%s", t, round(Int, Re), Ri,
-                          isempty(scale) ? "" : @sprintf("      ℓ = %s", scale)), fontsize = 17)
+                          isempty(scale) ? "" : @sprintf("      ℓ = %s", scale)),
+      fontsize = 17, padding = (0, 0, 0, 10))
 
 # One field keeps its name in the filename; several would make it unreadable, so they become "budget6".
 tag = length(fields) == 1 ? only(fields) : "$(length(fields))panel"
