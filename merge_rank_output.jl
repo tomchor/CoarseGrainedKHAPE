@@ -1,24 +1,23 @@
 # Stitches the per-rank NetCDF files of a distributed run (`--ranks R`, x-slabs) into the two files a single-GPU run
 # writes, so that nothing downstream (the Python pipeline, `plot_kelvin_helmholtz_instability.jl`) knows the difference:
 #
-#   julia --project merge_rank_output.jl <dir>/khi_Nz1024_Ri0.10 [--copy [--delete]]
+#   julia --project merge_rank_output.jl <dir>/khi_Nz1024_Ri0.10
 #
 # merges <stem>_rank<r>.nc into <stem>.nc and <stem>_2d_rank<r>.nc into <stem>_2d.nc, r = 0, …, R-1, with R read from
 # the files' own `ranks` attribute.
 #
 # The 3D file is merged virtually: its fields are HDF5 virtual datasets that read each rank's slab from the rank file
 # where it lies (see *Virtual datasets*), so the merge takes seconds where copying the ~3.8 TB of an Nz=1024 run took
-# 7 h, and the rank files must stay beside it. `--copy` writes it out instead, as the 2D file always is (it is small,
-# and NCDatasets needs `allow_virtual_storage!` to read a virtual file); `--delete` then removes the rank files once
-# both merges have succeeded, and is refused without `--copy`.
+# 7 h, and the rank files must stay beside it. The 2D file is written out (9 GB at Nz=1024): NCDatasets needs
+# `allow_virtual_storage!` to read a virtual file, and the animation reads that one in Julia. A standalone copy of the
+# 3D file, which the rank files are no longer needed for, is `nccopy -k nc4 <stem>.nc <copy>.nc` (hours at Nz=1024).
 #
 # What a rank file holds: its own x-slab of every field, on the dimensions a single-GPU file has (`x_caa`, `x_faa`,
 # …), with real coordinates; every variable without an x dimension (time, the `_int` volume integrals, ε̄, L_K, …)
 # whole and identical on every rank, since the reductions are all-reduced; and the grid of its own slab in the grid
 # metadata groups. So the merge
-#   - maps or concatenates every variable with an x dimension in rank order; a copy goes record by record (a slab at a
-#     time in memory) and drops the files' pages from the cache as it goes (see *The page cache*). Either way the x
-#     coordinates are written out and checked to come out increasing;
+#   - maps or concatenates every variable with an x dimension in rank order (the x coordinates are written out, and
+#     checked to come out increasing);
 #   - copies every other variable from rank 0, after checking that all ranks agree bit for bit;
 #   - rewrites each variable's `indices` attribute, which records the slab's x range, to the whole domain's;
 #   - writes the grid metadata groups for the whole domain with Oceananigans' own writer, on the CPU (a file that
@@ -62,7 +61,8 @@ global_indices(indices, dims, global_size) = indices
     merge_ranks(stem; virtual)
 
 Merge the rank files of `stem` into `stem.nc`. With `virtual = true` every time-dependent field with an x dimension
-is a virtual dataset over the rank files (see *Virtual datasets*) and everything else is written as in the copy.
+is a virtual dataset over the rank files (see *Virtual datasets*), and everything else is written out; with
+`virtual = false`, everything.
 """
 function merge_ranks(stem; virtual)
     files = rank_files(stem)
@@ -155,45 +155,14 @@ function concatenate_in_x!(out, sources, name, x, t)
             NCDatasets.load!(slab, buffer, source...)
             merged[ntuple(d -> d == x ? (offset+1:offset+nx) : d == t ? record : Colon(), n)...] = buffer
             offset += nx
-            moved!(out, sources, sizeof(buffer))
         end
     end
     return nothing
 end
 
-#+++ The page cache
-# The job's memory limit counts the page cache its own reads and writes fill, and a merge moves far more than the limit
-# (an Nz=1024 run's 3D file is ~3.8 TB, read and written). Once the cache had filled it, every further page waited on
-# reclaim: on the Nz=256 rank files the merge ran 17x slower from that point on (64 GB job, 2026-10-02). So every
-# RELEASE_EVERY bytes the merged file is written back and the pages of it and of the rank files are dropped
-# (posix_fadvise drops clean pages only, hence the write-back first).
-const RELEASE_EVERY = 2^31
-const POSIX_FADV_DONTNEED = Cint(4)
-const MOVED_SINCE_RELEASE = Ref(0)
-
-function release_pages(path; writeback)
-    open(path, "r") do io
-        descriptor = reinterpret(Cint, fd(io))
-        writeback && ccall(:fsync, Cint, (Cint,), descriptor)
-        ccall(:posix_fadvise, Cint, (Cint, Int64, Int64, Cint), descriptor, 0, 0, POSIX_FADV_DONTNEED)
-    end
-    return nothing
-end
-
-function moved!(out, sources, bytes)
-    MOVED_SINCE_RELEASE[] += bytes
-    MOVED_SINCE_RELEASE[] < RELEASE_EVERY && return nothing
-    NCDatasets.sync(out)   # what HDF5 still buffers, into the page cache, so the write-back below covers it
-    release_pages(NCDatasets.path(out); writeback = true)
-    foreach(ds -> release_pages(NCDatasets.path(ds); writeback = false), sources)
-    MOVED_SINCE_RELEASE[] = 0
-    return nothing
-end
-#---
-
 #+++ Virtual datasets
 # netCDF-C cannot write an HDF5 virtual dataset, but reads one as an ordinary variable, so the virtual merge writes the
-# merged file with NCDatasets as the copy does, every time-dependent field with an x dimension defined and left empty,
+# merged file with NCDatasets, every time-dependent field with an x dimension defined and left empty,
 # and then replaces each of those, through the HDF5 library netCDF-C itself is built on, with a virtual dataset that
 # maps every rank file's slab onto its x-range: same name, type, attributes and dimensions. The rank files are named by
 # their basenames, which HDF5 resolves in the merged file's own directory, so the directory can move as a whole; a rank
@@ -379,14 +348,11 @@ end
 
 #+++ Main
 if abspath(PROGRAM_FILE) == @__FILE__
-    stem = only(filter(!startswith("--"), ARGS))
-    write_out = "--copy" in ARGS
-    delete = "--delete" in ARGS
-    delete && !write_out && error("--delete needs --copy: a virtual merge reads its fields from the rank files")
-    merged = vcat(merge_ranks(stem; virtual = !write_out), merge_ranks(stem * "_2d"; virtual = false))
-    if delete
-        foreach(rm, merged)
-        @info "Deleted the $(length(merged)) rank files"
-    end
+    length(ARGS) == 1 && !startswith(only(ARGS), "--") ||
+        error("usage: julia --project merge_rank_output.jl <dir>/<stem> (the 3D file is merged virtually; for a standalone " *
+              "copy, `nccopy -k nc4 <stem>.nc <copy>.nc`)")
+    stem = only(ARGS)
+    merge_ranks(stem; virtual = true)
+    merge_ranks(stem * "_2d"; virtual = false)
 end
 #---

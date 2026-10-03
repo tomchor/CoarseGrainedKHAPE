@@ -2,7 +2,7 @@
 #PBS -N merge
 #PBS -o logs/merge.log
 #PBS -e logs/merge.log
-#PBS -l walltime=24:00:00
+#PBS -l walltime=01:00:00
 #PBS -q casper
 #PBS -m ae
 #PBS -r n
@@ -12,9 +12,8 @@
 # The CPU job that follows a multi-GPU simulation (submit_simulation_job in khape_defaults.sh chains it with afterok):
 # merge_rank_output.jl stitches the per-rank files into the two files a one-GPU run writes, and then this job draws
 # what simulation.pbs draws after a one-GPU run, from them. The 3D file is merged virtually, in seconds: its fields
-# read each rank's slab from the rank files, which therefore stay. The 2D file is copied (9 GB, ~1 min at Nz=1024).
-# COPY=1 copies the 3D file too, ~7 h at Nz=1024 (3.98 TB at ~155 MB/s), for which the walltime is Casper's limit;
-# only then may DELETE_RANK_FILES=1 remove the rank files.
+# read each rank's slab from the rank files, which therefore stay. The 2D file is copied (9 GB, ~1 min at Nz=1024). At
+# Nz=1024 the whole job takes ~10 min, the animation and the figures most of it.
 
 set -eo pipefail
 
@@ -25,8 +24,6 @@ NZ=${NZ:?submit through the submit_*.sh wrappers, which pass NZ}
 PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}   # for the figures
 OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where the run is written; kelvin_helmholtz_instability.jl reads the same variable
 SIM=khi_Nz${NZ}_Ri0.10
-COPY=${COPY:-0}                             # 1 copies the 3D file instead of merging it virtually
-DELETE_RANK_FILES=${DELETE_RANK_FILES:-0}   # 1 removes the rank files once both merges have succeeded; needs COPY=1
 LOG=logs/merge_kelvin_helmholtz_${NZ}.out
 
 export JULIA_DEPOT_PATH="$WORK/.julia"
@@ -46,9 +43,7 @@ else
 fi
 $JULIA --version
 
-[ "$COPY" = "1" ] && COPY_FLAG="--copy" || COPY_FLAG=""
-[ "$DELETE_RANK_FILES" = "1" ] && DELETE_FLAG="--delete" || DELETE_FLAG=""
-time $JULIA --project merge_rank_output.jl $OUT_DIR/$SIM $COPY_FLAG $DELETE_FLAG 2>&1 | tee $LOG
+time $JULIA --project merge_rank_output.jl $OUT_DIR/$SIM 2>&1 | tee $LOG
 
 # The animation simulation.pbs's run draws at its end, and the three figures it draws after. A failed figure is
 # reported, not fatal: the merged run is complete, and the jobs chained on this one with afterok should still start.

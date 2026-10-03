@@ -175,8 +175,9 @@ What changes when `NGPUS > 1`:
   (the directory can move as a whole). A missing rank file would read as fill values, so the Python loader refuses a
   merged file whose rank files are not all there. The 2D file (9 GB at Nz=1024) is copied, so Julia reads it as any
   file; Julia readers of the virtual 3D file need `allow_virtual_storage!()` from `merge_rank_output.jl` first.
-- `COPY=1` reaching `merge.pbs` copies the 3D file instead (~4 TB, ~7 h at Nz=1024), and only then does
-  `DELETE_RANK_FILES=1` delete the rank files.
+- For a standalone 3D file, which no longer needs the rank files, copy the virtual one with netCDF's own
+  `nccopy -k nc4 khi_Nz<NZ>_Ri0.10.nc <copy>.nc` (hours at Nz=1024, and better on a login node than in a job,
+  whose memory limit counts the page cache of all that I/O).
 - `SAVE_SORTED` and `VALIDATE` are refused: the two model-grid sorts of the validation-only view would each sort one
   rank's slab.
 
