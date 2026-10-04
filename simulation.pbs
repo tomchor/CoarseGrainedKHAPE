@@ -6,7 +6,7 @@
 #PBS -q casper
 #PBS -m ae
 #PBS -r n
-#PBS -l select=1:ncpus=8:ngpus=1:gpu_type=a100:mem=64GB
+#PBS -l select=1:ncpus=8:ngpus=1:gpu_type=a100_80gb:mem=64GB
 #PBS -l job_priority=regular
 
 set -eo pipefail
