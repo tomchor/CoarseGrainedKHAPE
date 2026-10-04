@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
+import numpy as np
 import xarray as xr
 from dask.diagnostics.progress import ProgressBar
 from src.aux00_utils import (PP_OUTPUT, pad_margin_for_run, extension_for_run, halo_for_run, extension_suffix, load_dataset_and_grid,
@@ -30,6 +31,14 @@ parser.add_argument("--keep-fields", action="store_true", default=False,
                     help="Also write the 4D fields (Π_K, Π_A, the SFS APE->KE exchange and w̄·b_rˡ), not just their "
                          "volume integrals. Every reader of the sweep uses only the integrals, and the fields are "
                          "about 860 GB at Nz=2048.")
+split = parser.add_mutually_exclusive_group()
+split.add_argument("--part", default=None, metavar="K/N",
+                   help="Compute only the K-th of N contiguous, near-equal shares of the sweep's records (K = 1, ..., N) "
+                        "and write them to a _part<K>of<N> file for --merge-parts to join. The memory grows with the "
+                        "records a job holds, so this is how several jobs share a run too large for one node.")
+split.add_argument("--merge-parts", type=int, default=None, metavar="N",
+                   help="Compute nothing: join the N files of a `--part K/N` run into this sweep's output, after "
+                        "checking that they hold each of the sweep's records once and in order, and delete them.")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
@@ -50,6 +59,45 @@ ext_suffix = extension_suffix(extension)
 if extension != args.extension:
     raise ValueError(f"--extension {args.extension!r} but {Path(filtered_filename).name} records "
                      f"z_extension={extension!r}; rerun sweep1 with --extension {args.extension}")
+output_filename = str(PP_OUTPUT / (Path(filename).stem
+                                   + f"_energy_transfer_sweep{ref_suffix}{scale_tag}{ext_suffix}.nc"))
+
+
+def part_filename(k, n):
+    return output_filename.removesuffix(".nc") + f"_part{k}of{n}.nc"
+
+
+if args.part is not None:
+    try:
+        part_k, n_parts = (int(v) for v in args.part.split("/"))
+    except ValueError:
+        parser.error(f"--part takes K/N, e.g. 2/6, not {args.part!r}")
+    if not 1 <= part_k <= n_parts:
+        parser.error(f"--part {args.part}: K must be one of 1, ..., N")
+#---
+
+#+++ Join the parts of a split run (--merge-parts), and stop
+if args.merge_parts is not None:
+    part_files = [part_filename(k, args.merge_parts) for k in range(1, args.merge_parts + 1)]
+    missing = [Path(f).name for f in part_files if not Path(f).exists()]
+    if missing:
+        raise FileNotFoundError(f"cannot join the parts: {missing} are not in {PP_OUTPUT}")
+    with xr.open_dataset(filtered_filename, decode_times=False) as ds_filt:
+        record_times = ds_filt.time.values
+    with xr.open_mfdataset(part_files, combine="nested", concat_dim="time", decode_times=False, decode_timedelta=False,
+                           parallel=False, chunks={"time": 1}) as merged:
+        if not np.array_equal(merged.time.values, record_times):
+            raise ValueError(f"the {args.merge_parts} parts hold {merged.sizes['time']} records, not the sweep's "
+                             f"{len(record_times)} once each and in order: they are not one --part run of this sweep")
+        for attr in ("sweep_part", "sweep_records"):
+            merged.attrs.pop(attr, None)
+        write_job = merged.to_netcdf(output_filename, compute=False)
+        with ProgressBar(minimum=5, dt=5):
+            write_job.compute()
+    for f in part_files:
+        os.remove(f)
+    print(f"Joined {args.merge_parts} parts, {len(record_times)} records, into: {output_filename}")
+    raise SystemExit(0)
 #---
 
 #+++ Load data and grid
@@ -89,6 +137,21 @@ print(f"  Filter length scales: {filter_scales}")
 print(f"  Filter dimensions: x, y and z")
 #---
 
+#+++ This job's share of the records (--part)
+# The frozen reference is the sort of the run's first record, whichever records this job computes, so its
+# source is set aside before they are narrowed down.
+first_record = ds[["b", "dV", "LxLy"]].isel(time=[0])
+n_records = ds_filt.sizes["time"]
+if args.part is not None:
+    records = np.array_split(np.arange(n_records), n_parts)[part_k - 1]
+    if records.size == 0:
+        raise ValueError(f"--part {args.part}: the sweep has {n_records} records, fewer than its {n_parts} parts")
+    ds_filt = ds_filt.isel(time=records)
+    ds = ds.isel(time=records)
+    print(f"\nPart {args.part}: records {records[0]}-{records[-1]} of 0-{n_records - 1} "
+          f"(t = {float(ds_filt.time[0]):g} to {float(ds_filt.time[-1]):g})")
+#---
+
 #+++ Build the frozen reference column (only when using fixed reference)
 rho_sorted = dz_sorted = None
 if fixed_reference:
@@ -102,7 +165,7 @@ if fixed_reference:
     print("Sorting t=0 density for the frozen reference (on the sweep's own padded grid)...")
     # isel *before* sorting: `sorted_timeseries` does `ds[field].values`, which would otherwise pull the
     # whole padded density timeseries into RAM only to read row 0.
-    ds_for_sort = ds[["b", "dV", "LxLy"]].isel(time=[0]).copy()
+    ds_for_sort = first_record.copy()
     ds_for_sort.attrs.update(ds.attrs)
     ds_for_sort = calculate_density_fields_from_buoyancy(ds_for_sort, buoyancy_name="b", density_name="ρ")
     sorted_t0 = sorted_timeseries(ds_for_sort, field_to_sort="ρ", n_workers=1, fixed_reference=True)
@@ -122,41 +185,46 @@ energy_transfer = calculate_energy_transfer(ds, filter_scales,
                                             dz_sorted=dz_sorted,
                                             n_workers=n_workers,
                                             filtered_reference=True,
-                                            frozen_reference=fixed_reference)
+                                            frozen_reference=fixed_reference,
+                                            integrals_only=not args.keep_fields)
 print("\nDone!")
 #---
 
 #+++ Save results
 print("\n" + "="*60)
 print("Saving results...")
-# Every reader of the sweep (sweep3, plot2, compare_extension and the S scripts) uses only the ∫ integrals, so the 4D
-# fields behind them are written only when asked for: they are about 860 GB at Nz=2048 and 3.4 TB at Nz=4096.
-if not args.keep_fields:
-    energy_transfer = energy_transfer[[v for v in energy_transfer.data_vars if v.startswith("∫")]]
 energy_transfer.attrs.update(ds.attrs)
 energy_transfer.attrs["ape_reference"] = "filtered"
-output_filename = str(PP_OUTPUT / (Path(filename).stem
-                                   + f"_energy_transfer_sweep{ref_suffix}{scale_tag}{ext_suffix}.nc"))
-# A fresh directory per run: a shared one let concurrent runs delete each other's records, and a file left
-# by an interrupted run made the final rmdir fail after the output had been written.
-tmp_dir = Path(tempfile.mkdtemp(prefix=Path(output_filename).stem + "_tmp_", dir=PP_OUTPUT))
-tmp_files = []
-with ProgressBar(minimum=5, dt=5):
-    for i in range(energy_transfer.sizes["time"]):
-        tmp_f = str(tmp_dir / f"t{i:04d}.nc")
-        energy_transfer.isel(time=[i]).to_netcdf(tmp_f)
-        tmp_files.append(tmp_f)
-        print(f"  wrote time {i+1}/{energy_transfer.sizes['time']}")
-
-print("Merging per-timestep files...")
-# Stream via dask (no .load(): the merged dataset is hundreds of GB and won't fit in RAM).
-with xr.open_mfdataset(tmp_files, combine="by_coords", decode_timedelta=False,
-                       parallel=False, chunks={"time": 1}) as merged:
-    write_job = merged.to_netcdf(output_filename, compute=False)
+target_filename = output_filename
+if args.part is not None:
+    target_filename = part_filename(part_k, n_parts)
+    energy_transfer.attrs.update(sweep_part=args.part, sweep_records=f"{records[0]}:{records[-1] + 1}")
+if not args.keep_fields:
+    # Every reader of the sweep (sweep3, plot4, compare_extension and the S scripts) uses only the ∫ integrals, which
+    # calculate_energy_transfer has computed already: a few MB, written at once. The 4D fields behind them are kept only
+    # when asked for: they are about 860 GB at Nz=2048 and 3.4 TB at Nz=4096.
+    energy_transfer.to_netcdf(target_filename)
+else:
+    # A fresh directory per run: a shared one let concurrent runs delete each other's records, and a file left
+    # by an interrupted run made the final rmdir fail after the output had been written.
+    tmp_dir = Path(tempfile.mkdtemp(prefix=Path(target_filename).stem + "_tmp_", dir=PP_OUTPUT))
+    tmp_files = []
     with ProgressBar(minimum=5, dt=5):
-        write_job.compute()
-for f in tmp_files:
-    os.remove(f)
-tmp_dir.rmdir()
-print(f"Results saved to: {output_filename}")
+        for i in range(energy_transfer.sizes["time"]):
+            tmp_f = str(tmp_dir / f"t{i:04d}.nc")
+            energy_transfer.isel(time=[i]).to_netcdf(tmp_f)
+            tmp_files.append(tmp_f)
+            print(f"  wrote time {i+1}/{energy_transfer.sizes['time']}")
+
+    print("Merging per-timestep files...")
+    # Stream via dask (no .load(): the merged dataset is hundreds of GB and won't fit in RAM).
+    with xr.open_mfdataset(tmp_files, combine="by_coords", decode_timedelta=False,
+                           parallel=False, chunks={"time": 1}) as merged:
+        write_job = merged.to_netcdf(target_filename, compute=False)
+        with ProgressBar(minimum=5, dt=5):
+            write_job.compute()
+    for f in tmp_files:
+        os.remove(f)
+    tmp_dir.rmdir()
+print(f"Results saved to: {target_filename}")
 #---
