@@ -8,7 +8,7 @@ Computes Available Potential Energy (APE) from three-dimensional Kelvin-Helmholt
 2. **Post-processing** — `postprocessing/budgeting.pbs` assembles the SFS KE and APE budgets from the terms the simulation computed online and plots them (the offline computation of those terms lives in `postprocessing/offline/` and runs only as a CI cross-check)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
-   - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant)
+   - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant); above `NZ=512` the records are split across `SWEEP_PARTS` such jobs, and a last, small one joins their files and plots (see [Run sweep only](#run-sweep-only))
 
 ## Post-processing scripts (`postprocessing/`)
 
@@ -94,13 +94,13 @@ bash submit_all_pbs.sh VALIDATE=1 PLOTS=1    # the whole pipeline
 bash submit_all_pbs.sh SIMULATION=0 PLOTS=1
 ```
 
-Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter`. With `SIMULATION=0` there is no simulation job and `budgeting` starts at once, on the run already in `$KHAPE_OUTPUT_DIR` (the wrapper stops if that run does not exist). `budgeting` assembles and plots the integrated budgets from the simulation's online terms (about a minute); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
+Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter` (above `NZ=512`, `SWEEP_PARTS` transfer jobs at once and a small one that joins their files; see Run sweep only). With `SIMULATION=0` there is no simulation job and `budgeting` starts at once, on the run already in `$KHAPE_OUTPUT_DIR` (the wrapper stops if that run does not exist). `budgeting` assembles and plots the integrated budgets from the simulation's online terms (about a minute); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
 
 `SAVE_SORTED` defaults to `1`, so the simulation also writes the validation-only view of the sorted reference state (the two model-grid z✶ methods, the sorted column, ∫E_b) that `inv06` and `inv07` compare against the offline sort. Every budget term is written regardless, so `SAVE_SORTED=0` gives smaller output and changes no budget number; `VALIDATE=1` turns it back on.
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
-- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot4_sweep_spectrum_hovmoller.py` (Hovmöllers of the transfers, from the sweep output), `plot5_budgets.py` (the integrated SFS budgets) and `plot6_panels.py` (the local SFS budget fields), the last two assembled from the simulation output itself, so they need no post-processing. `plot3`, `plot5` and `plot6` are also drawn by the simulation job itself as soon as the run ends (see *Run simulation only*), so the plots job redraws them after the sweep.
+- `PLOTS=1` submits a **plots** job (`postprocessing/plots.pbs`) after `sweep_transfer` (after the join, when it is split) that runs every `postprocessing/plot*.py`, in name order: `plot2_transfer_spectrum.py` (transfer spectra, from the sweep output), `plot3_b_br_snapshots.py` (b and b_r snapshots, from the `_2d.nc` file), `plot4_sweep_spectrum_hovmoller.py` (Hovmöllers of the transfers, from the sweep output), `plot5_budgets.py` (the integrated SFS budgets) and `plot6_panels.py` (the local SFS budget fields), the last two assembled from the simulation output itself, so they need no post-processing. `plot3`, `plot5` and `plot6` are also drawn by the simulation job itself as soon as the run ends (see *Run simulation only*), so the plots job redraws them after the sweep.
 
 ### Run simulation only
 
@@ -227,9 +227,13 @@ bash submit_sweep.sh NZ=256
 bash submit_sweep.sh NZ=512 FIXED_REF=1      # fixed-in-time reference profile
 bash submit_sweep.sh NZ=512 FIXED_REF=both   # submit both variants; filter runs only once
 bash submit_sweep.sh NZ=512 EXTENSION=odd    # the whole sweep with b oddly reflected past the walls
+bash submit_sweep.sh NZ=1024                  # the transfer in six jobs over shares of the records, then their join
+bash submit_sweep.sh NZ=1024 FILTER=0 PLOTS=1 # the transfer alone, on the filtered file already written, then the plots
 ```
 
 `submit_sweep.sh` refuses any argument it does not know, so a misspelled key cannot silently rerun the default sweep over the production files.
+
+**Splitting the transfer.** The transfer's memory grows with the records it holds times the cells: the 3D Nz=512 run took 689 GiB of a 730 GiB node in one job, and the Nz=1024 one ran out of it, the sorted column of the padded domain alone being 421 M slots per record there. `SWEEP_PARTS` (default 1 up to `NZ=512`, 6 up to `NZ=1024`, required beyond; also taken by `submit_all_pbs.sh`) splits the records into that many contiguous shares, one job each, all running at once after the filter (`sweep2 --part K/N`, which writes a `_part<K>of<N>` file), and a small job after all of them joins the files into the usual one, checking that they hold every record once and in order, and runs `sweep3` (`sweep2 --merge-parts N`). Every quantity is computed record by record, so the split changes no number. Within a job, each scale's integrals are computed before the next scale is built, so nothing accumulates across the 30 scales, and the sort and the reference-height lookup fill their outputs record by record instead of holding every record twice. `FILTER=0` skips `sweep1` and starts the transfer at once on the filtered file already in place; `PLOTS=1` adds the plots job after the transfer.
 
 Under the default edge extension the sweep does not build its z padding. Its fields keep one padded cell past each wall, which is what the centred gradients at the wall cells read; the filter's `nearest` mode repeats the wall value from there on, as the padding did; and only the sorted reference column still holds the padded fluid. The filtered fields come out bit for bit as on the padded grid and the integrals agree with the padded computation to roundoff, while `sweep1`'s file and the arrays `sweep2` holds are Nz + 2 levels tall instead of 3.7 Nz. `EXTENSION=odd` is a different extension of b, so it keeps the whole padding in the arrays.
 
@@ -300,4 +304,4 @@ All job logs are written to the `logs/` subdirectory next to the submit script:
 - `logs/<job_name>.out` — Python script output (written live via `tee`)
 - for a multi-GPU run, also `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` (every GPU's memory every 10 s); the merge writes to the simulation's own `.out`
 
-Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref` (the `_fixed_ref` tag exists only for the sweep).
+Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref` (the `_fixed_ref` tag exists only for the sweep). A split sweep transfer's jobs add `_part<K>of<N>`, and the one that joins them `_merge`.

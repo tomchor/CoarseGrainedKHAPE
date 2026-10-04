@@ -270,4 +270,23 @@ def test_transfer_integrals_do_not_need_the_padding():
         print(f"\n  {name:<20} max|padded| = {np.abs(a).max():.3e}   max|Δ|/max|padded| = {rel:.1e}")
         assert np.abs(a).max() > 1e-6, f"{name} is ~0 on this field, so the comparison says nothing"
         assert rel < 1e-12, f"{name} changes by {rel:.1e} when the padding is left out of the arrays"
+
+
+def test_transfer_integrals_do_not_depend_on_how_the_work_is_split():
+    """The sweep's two memory savings change no number, bit for bit: computing each scale's integrals before the next
+    scale is built (integrals_only), and splitting the records across jobs (`sweep2 --part`), which is sound because
+    every quantity is computed record by record. Several workers, so the threaded paths of the sort and the lookup run."""
+    scales = [0.5, 3.0, 20.0]
+    ds = _pad_domain_in_z(_flow_dataset(n_times=3), min_margin=required_pad_margin(scales), halo=sweep_halo("edge"))
+    kw = dict(ds_filt=None, n_workers=2, filtered_reference=True)
+    whole = calculate_energy_transfer(ds, scales, **kw)
+    integrals = [v for v in whole.data_vars if v.startswith("∫")]
+    only = calculate_energy_transfer(ds, scales, integrals_only=True, **kw)
+    assert sorted(only.data_vars) == sorted(integrals)
+    split = xr.concat([calculate_energy_transfer(ds.isel(time=records), scales, integrals_only=True, **kw)
+                       for records in ([0, 1], [2])], dim="time")
+    for name in integrals:
+        assert np.abs(whole[name].values).max() > 1e-6, f"{name} is ~0 on this field, so the comparison says nothing"
+        assert np.array_equal(only[name].values, whole[name].values), f"{name} changes with integrals_only"
+        assert np.array_equal(split[name].values, whole[name].values), f"{name} changes when the records are split"
 #---

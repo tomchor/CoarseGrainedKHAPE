@@ -3,6 +3,7 @@
 # each stage only runs if the previous one succeeds. Optional validation and plotting stages.
 #
 #   simulation → budgeting → sweep_filter → sweep_transfer                      (always)
+#   sweep_transfer = SWEEP_PARTS jobs over shares of the records → their join   (SWEEP_PARTS > 1)
 #   + validation  (online-vs-offline figures + animations; parallel after sim)  (VALIDATE=1)
 #   + plots       (plot2 transfer spectrum, plot3 budgets, plot4 panels)        (PLOTS=1)
 #
@@ -10,6 +11,7 @@
 # (postprocessing/01_online_budgets.py, 02_plot_budgets.py). The sweep over filter scales stays offline.
 #
 # Usage: bash submit_all_pbs.sh [NZ=512] [NGPUS=] [VALIDATE=0] [PLOTS=0] [SAVE_SORTED=1] [FIXED_REF=0] [SIMULATION=1]
+#                               [SWEEP_PARTS=]
 #   NZ         vertical resolution
 #   NGPUS      GPUs to run the simulation on (default: 1 up to NZ=512, 4 up to NZ=1024). More than one splits the
 #              domain across MPI ranks, whose files the simulation job merges after the run; see submit_simulation.sh
@@ -21,13 +23,15 @@
 #              is refused): 0 or 1. The budgets do not depend on it.
 #   PLOTS      also run the final plots after sweep_transfer: 0 or 1
 #   FIXED_REF  the sweep transfer's fixed-in-time reference profile (the budgets have no such variant): 0 or 1
+#   SWEEP_PARTS  jobs the sweep transfer splits the records across, joined by a small job that runs sweep3 (default: 1 up
+#              to NZ=512, 6 up to NZ=1024); see submit_sweep.sh
 #
 # To run post-processing alone:
 #   bash postprocessing/submit_budgeting.sh [NZ=512]
 # or the whole chain from budgeting on, on a run that already exists:
 #   bash submit_all_pbs.sh SIMULATION=0 [PLOTS=1]
 
-NZ=512; NGPUS=""; FIXED_REF=0; VALIDATE=0; PLOTS=0; SIMULATION=1
+NZ=512; NGPUS=""; FIXED_REF=0; VALIDATE=0; PLOTS=0; SIMULATION=1; SWEEP_PARTS=""
 # An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
 for arg in "$@"; do case $arg in
   NZ=*)          NZ="${arg#*=}";;
@@ -37,7 +41,9 @@ for arg in "$@"; do case $arg in
   SAVE_SORTED=*) SAVE_SORTED="${arg#*=}";;
   PLOTS=*)       PLOTS="${arg#*=}";;
   SIMULATION=*)  SIMULATION="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected NZ=, NGPUS=, FIXED_REF=, VALIDATE=, PLOTS=, SAVE_SORTED= or SIMULATION=)" >&2; exit 2;;
+  SWEEP_PARTS=*) SWEEP_PARTS="${arg#*=}";;
+  *) echo "unknown argument: $arg (expected NZ=, NGPUS=, FIXED_REF=, VALIDATE=, PLOTS=, SAVE_SORTED=, SIMULATION= or SWEEP_PARTS=)" >&2
+     exit 2;;
 esac; done
 # The allocation to charge and the Python to run: defaults in khape_defaults.sh, overridden from the environment.
 source "$(dirname "$0")/khape_defaults.sh"
@@ -48,6 +54,7 @@ check_khape_python
 # output and changes no budget number; VALIDATE=1 turns it back on.
 # On several GPUs it is refused (its model-grid sorts would sort each rank's slab), and so is VALIDATE=1, which needs it.
 NGPUS=${NGPUS:-$(default_ngpus $NZ)} || exit 2
+SWEEP_PARTS=${SWEEP_PARTS:-$(default_sweep_parts $NZ)} || exit 2
 if [ "$NGPUS" != "1" ]; then
     if [ "$VALIDATE" = "1" ] || [ "${SAVE_SORTED:-0}" = "1" ]; then
         echo "error: VALIDATE=1 and SAVE_SORTED=1 need a single GPU (NGPUS=1): the sorted-state view sorts each rank's slab" >&2; exit 2
@@ -109,15 +116,11 @@ SF_JOB=$(qsub -N "$SF_NAME" \
               sweep_filter.pbs)
 echo "Submitted sweep filter (depends on $PP_JOB): $SF_JOB"
 
+# ST_JOB is the job after which the transfer file is whole: the transfer itself, or the join of its parts.
 ST_NAME="sweep_transfer_Nz${NZ}_Ri0.10${REF_SUFFIX}"
-ST_JOB=$(qsub -N "$ST_NAME" \
-              -A "$KHAPE_ACCOUNT" \
-              -o "logs/${ST_NAME}.log" \
-              -e "logs/${ST_NAME}.log" \
-              -v NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON$KHAPE_REDIRECT \
-              -W depend=afterok:$SF_JOB \
-              sweep_transfer.pbs)
-echo "Submitted sweep transfer (depends on $SF_JOB): $ST_JOB"
+ST_JOB=$(submit_sweep_transfer "$ST_NAME" "$SWEEP_PARTS" "afterok:$SF_JOB" \
+         "NZ=$NZ,FIXED_REF=$FIXED_REF,KHAPE_PYTHON=$KHAPE_PYTHON$KHAPE_REDIRECT") || exit 2
+echo "Submitted sweep transfer in $SWEEP_PARTS part(s) (depends on $SF_JOB): $ST_JOB"
 
 # Optional final plots — after sweep_transfer (which is downstream of budgeting, so both are done)
 if [ "$PLOTS" = "1" ]; then
