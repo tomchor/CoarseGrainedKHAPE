@@ -305,11 +305,31 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
     def _sort(i):
         return _sort_single_timestep(_with_virtual_padding(rho_all[i], n_virtual, z_axis), dz_flat, z_min)
 
+    # Each record's column goes into its row of the output as soon as it is sorted. Holding every record's column
+    # and concatenating them at the end needs the whole output twice: at Nz=1024 that is 2 x 320 GiB for the 51
+    # records of the sweep, which is what ran its job out of memory.
+    rho_sorted = dz_sorted = z_1d_sorted = None
+
+    def _keep(i, result):
+        nonlocal rho_sorted, dz_sorted, z_1d_sorted
+        rho_1d, dz_1d, z_1d = result
+        if rho_sorted is None:
+            rho_sorted = np.empty((n_times, rho_1d.size), dtype=rho_1d.dtype)
+            dz_sorted  = np.empty((n_times, dz_1d.size), dtype=dz_1d.dtype)
+            z_1d_sorted = z_1d
+        elif not np.array_equal(z_1d, z_1d_sorted):
+            # The slot heights are the same cell volumes in a different order, so they only add up to different
+            # heights on a grid whose cells differ in height, and one column coordinate cannot describe every record.
+            raise ValueError(f"record {i} sorts to slot heights that differ from another record's: the cells' "
+                             f"heights differ, and the records' columns would not share one z_1d_sorted")
+        rho_sorted[i], dz_sorted[i] = rho_1d, dz_1d
+
     if fixed_reference:
         if verbose_level > 0:
             print("  Sorting t=0 only (fixed reference profile)...")
         t0_result = _sort(0)
-        results = [t0_result] * n_times
+        for i in range(n_times):
+            _keep(i, t0_result)
     else:
         def _run(i):
             if verbose_level > 0:
@@ -317,29 +337,22 @@ def sorted_timeseries(ds, field_to_sort="rho", dV_name="dV", LxLy_name="LxLy",
             return _sort(i)
 
         if n_workers == 1 or n_times == 1:
-            results = [_run(i) for i in range(n_times)]
+            for i in range(n_times):
+                _keep(i, _run(i))
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
                 futures = {pool.submit(_sort, i): i for i in range(n_times)}
-                results_unordered = {}
-                for fut in concurrent.futures.as_completed(futures):
-                    i = futures[fut]
-                    results_unordered[i] = fut.result()
+                for n_done, fut in enumerate(concurrent.futures.as_completed(futures), start=1):
+                    _keep(futures.pop(fut), fut.result())   # pop: a finished future holds its column until dropped
                     if verbose_level > 0:
-                        print(f"  Sorted time step {len(results_unordered)}/{n_times}", end="\r")
-            results = [results_unordered[i] for i in range(n_times)]
+                        print(f"  Sorted time step {n_done}/{n_times}", end="\r")
 
     if verbose_level > 0:
         print("\nDone!")
 
-    rho_sorted_list, dz_sorted_list = [], []
-    for rho_1d_sorted, dz_1d_sorted, z_1d_sorted in results:
-        coord = dict(z_1d_sorted=z_1d_sorted)
-        rho_sorted_list.append(xr.DataArray(rho_1d_sorted, dims="z_1d_sorted", coords=coord))
-        dz_sorted_list.append(xr.DataArray(dz_1d_sorted, dims="z_1d_sorted", coords=coord))
-
-    rho_sorted_da = xr.concat(rho_sorted_list, dim="time").assign_coords(time=ds.time)
-    dz_sorted_da  = xr.concat(dz_sorted_list,  dim="time").assign_coords(time=ds.time)
+    coords = dict(time=ds.time, z_1d_sorted=z_1d_sorted)
+    rho_sorted_da = xr.DataArray(rho_sorted, dims=("time", "z_1d_sorted"), coords=coords)
+    dz_sorted_da  = xr.DataArray(dz_sorted,  dims=("time", "z_1d_sorted"), coords=coords)
 
     return xr.Dataset(dict(rho_sorted=rho_sorted_da, dz_sorted=dz_sorted_da))
 #---
@@ -384,7 +397,7 @@ def _process_single_timestep(rho_np, z_np, rho_sorted_1d, dz_sorted_1d, z_sorted
 def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level=1,
                                         density_name="rho", z_name="z_aac", n_workers=None):
     """
-    Calculate local APE and TPE fields for all time steps.
+    Calculate the local APE, the reference height and Υ for all time steps.
 
     Requires a pre-sorted reference state (from sorted_timeseries()).
 
@@ -411,12 +424,10 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
         - ape     : (time, x, y, z) — local APE density [m² s⁻²]
         - z0      : (time, x, y, z) — reference height z_0
         - upsilon : (time, x, y, z) — buoyancy displacement potential Υ
-        - tpe     : (time, x, y, z) — local TPE density g·ρ·z / ρ0
-        - rpe     : (time, z_1d_sorted) — local RPE density in sorted state
         - rho_sorted : (time, z_1d_sorted) — sorted reference density (passed through)
         - dz_sorted  : (time, z_1d_sorted) — sorted cell heights (passed through)
     """
-    if verbose_level > 0: print("Calculating local APE and TPE time series...")
+    if verbose_level > 0: print("Calculating local APE time series...")
 
     n_times = len(ds.time)
 
@@ -428,61 +439,49 @@ def local_potential_energies_timeseries(ds, rho_sorted, dz_sorted, verbose_level
     dz_sorted_all_np  = dz_sorted.values                               # (time, N)
     z_sorted_1d_np    = rho_sorted.coords["z_1d_sorted"].values        # (N,)
 
-    task_args = [(rho_all_np[i], z_np,
-                  rho_sorted_all_np[i], dz_sorted_all_np[i], z_sorted_1d_np)
-                 for i in range(n_times)]
+    def _task(i):
+        return _process_single_timestep(rho_all_np[i], z_np, rho_sorted_all_np[i], dz_sorted_all_np[i], z_sorted_1d_np)
+
+    # Each record's fields go into their rows of the outputs as soon as they are computed. Holding every record's
+    # fields and concatenating them at the end needs each output twice.
+    outputs = None
+
+    def _keep(i, result):
+        nonlocal outputs
+        if outputs is None:
+            outputs = [np.empty((n_times,) + a.shape, dtype=a.dtype) for a in result]
+        for output, a in zip(outputs, result):
+            output[i] = a
 
     # --- parallel or serial time loop ---
     if n_workers == 1 or n_times == 1:
-        results = []
-        for i, a in enumerate(task_args):
+        for i in range(n_times):
             if verbose_level > 0: print(f"  Processing time step {i+1}/{n_times}", end="\r")
-            results.append(_process_single_timestep(*a))
+            _keep(i, _task(i))
     else:
-        max_w = n_workers
-        if verbose_level > 0: print(f"  Using ThreadPoolExecutor (n_workers={max_w})...")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_w) as pool:
-            futures = {pool.submit(_process_single_timestep, *a): i for i, a in enumerate(task_args)}
-            results_unordered = {}
-            for fut in concurrent.futures.as_completed(futures):
-                i = futures[fut]
-                results_unordered[i] = fut.result()
+        if verbose_level > 0: print(f"  Using ThreadPoolExecutor (n_workers={n_workers})...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = {pool.submit(_task, i): i for i in range(n_times)}
+            for n_done, fut in enumerate(concurrent.futures.as_completed(futures), start=1):
+                _keep(futures.pop(fut), fut.result())   # pop: a finished future holds its fields until dropped
                 if verbose_level > 0:
-                    print(f"  Completed time step {len(results_unordered)}/{n_times}", end="\r")
-        results = [results_unordered[i] for i in range(n_times)]
+                    print(f"  Completed time step {n_done}/{n_times}", end="\r")
 
     if verbose_level > 0: print("\nDone (time loop)!")
 
-    # --- Reassemble results into xarray ---
-    rho_t0  = ds[density_name].isel(time=0)
-    coords0 = rho_t0.coords
-    dims0   = rho_t0.dims
-
-    local_ape_list     = []
-    local_z0_list      = []
-    local_upsilon_list = []
-
-    for ape_3d, z0_3d, upsilon_3d in results:
-        local_ape_list.append(    xr.DataArray(ape_3d,     dims=dims0, coords=coords0))
-        local_z0_list.append(     xr.DataArray(z0_3d,      dims=dims0, coords=coords0))
-        local_upsilon_list.append(xr.DataArray(upsilon_3d, dims=dims0, coords=coords0))
+    # --- Reassemble results into xarray: the field's own coordinates, with the records' times ---
+    rho_t0 = ds[density_name].isel(time=0)
+    coords = {name: coord for name, coord in rho_t0.coords.items() if name != "time"}
+    local_ape_4d, local_z0_4d, local_upsilon_4d = (
+        xr.DataArray(output, dims=("time",) + rho_t0.dims, coords=coords).assign_coords(time=ds.time) for output in outputs)
 
     if verbose_level > 0: print("\nDone!")
-
-    local_ape_4d     = xr.concat(local_ape_list,     dim="time").assign_coords(time=ds.time)
-    local_z0_4d      = xr.concat(local_z0_list,      dim="time").assign_coords(time=ds.time)
-    local_upsilon_4d = xr.concat(local_upsilon_list, dim="time").assign_coords(time=ds.time)
-
-    tpe = local_TPE(ds[density_name], z_name=z_name)
-    rpe = local_TPE(rho_sorted, z_name="z_1d_sorted")
 
     # Combine into a Dataset
     local_potential_energies_ds = xr.Dataset(dict(
         ape = local_ape_4d,
         z0 = local_z0_4d,
         upsilon = local_upsilon_4d,
-        tpe = tpe,
-        rpe = rpe,
         rho_sorted = rho_sorted,
         dz_sorted = dz_sorted,
     ))
