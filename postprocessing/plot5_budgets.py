@@ -89,10 +89,10 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         else:
             ax.set_xlabel("")
             ax.tick_params(labelbottom=False)
-        # None leaves the axis on the data. The 140 this used to hard-code silently truncated any run
-        # longer than that -- the Nz=1024 run goes to 200 -- with nothing in the figure to say so.
-        if args.max_time is not None:
-            ax.set_xlim(right=args.max_time)
+        # Tight to the run: 0 to the last output time, with no matplotlib margin either side. The data
+        # itself starts one record in and ends at the last closed TimeDerivative window (t = 198 on a run
+        # to 200), so the small gaps at the ends are real and say where the budget is defined.
+        ax.set_xlim(0, args.max_time if args.max_time is not None else float(ke_budget.time.max()))
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
@@ -102,9 +102,14 @@ for col, ℓ in enumerate(args.filter_scales):
 #---
 
 #+++ Share y-axis within each column
+# Both legends sit in the right-hand column, so that column gets headroom above the data for them to
+# occupy. Expanding the column rather than one panel keeps the within-column sharing the loop exists for.
+LEGEND_HEADROOM = 0.33   # of the data span, enough for the five-entry APE legend
 for col in range(2):
     ymin = min(axes[row, col].get_ylim()[0] for row in range(2))
     ymax = max(axes[row, col].get_ylim()[1] for row in range(2))
+    if col == 1:
+        ymax += LEGEND_HEADROOM * (ymax - ymin)
     for row in range(2):
         axes[row, col].set_ylim(ymin, ymax)
 #---
@@ -113,13 +118,16 @@ for col in range(2):
 ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
 ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
 axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
-rs_idx = ape_labels.index(r"$R^s$")
-rs_handle = ape_handles.pop(rs_idx)
-rs_label  = ape_labels.pop(rs_idx)
+# Five entries over two columns, with one of them alone in the first column and the rest in the second.
+# The tendency takes the solo slot: it is the term the other four sum to, so it reads as the left-hand
+# side of the budget rather than as one more flux.
+solo_idx    = ape_labels.index(ape_tendency_label)
+solo_handle = ape_handles.pop(solo_idx)
+solo_label  = ape_labels.pop(solo_idx)
 blank = Line2D([], [], linestyle="None")
 n_pad = len(ape_handles) - 1
-ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
-ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
+ape_handles = [solo_handle] + [blank] * n_pad + ape_handles
+ape_labels  = [solo_label]  + [""]    * n_pad + ape_labels
 axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
 
 for ax, letter in zip(axes.flat, "abcd"):
