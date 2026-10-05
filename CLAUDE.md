@@ -25,7 +25,7 @@ Jobs are chained via PBS `afterok` dependencies. Always use `submit_*.sh` wrappe
 ```bash
 bash submit_simulation.sh NZ=512
 ```
-The job runs the simulation and then, in the same job, `plot3_b_br_snapshots.py`, `plot5_budgets.py` and `plot6_panels.py`, the three figures that need only the simulation's own files (a failing figure is a logged warning, not a job failure, so `afterok` chains still start); the wrapper passes `$KHAPE_PYTHON` to it for that. On several GPUs it merges the rank files first (see Multi-GPU runs).
+The job runs the simulation and then, in the same job, `plot3_omega_br_snapshots.py`, `plot5_budgets.py` and `plot6_panels.py`, the three figures that need only the simulation's own files (a failing figure is a logged warning, not a job failure, so `afterok` chains still start); the wrapper passes `$KHAPE_PYTHON` to it for that. On several GPUs it merges the rank files first (see Multi-GPU runs).
 
 ### Multi-GPU runs
 ```bash
@@ -123,7 +123,7 @@ The budgets are computed by the simulation; the Python side assembles and plots 
 
 Standalone visualization scripts (not part of the numbered pipeline; `plots.pbs` runs every `plot*.py`, in name order, so a figure script must take `--filename`):
 - `plot2_transfer_spectrum.py` -- cross-scale transfer spectra (from the sweep output)
-- `plot3_b_br_snapshots.py` -- b (top row) and b_r (bottom row) snapshots, one column per time (from the `_2d.nc` file; `simulation.pbs` draws it right after the run)
+- `plot3_omega_br_snapshots.py` -- spanwise vorticity ω (top row, `--top b` for buoyancy instead) and b_r (bottom row) snapshots, one column per time, with buoyancy contours overlaid on both (from the `_2d.nc` file; `simulation.pbs` draws it right after the run)
 - `plot5_budgets.py` -- 2x2 panel of SFS KE and APE budget time series (assembled from the simulation output by `online_budgets`; no post-processing needed, and `simulation.pbs` draws it right after the run)
 - `plot6_panels.py` -- 4-panel snapshot of local SFS budget fields (likewise straight from the simulation output, and likewise drawn by `simulation.pbs`)
 - `anim1_panels.py` -- animated version of plot6 panels (requires ffmpeg); reads everything from the `_2d.nc` file, so it needs no post-processing: every panel (the budget terms through `online_budgets`, and the online `b_r`, on the x–z plane the 2D writer slices) and the time series (the `_int` volume integrals of the same records)

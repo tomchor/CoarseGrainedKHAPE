@@ -127,7 +127,7 @@ fi
 # _2d.nc file, plot5 and plot6 assemble the SFS budgets from the 3D file themselves (plot4 needs the sweep and stays in
 # plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this one with
 # afterok should still start.
-for script in plot3_b_br_snapshots.py plot5_budgets.py plot6_panels.py; do
+for script in plot3_omega_br_snapshots.py plot5_budgets.py plot6_panels.py; do
     time $PYTHON -u postprocessing/$script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
         || echo "warning: $script failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
 done
