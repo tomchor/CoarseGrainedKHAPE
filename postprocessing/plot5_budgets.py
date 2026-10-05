@@ -16,6 +16,9 @@ parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE b
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
                     help="Path to simulation NetCDF file (the budgets are assembled from its online terms)")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
+parser.add_argument("--max-time", type=float, default=None,
+                    help="Right edge of the time axis; default is the end of the record set. The data always runs to "
+                         "the last record with a closed TimeDerivative window, whatever this is set to")
 parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive",
                     help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
@@ -86,7 +89,10 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         else:
             ax.set_xlabel("")
             ax.tick_params(labelbottom=False)
-        ax.set_xlim(right=140)
+        # None leaves the axis on the data. The 140 this used to hard-code silently truncated any run
+        # longer than that -- the Nz=1024 run goes to 200 -- with nothing in the figure to say so.
+        if args.max_time is not None:
+            ax.set_xlim(right=args.max_time)
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
