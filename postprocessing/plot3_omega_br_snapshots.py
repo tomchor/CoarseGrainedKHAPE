@@ -158,8 +158,10 @@ for ax, letter in zip(axes.flat, "abcdefghijkl"):
 
 label = run_label(ds.attrs)
 if label:
-    axes[1, -1].text(0.98, 0.04, label, transform=axes[1, -1].transAxes, fontsize=10, ha="right", va="bottom",
-                     bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
+    # Bottom-left panel, not bottom-right: the run parameters apply to the whole figure, so they belong at
+    # the start of the reading order rather than tucked in the last panel where they read as a caption to it.
+    axes[1, 0].text(0.02, 0.04, label, transform=axes[1, 0].transAxes, fontsize=10, ha="left", va="bottom",
+                    bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 
 t_tag = "-".join(f"{t:.0f}" for t in t_sel)
 # PDF, as the other paper figures (plot2, and X3 among the extra ones). The pcolormesh layers are rasterized above, so the file
