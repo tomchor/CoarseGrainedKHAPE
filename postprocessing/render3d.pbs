@@ -43,6 +43,7 @@ LEVELS=${LEVELS:-6}
 FRACTIONS=$(echo "${FRACTIONS:-}" | tr ':' ',')
 if [ -n "$FRACTIONS" ]; then LEVEL_ARGS=(--fractions "$FRACTIONS"); else LEVEL_ARGS=(--levels "$LEVELS"); fi
 ZLIM=${ZLIM:-4}
+DERIVED=${DERIVED:-filtered}
 OVERLAY=${OVERLAY:-b}
 OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
 FILE=${FILE:-$OUT_DIR/khi_Nz${NZ}_Ri0.10.nc}
@@ -98,7 +99,7 @@ save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK
 #+++ Render
 LOG=logs/${JOB_NAME}.out
 : > "$LOG"
-echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  levels=$LEVELS  zlim=$ZLIM  overlay=$OVERLAY" | tee -a "$LOG"
+echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  levels=$LEVELS  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY" | tee -a "$LOG"
 echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
 
 # One invocation per time: each writes its own figure, named by the time, and a failure at one time is
@@ -107,7 +108,7 @@ for T in $(echo "$TIMES" | tr ':' ' '); do
     echo "=== t = $T ===" | tee -a "$LOG"
     time $JULIA --project="$REPO" "$REPO/postprocessing/X13_3d_volume.jl" "$FILE" \
         --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface \
-        "${LEVEL_ARGS[@]}" \
+        "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" \
         --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
         || echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"
 done

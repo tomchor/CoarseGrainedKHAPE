@@ -16,6 +16,8 @@
 #   FRACTIONS  place the surfaces explicitly instead, as fractions of each panel's range, e.g.
 #            0.1,0.5,0.85. Alternative to LEVELS, not a companion -- setting both is an error
 #   ZLIM     crop to |z| < ZLIM
+#   DERIVED  velocity the derived fields (Q, enstrophy, speed) are built from: 'filtered' (default, the
+#            online field at SCALE) or 'full' (the raw one)
 #   OVERLAY  reference field drawn as contours on the bounding walls ('' for none)
 #
 # No GPU is requested: the job makes its own OpenGL context with Xvfb and Mesa's software rasteriser.
@@ -32,6 +34,7 @@ SCALE=1
 LEVELS=6
 FRACTIONS=""
 ZLIM=4
+DERIVED=filtered
 OVERLAY=b
 # An unknown KEY=VALUE is refused rather than ignored, so a misspelled flag cannot silently fall back to its default.
 for arg in "$@"; do case $arg in
@@ -47,8 +50,9 @@ for arg in "$@"; do case $arg in
   LEVELS=*)  LEVELS="${arg#*=}";;
   FRACTIONS=*) FRACTIONS="${arg#*=}";;
   ZLIM=*)    ZLIM="${arg#*=}";;
+  DERIVED=*) DERIVED="${arg#*=}";;
   OVERLAY=*) OVERLAY="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, ZLIM= or OVERLAY=)" >&2; exit 2;;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, ZLIM=, DERIVED= or OVERLAY=)" >&2; exit 2;;
 esac; done
 # A list or a range, not both: silently preferring one would hide a typo in the other.
 if [ -n "$TIMES" ] && { [ -n "$FROM" ] || [ -n "$TO" ]; }; then
@@ -82,6 +86,6 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
-           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,ZLIM=$ZLIM,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
+           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
            render3d.pbs)
 echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS): $JOB"
