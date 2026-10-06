@@ -63,7 +63,10 @@ ape_terms = {
 
 #+++ Plot 2×2 figure
 print("Creating 2×2 budget panel plot...")
-fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(14, 7.6), constrained_layout=True)
+# Room between the rows for the KE legend, which sits under row 0. At the default spacing it has
+# nowhere to go and overlaps the tops of row 1's panels.
+fig.get_layout_engine().set(hspace=0.16)
 
 budget_configs = [
     (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms"),
@@ -102,33 +105,42 @@ for col, ℓ in enumerate(args.filter_scales):
 #---
 
 #+++ Share y-axis within each column
-# Both legends sit in the right-hand column, so that column gets headroom above the data for them to
-# occupy. Expanding the column rather than one panel keeps the within-column sharing the loop exists for.
-LEGEND_HEADROOM = 0.33   # of the data span, enough for the five-entry APE legend
 for col in range(2):
     ymin = min(axes[row, col].get_ylim()[0] for row in range(2))
     ymax = max(axes[row, col].get_ylim()[1] for row in range(2))
-    if col == 1:
-        ymax += LEGEND_HEADROOM * (ymax - ymin)
     for row in range(2):
         axes[row, col].set_ylim(ymin, ymax)
 #---
 
 #+++ Legend and labels
-ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
+# One horizontal legend under each row, outside the axes. Inside the panels they collided with the data at
+# Nz=1024 and could only be kept clear by adding headroom, which is whitespace spent on the legend rather
+# than on the curves. Out here the axes keep their own limits.
+#
+# They are anchored to the left-hand axes of the row and pushed past its right edge, so each legend centres
+# on the row rather than on its first panel. Row 1's sits lower, clearing the "Time" label beneath it.
+ke_handles, ke_labels   = axes[0, 1].get_legend_handles_labels()
 ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
-axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
-# Five entries over two columns, with one of them alone in the first column and the rest in the second.
-# The tendency takes the solo slot: it is the term the other four sum to, so it reads as the left-hand
-# side of the budget rather than as one more flux.
-solo_idx    = ape_labels.index(ape_tendency_label)
-solo_handle = ape_handles.pop(solo_idx)
-solo_label  = ape_labels.pop(solo_idx)
-blank = Line2D([], [], linestyle="None")
-n_pad = len(ape_handles) - 1
-ape_handles = [solo_handle] + [blank] * n_pad + ape_handles
-ape_labels  = [solo_label]  + [""]    * n_pad + ape_labels
-axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
+
+# The tendency leads: it is the term the others sum to, so the legend reads in the order the budget does.
+solo_idx = ape_labels.index(ape_tendency_label)
+ape_handles.insert(0, ape_handles.pop(solo_idx))
+ape_labels.insert(0, ape_labels.pop(solo_idx))
+
+# Centred on the row, which means centred between the left edge of its first panel and the right edge of
+# its last -- not on the figure, whose left margin carries the y label, and not a guessed offset in axes
+# coordinates, which depends on the inter-column gap. constrained_layout only resolves those positions at
+# draw time, so the figure is drawn once and then frozen: adding legends afterwards would otherwise make
+# the engine re-run on save and shift the axes out from under them.
+fig.canvas.draw()
+fig.set_layout_engine("none")
+
+for row, (handles, labels, drop) in enumerate([(ke_handles, ke_labels, 0.030),
+                                               (ape_handles, ape_labels, 0.085)]):
+    left, right = axes[row, 0].get_position(), axes[row, -1].get_position()
+    fig.legend(handles, labels, fontsize=13, ncol=len(labels), frameon=False,
+               loc="upper center", bbox_transform=fig.transFigure,
+               bbox_to_anchor=((left.x0 + right.x1) / 2, left.y0 - drop))
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,
