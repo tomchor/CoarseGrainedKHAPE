@@ -37,8 +37,11 @@ FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
 COLS=${COLS:-3}
 SCALE=${SCALE:-1}
 LEVELS=${LEVELS:-6}
-# Colon-separated in, commas out, as TIMES and FIELDS are. Empty means "use LEVELS".
+# Colon-separated in, commas out, as TIMES and FIELDS are. Empty means "use LEVELS". The two are passed as
+# an array rather than with ${VAR:+}/${VAR:-}: the latter substitutes the *value* when the variable is set,
+# so the fraction list ended up on the command line a second time as a stray argument.
 FRACTIONS=$(echo "${FRACTIONS:-}" | tr ':' ',')
+if [ -n "$FRACTIONS" ]; then LEVEL_ARGS=(--fractions "$FRACTIONS"); else LEVEL_ARGS=(--levels "$LEVELS"); fi
 ZLIM=${ZLIM:-4}
 OVERLAY=${OVERLAY:-b}
 OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
@@ -104,7 +107,7 @@ for T in $(echo "$TIMES" | tr ':' ' '); do
     echo "=== t = $T ===" | tee -a "$LOG"
     time $JULIA --project="$REPO" "$REPO/postprocessing/X13_3d_volume.jl" "$FILE" \
         --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface \
-        ${FRACTIONS:+--fractions "$FRACTIONS"} ${FRACTIONS:---levels "$LEVELS"} \
+        "${LEVEL_ARGS[@]}" \
         --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
         || echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"
 done
