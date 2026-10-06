@@ -46,18 +46,20 @@ tendency_sign = -1 if positive_tendency else 1
 ke_tendency_label  = r"$\partial_t E_K^s$"  if positive_tendency else r"$-\partial_t E_K^s$"
 ape_tendency_label = r"$\partial_t E_A^s$"  if positive_tendency else r"$-\partial_t E_A^s$"
 
+# Order here sets both the plot order and the legend order. The tendency leads, as the term the others sum
+# to, and the dissipation closes: it is the only sink, so the row reads sources first and the sink last.
 ke_terms = {
     ke_tendency_label:        ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
     r"$\Pi_K$":               ("∫Π_K dV",           budget_colors["flux"]),
-    r"$-\varepsilon_K^s$":    ("∫-ε_Kˢ dV",         budget_colors["dissipation"]),
     r"$E_A^s \to E_K^s$":     ("∫(SFS APE->KE) dV", budget_colors["exchange"]),
+    r"$-\varepsilon_K^s$":    ("∫-ε_Kˢ dV",         budget_colors["dissipation"]),
 }
 ape_terms = {
     ape_tendency_label:      ("∫-∂ₜ SFS APE dV",    budget_colors["tendency"]),
     r"$\Pi_A$":              ("∫Π_A dV",            budget_colors["flux"]),
-    r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
     r"$E_K^s \to E_A^s$":    ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
     r"$R^s$":                ("∫Rˢ dV",             "C4"),
+    r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
 }
 #---
 
