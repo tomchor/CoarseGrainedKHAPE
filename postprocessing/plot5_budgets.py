@@ -141,7 +141,7 @@ fig.set_layout_engine("none")
 # "Time" label beneath it; row 0's has only the inter-row gap to sit in, and sits high in it so it reads as
 # belonging to the row above rather than floating between the two.
 for row, (handles, labels, drop) in enumerate([(ke_handles, ke_labels, 0.015),
-                                               (ape_handles, ape_labels, 0.085)]):
+                                               (ape_handles, ape_labels, 0.060)]):
     left, right = axes[row, 0].get_position(), axes[row, -1].get_position()
     fig.legend(handles, labels, fontsize=13, ncol=len(labels), frameon=False,
                loc="upper center", bbox_transform=fig.transFigure,
