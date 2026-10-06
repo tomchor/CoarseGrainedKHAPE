@@ -37,6 +37,8 @@ FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
 COLS=${COLS:-3}
 SCALE=${SCALE:-1}
 LEVELS=${LEVELS:-6}
+# Colon-separated in, commas out, as TIMES and FIELDS are. Empty means "use LEVELS".
+FRACTIONS=$(echo "${FRACTIONS:-}" | tr ':' ',')
 ZLIM=${ZLIM:-4}
 OVERLAY=${OVERLAY:-b}
 OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
@@ -101,7 +103,8 @@ echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
 for T in $(echo "$TIMES" | tr ':' ' '); do
     echo "=== t = $T ===" | tee -a "$LOG"
     time $JULIA --project="$REPO" "$REPO/postprocessing/X13_3d_volume.jl" "$FILE" \
-        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface --levels "$LEVELS" \
+        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface \
+        ${FRACTIONS:+--fractions "$FRACTIONS"} ${FRACTIONS:---levels "$LEVELS"} \
         --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
         || echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"
 done
