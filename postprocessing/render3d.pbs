@@ -104,16 +104,25 @@ echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
 
 # One invocation per time: each writes its own figure, named by the time, and a failure at one time is
 # reported rather than losing the rest of the run.
+# A time that fails is reported and the rest continue, but the job exits non-zero at the end. Figures are
+# named by time alone, so a failed render leaves the previous one in place: without this the job reports
+# success and the stale figure reads as a result. PBS marking it failed is the only reliable signal.
+failed=0
 for T in $(echo "$TIMES" | tr ':' ' '); do
     echo "=== t = $T ===" | tee -a "$LOG"
     time $JULIA --project="$REPO" "$REPO/postprocessing/X13_3d_volume.jl" "$FILE" \
         --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface \
         "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" \
         --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
-        || echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"
+        || { failed=$((failed + 1)); echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"; }
 done
 
 echo "Figures in $REPO/postprocessing/extra_figures/" | tee -a "$LOG"
 ls -la "$REPO"/postprocessing/extra_figures/*6panel* 2>/dev/null | tee -a "$LOG" || true
 qstat -f "$PBS_JOBID" >> "$LOG"
+if [ "$failed" -gt 0 ]; then
+    echo "error: $failed of the requested times failed to render; any figure of that name on disk is from an" \
+         "earlier run" | tee -a "$LOG"
+    exit 1
+fi
 #---
