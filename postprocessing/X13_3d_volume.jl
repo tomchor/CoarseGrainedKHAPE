@@ -63,6 +63,12 @@ ov_alpha  = parse(Float64, get(opts, "overlay-alpha", "0.45"))
 # axis stays legibly separate. Any Makie colour name works.
 ov_color  = Symbol(get(opts, "overlay-color", "seagreen"))
 ov_clip   = parse(Float64, get(opts, "overlay-clip", "0.45"))
+# Which velocity Q, enstrophy and speed are built from: the filtered field at --scale, or the full one.
+# Filtered by default, so they sit on the same scale as the budget terms beside them. Note this makes them
+# consistent in *velocity*, not in decomposition: Q(ū) is a resolved-scale quantity where Π_K, ε_Kˢ, ε_Aˢ
+# and τ are sub-filter, and Q, being quadratic in gradients, has no natural resolved/sub-filter split.
+derived_from = get(opts, "derived-from", "filtered")
+derived_from in ("filtered", "full") || error("--derived-from must be filtered or full; got $derived_from")
 # How the overlay is drawn. `wall` paints it on the bounding planes behind the data, `iso` draws it as
 # isosurfaces in the box.
 #
@@ -136,8 +142,19 @@ function ∂(a, dim, coord)
     return (circshift(a, ntuple(i -> i == dim ? -1 : 0, 3)) .- circshift(a, ntuple(i -> i == dim ? 1 : 0, 3))) ./ (2h)
 end
 
+# The velocity the derived fields are built from. `--derived-from filtered` takes the online filtered field
+# at --scale, which the simulation writes for every scale in its filter_ℓs; `full` takes the raw one. A
+# filtered field that is not in the run falls back to the raw one and says so, rather than failing.
+function velocity(component)
+    derived_from == "full" && return read3d(component)
+    filtered = isempty(scale) ? component : "$(component)_ℓ$scale"
+    haskey(ds, filtered) && return read3d(filtered)
+    @warn "$filtered is not in this run; building the derived fields from the unfiltered $component instead"
+    return read3d(component)
+end
+
 function velocity_gradient()
-    u, v, w = read3d("u"), read3d("v"), read3d("w")
+    u, v, w = velocity("u"), velocity("v"), velocity("w")
     coords = (x, y, z_read)
     return [∂(a, j, coords[j]) for a in (u, v, w), j in 1:3]   # A[i, j] = ∂uⁱ/∂xʲ
 end
@@ -160,7 +177,7 @@ end
 function derived(name)
     name == "b_r" && return reference_buoyancy_anomaly()
     if name == "speed"
-        u, v, w = read3d("u"), read3d("v"), read3d("w")
+        u, v, w = velocity("u"), velocity("v"), velocity("w")
         return sqrt.(u.^2 .+ v.^2 .+ w.^2)
     end
     A = velocity_gradient()
