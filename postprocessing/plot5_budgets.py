@@ -135,7 +135,10 @@ ape_labels.insert(0, ape_labels.pop(solo_idx))
 fig.canvas.draw()
 fig.set_layout_engine("none")
 
-for row, (handles, labels, drop) in enumerate([(ke_handles, ke_labels, 0.030),
+# `drop` is how far below the row's axes the legend's top sits, in figure fraction. Row 1's clears the
+# "Time" label beneath it; row 0's has only the inter-row gap to sit in, and sits high in it so it reads as
+# belonging to the row above rather than floating between the two.
+for row, (handles, labels, drop) in enumerate([(ke_handles, ke_labels, 0.015),
                                                (ape_handles, ape_labels, 0.085)]):
     left, right = axes[row, 0].get_position(), axes[row, -1].get_position()
     fig.legend(handles, labels, fontsize=13, ncol=len(labels), frameon=False,
