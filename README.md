@@ -269,7 +269,7 @@ A `-` prefix on a field negates it, for a term that enters two budgets with oppo
 
 **The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
 
-Software rendering costs about **90 seconds per six-panel figure** at Nz=1024, measured on a Casper CPU node, so the job is sequential in the times and a full 101-record set is roughly 2.5 h — comfortably inside the 6 h walltime it asks for. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `subset_for_plots.py` (below) is for.
+Software rendering costs about **90 seconds per six-panel figure** at Nz=1024, measured on a Casper CPU node, so the job is sequential in the times. It asks for a 30 min walltime, which covers about ten times including Julia's startup; a sweep over many more — a full 101-record set is roughly 2.5 h — needs a longer request (`qsub -l walltime=…`, or edit `render3d.pbs`). `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `subset_for_plots.py` (below) is for.
 
 ### Subset a run for local plotting
 

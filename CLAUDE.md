@@ -69,7 +69,7 @@ an EXIT trap. Two traps: `xvfb-run` is **not** installed on Casper, only the `Xv
 `julia +1.13` is a juliaup feature that Casper's `julia` reads as a filename, so the job finds 1.13 the way
 `simulation.pbs` does. `TIMES` and `FIELDS` travel colon-separated because `qsub -v` splits its own list on
 commas, which is also why a strided range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. Software rendering costs about 90 s per six-panel figure at Nz=1024 (measured), so the job renders its
-times sequentially and a full 101-record set is about 2.5 h, well inside one job; `subset_for_plots.py` is still the quicker loop
+times sequentially; the job asks for 30 min, enough for about ten times, and a full 101-record set (about 2.5 h) needs a longer walltime than the default; `subset_for_plots.py` is still the quicker loop
 for tuning camera, levels and colours, since no `qsub` round trip beats a local render.
 
 ### Local post-processing (no PBS)
