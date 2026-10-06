@@ -22,6 +22,12 @@ using Statistics
 
 GLMakie.activate!(visible = false)   # render offscreen; `save` still works
 
+# Evenly spaced level fractions of a panel's colour range, used by --levels and by the isosurface overlay.
+# Defined up here because the argument block below calls it. `range(lo, hi, 1)` throws when the endpoints
+# differ, so a single pair takes the upper fraction alone -- the strongest surface, which is what one pair
+# should show.
+fractions(lo, hi, n) = n <= 1 ? [hi] : collect(range(lo, hi, n))
+
 
 #+++ Arguments
 # Deliberately hand-rolled rather than ArgParse: this is called by hand, and keeping it dependency-light
@@ -44,7 +50,17 @@ cols    = parse(Int, get(opts, "cols", "3"))
 tsel    = haskey(opts, "time") ? parse(Float64, opts["time"]) : nothing
 zlim    = parse(Float64, get(opts, "zlim", "4.0"))
 pct     = parse(Float64, get(opts, "clim-percentile", "99.0"))
-nlevels = parse(Int,     get(opts, "levels", "6"))
+# Where the isosurfaces sit, as fractions of each panel's own colour range. By default --levels n spreads
+# n/2 of them evenly over 0.18-0.85; --fractions places them explicitly instead, e.g. "0.1,0.5,0.85". The
+# two are alternatives, not a pair.
+if haskey(opts, "levels") && haskey(opts, "fractions")
+    error("--levels and --fractions both set; they are alternative ways to place the same surfaces")
+end
+nlevels = parse(Int, get(opts, "levels", "6"))
+level_fracs = haskey(opts, "fractions") ?
+              [parse(Float64, f) for f in split(opts["fractions"], ",")] :
+              fractions(0.18, 0.85, nlevels ÷ 2)
+all(0 .< level_fracs .<= 1) || error("--fractions must lie in (0, 1]; got $level_fracs")
 alpha   = parse(Float64, get(opts, "alpha", "0.35"))
 # The diverging map every panel is drawn on. :balance (cmocean) by default; the perceptually uniform
 # Scientific Colour Maps (:vik, :broc, :berlin, :cork, ...) and the ColorBrewer names also work.
@@ -243,9 +259,6 @@ function scale_line(p)
     return s
 end
 
-# Level fractions of the colour range. `range(lo, hi, 1)` throws when the endpoints differ, so a single
-# pair takes the upper fraction alone -- the strongest surface, which is what one pair should show.
-fractions(lo, hi, n) = n <= 1 ? [hi] : collect(range(lo, hi, n))
 
 """Read or derive one field, cropped, with its colour scale and isosurface levels."""
 function prepare(spec)
@@ -286,7 +299,7 @@ function prepare(spec)
     # field changes sign and n/2 when it does not. Earlier revisions placed positive levels by quantile of
     # the field's own distribution, which put them where the data was but at magnitudes unrelated to any
     # other panel's, so nothing could be read across the figure.
-    f = fractions(0.18, 0.85, nlevels ÷ 2)
+    f = level_fracs
     levels = signed ? sort(vcat(-f, f)) : f
     a = a ./ hi
     # The budget terms carry their own volume integral, which is the number the closure is stated in and
@@ -297,9 +310,10 @@ function prepare(spec)
     integral = haskey(ds, int_name) ? Float64(ds[int_name][n]) : nothing
     neg && !isnothing(integral) && (integral = -integral)
     # ±hi, not crange: crange is the normalised (-1, 1) every panel is drawn on, which says nothing.
-    @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s)%s", bare, name, -hi, hi,
+    @info @sprintf("  %-12s -> %-12s  range [%.3g, %.3g] (%s)%s  levels %s", bare, name, -hi, hi,
                    signed ? "signed" : "positive",
-                   isnothing(integral) ? "" : @sprintf("  ∫dV = %.3g", integral))
+                   isnothing(integral) ? "" : @sprintf("  ∫dV = %.3g", integral),
+                   join((@sprintf("%.3g", l) for l in levels), ", "))
     return (; name, bare, neg, data = a, colorrange = crange, colormap = cmap, levels, integral, scale = hi)
 end
 
