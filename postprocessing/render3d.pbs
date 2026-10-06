@@ -4,7 +4,7 @@
 #PBS -e logs/render3d_Nz1024_Ri0.10.log
 # Note: job name above is a default; qalter below updates it at runtime based on NZ
 # Log file paths (-o/-e) cannot be changed at runtime; use the .out file for per-run logs
-#PBS -l walltime=00:30:00
+#PBS -l walltime=06:00:00
 #PBS -q casper
 #PBS -m ae
 #PBS -r n
@@ -21,9 +21,9 @@
 # a separate piece of setup; the software path needs nothing and is fast enough for stills -- measured at
 # about 90 s per six-panel figure at Nz=1024, plus a few minutes of Julia startup and precompilation.
 #
-# The 30 min walltime therefore covers roughly ten times, which is what this job is normally asked for, and
-# schedules sooner than a long request. The times render sequentially, so a sweep over many of them -- a
-# full 101-record set is about 2.5 h -- needs a longer request: `qsub -l walltime=...` or an edit here.
+# The times render sequentially, so the walltime scales with how many are asked for: 200 of them is about
+# 5 h, which is what the 6 h request covers. A handful finishes in minutes and leaves the rest unused --
+# PBS charges what is used, not what is asked, though a shorter request does schedule sooner.
 set -eo pipefail
 
 [ -n "${PBS_O_WORKDIR:-}" ] && cd "$PBS_O_WORKDIR"   # postprocessing/, where the wrapper submits from

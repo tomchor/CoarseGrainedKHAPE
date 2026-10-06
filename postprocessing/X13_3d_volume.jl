@@ -187,27 +187,37 @@ function resolve(name)
     error("neither $name nor $suffixed is in $(basename(filepath)), and it is not one of $(join(DERIVED_NAMES, ", "))")
 end
 
-# Panel titles as Makie rich text, so the sub- and superscripts that name these terms are typeset rather
-# than spelled out in lookalike unicode: ε with a subscript K and a superscript s, not "ε_Kˢ". Anything
-# unlisted falls back to the variable's own name.
+# Panel titles as LaTeX, rendered by Makie's MathTeXEngine. Rich text put a subscript and a superscript
+# side by side rather than stacked, so ε_Kˢ came out with the s trailing the K; LaTeX sets them over each
+# other as the notation intends, and matches how plot5 writes the same terms in matplotlib mathtext.
+# Stored as math-mode bodies without the $...$, so a panel letter and a minus sign can be prefixed before
+# the string is wrapped. A name that is not listed falls back to plain text, since an arbitrary variable
+# name (Π_K_ℓ1) is not valid LaTeX.
 const TITLES = Dict(
-    "Q"         => rich("Q", "  vortex criterion"),
-    "enstrophy" => rich("|ω|", superscript("2")),
-    "speed"     => rich("|u|"),
-    "b"         => rich("b"),
-    "b_r"       => rich("b", subscript("r"), "  buoyancy anomaly"),
-    "wb_rs"     => rich("τ(w, b", subscript("r"), ")  conversion"),
-    "Π_K"       => rich("Π", subscript("K"), "  KE flux"),
-    "Π_A"       => rich("Π", subscript("A"), "  APE flux"),
-    "ε_Ks"      => rich("ε", subscript("K"), superscript("s"), "  KE dissipation"),
-    "ε_As"      => rich("ε", subscript("A"), superscript("s"), "  APE dissipation"),
-    "K_s"       => rich("K", superscript("s"), "  sub-filter KE"),
-    "E_as"      => rich("E", subscript("a"), superscript("s"), "  sub-filter APE"),
-    "R_s"       => rich("R", superscript("s"), "  reference tendency"),
-    "dKs_dt"    => rich("∂", subscript("t"), "K", superscript("s"), "  KE tendency"),
-    "dEas_dt"   => rich("∂", subscript("t"), "E", subscript("a"), superscript("s"), "  APE tendency"),
+    "Q"         => raw"Q \;\; \mathrm{vortex\ criterion}",
+    "enstrophy" => raw"|\omega|^2",
+    "speed"     => raw"|\mathbf{u}|",
+    "b"         => raw"b",
+    "b_r"       => raw"b_r \;\; \mathrm{buoyancy\ anomaly}",
+    "wb_rs"     => raw"\tau(w, b_r) \;\; \mathrm{conversion}",
+    "Π_K"       => raw"\Pi_K \;\; \mathrm{KE\ flux}",
+    "Π_A"       => raw"\Pi_A \;\; \mathrm{APE\ flux}",
+    "ε_Ks"      => raw"\varepsilon_K^s \;\; \mathrm{KE\ dissipation}",
+    "ε_As"      => raw"\varepsilon_A^s \;\; \mathrm{APE\ dissipation}",
+    "K_s"       => raw"K^s \;\; \mathrm{subfilter\ KE}",
+    "E_as"      => raw"E_a^s \;\; \mathrm{subfilter\ APE}",
+    "R_s"       => raw"R^s \;\; \mathrm{reference\ tendency}",
+    "dKs_dt"    => raw"\partial_t K^s \;\; \mathrm{KE\ tendency}",
+    "dEas_dt"   => raw"\partial_t E_a^s \;\; \mathrm{APE\ tendency}",
 )
-pretty(bare, resolved) = get(TITLES, bare, rich(resolved))
+
+"""The first title line: the term, with its panel letter and, for a negated field, a minus sign."""
+function panel_title(p, letter)
+    body = get(TITLES, p.bare, nothing)
+    isnothing(body) && return (isnothing(letter) ? "" : "($letter)  ") * (p.neg ? "−" : "") * p.name
+    prefix = isnothing(letter) ? "" : "(\\mathrm{$letter})" * raw"\;\;"
+    return Makie.LaTeXStrings.latexstring(prefix * (p.neg ? "-" : "") * body)
+end
 
 """The second title line: the panel's own range, and its volume integral where the file carries one."""
 function scale_line(p)
@@ -305,10 +315,8 @@ edge_pad(a) = (b = vcat(a[1:1, :], a, a[end:end, :]); hcat(b[:, 1:1], b, b[:, en
 
 # One field: panels are the modes. Several: panels are the fields, in the one mode given.
 panels = length(prepared) == 1 && mode == "both" ?
-         [(kind, only(prepared), rich(kind == "volume" ? "volume (MIP)" : "isosurfaces")) for kind in ("volume", "isosurface")] :
-         [(mode, p, isnothing(p) ? nothing :
-                    rich(p.neg ? rich("−", pretty(p.bare, p.name)) : pretty(p.bare, p.name),
-                         "\n", rich(scale_line(p), fontsize = 13))) for p in prepared]
+         [(kind, only(prepared), kind == "volume" ? "volume (MIP)" : "isosurfaces") for kind in ("volume", "isosurface")] :
+         [(mode, p, nothing) for p in prepared]
 
 # Each panel carries its own colorbar: the budget terms differ by orders of magnitude (Π_K ~ 1e-3 against
 # Q ~ 1e-1 on the test run), so one shared scale would flatten all but the largest.
@@ -322,15 +330,33 @@ nrows = cld(length(panels), ncols)
 # nothing visible.
 fig = Figure(size = (640 * ncols + 120, 520 * nrows), figure_padding = 4)
 
+# Panel letters, for referring to a panel in text. They prefix the title rather than sitting inside the
+# box: an annotation inside an Axis3 would need 3D data coordinates and would move with the camera, where
+# the title is already parked in the cell's top protrusion. Blank cells take no letter, so the sequence
+# counts drawn panels; a single-panel figure gets none, having nothing to distinguish.
+const PANEL_LETTERS = 'a':'z'
+# Precomputed rather than counted inside the loop: a top-level `for` opens a soft scope, so incrementing a
+# counter there would need `global`. cumsum gives each panel its position among the drawn ones.
+panel_letter = cumsum(!isnothing(q[2]) for q in panels)
+n_drawn = last(panel_letter)
+
 for (i, (kind, p, title)) in enumerate(panels)
     row, col = fldmod1(i, ncols)
     isnothing(p) && continue   # a "." in --field: the cell stays empty so the row keeps its alignment
-    # The title is a Label above the axis, not Axis3's own `title`: that attribute takes a plain string or
-    # a LaTeXString but rejects rich text, and no form of it accepts a line break, so neither the typeset
-    # subscripts nor the second line of scale and integral would survive it.
-    # `fig[row, col, Top()]` hangs the label in the cell's top protrusion rather than taking a grid row,
-    # so the axis keeps the whole cell. A nested GridLayout with a label row shrinks the axis to a corner.
-    Label(fig[row, col, Top()], title; fontsize = 15, font = :bold, padding = (0, 0, 6, 0))
+    letter = n_drawn > 1 ? PANEL_LETTERS[panel_letter[i]] : nothing
+    # `title` is set for the --mode both panels (a plain mode name); otherwise it is built from the field.
+    title_tex = isnothing(title) ? panel_title(p, letter) :
+                (isnothing(letter) ? title : "($letter)  " * title)
+    # The title is two Labels in a GridLayout hung in the cell's top protrusion. Every simpler arrangement
+    # fails: Axis3's own `title` takes no line break and rejects rich text; two Labels placed directly in
+    # the protrusion overlap rather than stack; Axis3's title under a protrusion Label overlaps too; and a
+    # LaTeX \substack spanning both lines does not parse in MathTeXEngine. A GridLayout *in the
+    # protrusion* stacks them and still leaves the axis the whole cell -- unlike one in the cell itself,
+    # which shrinks the axis into a corner.
+    gl = GridLayout(fig[row, col, Top()])
+    Label(gl[1, 1], title_tex;      fontsize = 19, padding = (0, 0, 4, 0))
+    Label(gl[2, 1], scale_line(p);  fontsize = 15, padding = (0, 0, 2, 0))
+    rowgap!(gl, 0)
     ax = Axis3(fig[row, col]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
                azimuth = azim * π, elevation = elev * π, limits = box_limits, viewmode = :fitzoom)
     if kind == "volume"
@@ -377,7 +403,8 @@ end
 # thing six times. Its ticks are fractions of each panel's own range; the ranges themselves are in the titles.
 Colorbar(fig[1:nrows, ncols + 1]; colormap = cgrad(cmap_name), colorrange = (-1.0, 1.0),
          ticks = ([-1, -0.5, 0, 0.5, 1], ["-1", "-0.5", "0", "0.5", "1"]),
-         label = "fraction of each panel's range", height = Relative(0.5), width = 14)
+         label = "fraction of each panel's range", height = Relative(0.5), width = 14,
+         labelsize = 20, ticklabelsize = 18)
 
 colgap!(fig.layout, 0)
 rowgap!(fig.layout, 0)
