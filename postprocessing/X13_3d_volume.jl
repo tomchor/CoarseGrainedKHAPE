@@ -83,6 +83,10 @@ ov_clip   = parse(Float64, get(opts, "overlay-clip", "0.45"))
 # Filtered by default, so they sit on the same scale as the budget terms beside them. Note this makes them
 # consistent in *velocity*, not in decomposition: Q(ū) is a resolved-scale quantity where Π_K, ε_Kˢ, ε_Aˢ
 # and τ are sub-filter, and Q, being quadratic in gradients, has no natural resolved/sub-filter split.
+# Rendered pixels per logical unit. The isosurfaces are a raymarched/transparent mesh, so the output is a
+# raster however it is saved -- a PDF would just embed the same bitmap. Raising this is the only way to
+# sharpen the edges; it does not touch the marching-cubes faceting, which is set by the data grid.
+px_per_unit = parse(Float64, get(opts, "px-per-unit", "2"))
 derived_from = get(opts, "derived-from", "filtered")
 derived_from in ("filtered", "full") || error("--derived-from must be filtered or full; got $derived_from")
 # How the overlay is drawn. `wall` paints it on the bounding planes behind the data, `iso` draws it as
@@ -446,6 +450,6 @@ Label(fig[0, :], @sprintf("t = %.1f      Re = %d,  Ri = %.2f%s", t, round(Int, R
 # One field keeps its name in the filename; several would make it unreadable, so they become "budget6".
 tag = length(fields) == 1 ? only(fields) : "$(length(fields))panel"
 outfile = joinpath(figures, @sprintf("%s_3dvol_%s%s_t%.1f.png", stem, tag, isempty(scale) ? "" : "_l$scale", t))
-save(outfile, fig; px_per_unit = 2)
+save(outfile, fig; px_per_unit = px_per_unit)
 @info "Figure saved to: $outfile"
 #---

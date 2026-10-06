@@ -99,7 +99,7 @@ save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK
 #+++ Render
 LOG=logs/${JOB_NAME}.out
 : > "$LOG"
-echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  levels=$LEVELS  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY" | tee -a "$LOG"
+echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY" | tee -a "$LOG"
 echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
 
 # One invocation per time: each writes its own figure, named by the time, and a failure at one time is

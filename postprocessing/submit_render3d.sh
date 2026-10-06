@@ -54,6 +54,17 @@ for arg in "$@"; do case $arg in
   OVERLAY=*) OVERLAY="${arg#*=}";;
   *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, ZLIM=, DERIVED= or OVERLAY=)" >&2; exit 2;;
 esac; done
+# LEVELS is a count, FRACTIONS a list. Passing one to the other fails deep inside the render, where the
+# time is logged as a warning and skipped -- and since the figure's name encodes neither, the previous
+# figure is left sitting there looking like a result.
+case "$LEVELS" in (*[!0-9]*|"")
+    echo "error: LEVELS=$LEVELS must be a whole number of surfaces; to place them explicitly use FRACTIONS=0.4,0.85" >&2
+    exit 2;;
+esac
+case "$FRACTIONS" in (*[!0-9.,]*)
+    echo "error: FRACTIONS=$FRACTIONS must be a comma-separated list of numbers, e.g. 0.4,0.85" >&2
+    exit 2;;
+esac
 # A list or a range, not both: silently preferring one would hide a typo in the other.
 if [ -n "$TIMES" ] && { [ -n "$FROM" ] || [ -n "$TO" ]; }; then
     echo "error: give TIMES= or FROM=/TO=, not both" >&2; exit 2
