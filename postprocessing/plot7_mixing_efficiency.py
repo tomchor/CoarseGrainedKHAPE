@@ -2,7 +2,6 @@
 #+++ Imports
 import os
 from pathlib import Path
-import numpy as np
 import matplotlib.pyplot as plt
 from src.aux00_utils import load_dataset_and_grid
 from src.aux03_plotting import run_label
@@ -17,9 +16,6 @@ parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc",
 parser.add_argument("--filter-scales", type=float, nargs="+", default=[7, 1], help="Filter length scales, one line each")
 parser.add_argument("--max-time", type=float, default=None,
                     help="Right edge of the time axis; default is the end of the record set")
-parser.add_argument("--min-dissipation", type=float, default=0.02,
-                    help="Blank the curve where ε_Aˢ + ε_Kˢ falls below this fraction of its own maximum. The ratio is "
-                         "meaningless where both sinks are near zero, and diverges where they cancel")
 args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
@@ -52,18 +48,13 @@ for ℓ, color in zip(args.filter_scales, ["C0", "C3", "C2", "C1"]):
     ε_K = sink(ke_budget,  "∫-ε_Kˢ dV", ℓ)
     ε_A = sink(ape_budget, "∫-ε_Aˢ dV", ℓ)
     ε_A = ε_A.reindex(time=ε_K.time)            # the two budgets drop the same records, but do not assume it
-    total = ε_A + ε_K
-
-    # ε_Kˢ is non-negative by construction but ε_Aˢ is not, so the denominator can pass through zero and the
-    # ratio diverge there. It is also meaningless before the billow forms, when both sinks are ~0. Both cases
-    # are blanked rather than drawn, so a vertical excursion is never mistaken for a physical efficiency.
-    weak = np.abs(total) < args.min_dissipation * float(np.abs(total).max())
-    η = (ε_A / total).where(~weak)
-    n_blank = int(weak.sum())
-    print(f"  ℓ = {actual:g}: {n_blank} of {weak.size} records blanked (ε_Aˢ + ε_Kˢ below "
-          f"{args.min_dissipation:g} of its maximum)")
+    # t = 0 alone is dropped: both sinks are identically zero there, so the ratio is 0/0. Everywhere else
+    # the curve is drawn as it comes, including where ε_Aˢ -- which is not sign-definite, unlike ε_Kˢ --
+    # drives the denominator through zero and the ratio with it.
+    η = (ε_A / (ε_A + ε_K)).where(ε_A.time > 0)
 
     ax.plot(η.time, η.values, color=color, lw=1.8, label=f"$\\ell = {actual:g}$")
+    print(f"  ℓ = {actual:g}: η over t > 0 spans [{float(η.min()):.3g}, {float(η.max()):.3g}]")
 
 ax.axhline(0.0, color="k", lw=0.8, ls="--")
 ax.set_xlim(0, args.max_time if args.max_time is not None else float(ke_budget.time.max()))
