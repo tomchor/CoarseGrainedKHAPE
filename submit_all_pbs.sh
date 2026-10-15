@@ -5,7 +5,7 @@
 #   simulation → budgeting → sweep_filter → sweep_transfer                      (always)
 #   sweep_transfer = SWEEP_PARTS jobs over shares of the records → their join   (SWEEP_PARTS > 1)
 #   + validation  (online-vs-offline figures + animations; parallel after sim)  (VALIDATE=1)
-#   + plots       (plot2 transfer spectrum, plot3 budgets, plot4 panels)        (PLOTS=1)
+#   + plots       (plot4 snapshots, plot5 sweep Hovmöller, plot6 budgets)       (PLOTS=1)
 #
 # The SFS KE and APE budgets are computed by the simulation itself; `budgeting` assembles and plots them
 # (postprocessing/01_online_budgets.py, 02_plot_budgets.py). The sweep over filter scales stays offline.

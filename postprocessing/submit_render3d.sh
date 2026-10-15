@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit the 3D isosurface rendering job: X13_3d_volume.jl at one or more output times.
+# Submit the 3D isosurface rendering job: plot7_3d_volume.jl at one or more output times.
 # Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [ZLIM=4] [OVERLAY=b]
 #    or: bash submit_render3d.sh FROM=60 TO=160 EVERY=10 [...]
 #   TIMES    output times to render, comma- or space-separated (quote if spaces). One figure per time
@@ -8,7 +8,7 @@
 #   NZ       vertical resolution, used to name the job and find the run
 #   FILE     the 3D file to read; default $KHAPE_OUTPUT_DIR/khi_Nz<NZ>_Ri0.10.nc. Give it to render a run
 #            that lives somewhere else, e.g. a colleague's scratch
-#   COLS     panels per row (X13 default 3). A two-row budget figure of eight fields wants COLS=4
+#   COLS     panels per row (plot7 default 3). A two-row budget figure of eight fields wants COLS=4
 #   FIELDS   comma-separated panels; default is the six-term budget set. A "-" prefix negates a field
 #            (a term entering two budgets with opposite sign) and a lone "." leaves a cell empty
 #   SCALE    filter scale ℓ whose per-scale terms to draw (the _ℓ<ℓ> suffix the bare names pick up)
@@ -21,7 +21,7 @@
 #   OVERLAY  reference field drawn as contours on the bounding walls ('' for none)
 #
 # No GPU is requested: the job makes its own OpenGL context with Xvfb and Mesa's software rasteriser.
-# See render3d.pbs.
+# See 04_render3d.pbs.
 TIMES=""
 FROM=""
 TO=""
@@ -98,5 +98,5 @@ JOB=$(qsub -N "$NAME" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
            -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
-           render3d.pbs)
+           04_render3d.pbs)
 echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS): $JOB"

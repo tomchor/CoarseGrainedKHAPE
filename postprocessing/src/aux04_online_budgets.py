@@ -8,7 +8,7 @@ along a `filter_scale` dimension, the budget's sign on every integral and the re
 knows which pipeline produced them. It is lazy (dask), so a caller that wants one slice pays for one slice.
 
 `01_online_budgets.py` writes the integrals it returns to the two integrated budget files that the tests and
-`02_plot_budgets.py` read. The 3D terms are never copied: the tests, `plot5_budgets.py`, `plot6_panels.py`,
+`02_plot_budgets.py` read. The 3D terms are never copied: the tests, `plot6_budgets.py`, `X6_panels.py`,
 `X2_panels.py` and `X4_thumbnail.py` call it on the simulation file directly, and `anim1_panels.py` on the x–z slices
 of the `_2d.nc` file, for its panels and its time series alike.
 """

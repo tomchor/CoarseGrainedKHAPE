@@ -123,8 +123,8 @@ if [ "$RANKS" -gt 1 ]; then
         || echo "warning: the animation failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
 fi
 
-# The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot3 reads the
-# _2d.nc file, plot5 and plot6 assemble the SFS budgets from the 3D file themselves (plot4 needs the sweep and stays in
+# The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot4 reads the
+# _2d.nc file, plot6 and X6 assemble the SFS budgets from the 3D file themselves (plot5 needs the sweep and stays in
 # plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this one with
 # afterok should still start.
 for script in plot4_omega_br_snapshots.py plot6_budgets.py X6_panels.py; do

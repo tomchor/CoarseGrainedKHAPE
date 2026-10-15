@@ -26,7 +26,7 @@ stem = Path(filename).stem
 #---
 
 #+++ Assemble the budgets and pull out the two sinks
-# Same source as plot5: `online_budgets` is what 01_online_budgets.py writes, so this runs straight off the
+# Same source as plot6: `online_budgets` is what 01_online_budgets.py writes, so this runs straight off the
 # simulation output with no post-processing. The budgets carry the dissipations with the sign they enter the
 # budget with -- as sinks -- so they are negated back to the dissipation rates themselves.
 print("Assembling the SFS budgets from the simulation output...")

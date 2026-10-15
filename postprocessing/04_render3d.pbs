@@ -11,7 +11,7 @@
 #PBS -l select=1:ncpus=4:mem=64GB:ngpus=0
 #PBS -l job_priority=regular
 
-# X13_3d_volume.jl (GLMakie isosurfaces) at one or more output times.
+# plot7_3d_volume.jl (GLMakie isosurfaces) at one or more output times.
 #
 # No GPU: GLMakie needs an OpenGL context, not a GPU, and Casper's compute nodes have neither a display nor
 # the NVIDIA driver exposed to one. Xvfb (/usr/bin/Xvfb, present without the usual xvfb-run wrapper) plus
@@ -32,7 +32,7 @@ REPO=$(cd .. && pwd)
 NZ=${NZ:-1024}
 # Colon-separated, because `qsub -v` splits its own list on commas and a space would not survive it.
 TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
-# Colon-separated on the way in, for the same reason TIMES is; X13 wants commas.
+# Colon-separated on the way in, for the same reason TIMES is; plot7 wants commas.
 FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
 COLS=${COLS:-3}
 SCALE=${SCALE:-1}
@@ -110,15 +110,15 @@ echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
 failed=0
 for T in $(echo "$TIMES" | tr ':' ' '); do
     echo "=== t = $T ===" | tee -a "$LOG"
-    time $JULIA --project="$REPO" "$REPO/postprocessing/X13_3d_volume.jl" "$FILE" \
+    time $JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE" \
         --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface \
         "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" \
         --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
         || { failed=$((failed + 1)); echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"; }
 done
 
-echo "Figures in $REPO/postprocessing/extra_figures/" | tee -a "$LOG"
-ls -la "$REPO"/postprocessing/extra_figures/*6panel* 2>/dev/null | tee -a "$LOG" || true
+echo "Figures in $REPO/figures/" | tee -a "$LOG"
+ls -la "$REPO"/figures/*6panel* 2>/dev/null | tee -a "$LOG" || true
 qstat -f "$PBS_JOBID" >> "$LOG"
 if [ "$failed" -gt 0 ]; then
     echo "error: $failed of the requested times failed to render; any figure of that name on disk is from an" \

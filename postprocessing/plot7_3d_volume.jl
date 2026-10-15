@@ -1,6 +1,6 @@
 # Exploratory: volume render and isosurfaces of one snapshot of a 3D run.
 #
-#   julia --project postprocessing/X13_3d_volume.jl <3d_output_filepath> [--field b] [--mode both] ...
+#   julia --project postprocessing/plot7_3d_volume.jl <3d_output_filepath> [--field b] [--mode both] ...
 #
 # One --field lays the panels out by mode (volume and isosurface of it); a comma-separated list lays them
 # out by field, one panel each, in the single --mode given. --scale appends the _ℓ<ℓ> every budget term
@@ -10,7 +10,7 @@
 #
 # GLMakie rather than CairoMakie: a volume render is GPU raymarching, which Cairo cannot do at all, and
 # Makie's 3D `contour` wants the same backend. It needs an OpenGL context but no GPU: on Casper, Xvfb
-# plus Mesa's software rasteriser gives one on a plain CPU node, which is what render3d.pbs sets up.
+# plus Mesa's software rasteriser gives one on a plain CPU node, which is what 04_render3d.pbs sets up.
 #
 # The isosurface is the more useful of the two modes for this flow -- Q or enstrophy picks out the
 # streamwise vortices that braid the billow, which is the whole reason the simulation went 3D.
@@ -32,7 +32,7 @@ fractions(lo, hi, n) = n <= 1 ? [hi] : collect(range(lo, hi, n))
 #+++ Arguments
 # Deliberately hand-rolled rather than ArgParse: this is called by hand, and keeping it dependency-light
 # means it also runs under `julia --project` with nothing precompiled beyond Makie and NCDatasets.
-length(ARGS) > 0 || error("Usage: julia --project postprocessing/X13_3d_volume.jl <3d_output_filepath> [--field F] [--mode M] ...")
+length(ARGS) > 0 || error("Usage: julia --project postprocessing/plot7_3d_volume.jl <3d_output_filepath> [--field F] [--mode M] ...")
 filepath = ARGS[1]
 opts = Dict{String,String}()
 for i in 2:2:length(ARGS)-1
@@ -110,7 +110,7 @@ length(fields) == 1 || mode != "both" ||
     error("--mode both lays panels out by mode, so it takes one --field; got $(length(fields)). Pick --mode isosurface or volume.")
 
 repo_root = dirname(@__DIR__)
-figures   = joinpath(@__DIR__, "extra_figures")
+figures   = joinpath(repo_root, "figures")
 mkpath(figures)
 isabspath(filepath) || (filepath = joinpath(repo_root, filepath))
 stem = replace(basename(filepath), ".nc" => "")
@@ -150,7 +150,7 @@ read3d(name) = Float64.(ds[name][:, :, kz_read, n])
 # and y, one-sided at the z walls -- matching how the rest of the pipeline treats the bounded axis.
 function ∂(a, dim, coord)
     d = diff(coord)
-    all(≈(d[1]), d) || error("X13 assumes a uniform grid along dimension $dim")
+    all(≈(d[1]), d) || error("plot7 assumes a uniform grid along dimension $dim")
     h = d[1]
     if dim == 3   # z is Bounded: one-sided at the walls
         g = similar(a)
@@ -226,7 +226,7 @@ end
 
 # Panel titles as LaTeX, rendered by Makie's MathTeXEngine. Rich text put a subscript and a superscript
 # side by side rather than stacked, so ε_Kˢ came out with the s trailing the K; LaTeX sets them over each
-# other as the notation intends, and matches how plot5 writes the same terms in matplotlib mathtext.
+# other as the notation intends, and matches how plot6 writes the same terms in matplotlib mathtext.
 # Stored as math-mode bodies without the $...$, so a panel letter and a minus sign can be prefixed before
 # the string is wrapped. A name that is not listed falls back to plain text, since an arbitrary variable
 # name (Π_K_ℓ1) is not valid LaTeX.

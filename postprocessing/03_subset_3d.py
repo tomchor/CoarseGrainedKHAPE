@@ -1,10 +1,12 @@
 #!/usr/bin/env python
-# Cut a 3D run down to something that fits on a laptop, for plotting with X13 locally.
+# Cut a 3D run down to something that fits on a laptop, for rendering it with plot7_3d_volume.jl locally.
 #
-#   python postprocessing/subset_for_plots.py --filename output/khi_Nz1024_Ri0.10.nc --times 100 120 140 --scale 1
+#   python postprocessing/03_subset_3d.py --filename output/khi_Nz1024_Ri0.10.nc --times 100 120 140 --scale 1
 #
 # Named neither plot*.py nor X*.py on purpose: it writes data, not a figure, so neither plots.pbs's glob
-# nor the extra-figures family picks it up. Run it on the HPC, scp the result, point X13 at it.
+# nor the extra-figures family picks it up. It is numbered before 04_render3d.pbs because it comes first:
+# tune camera, levels and colours locally on a subset, then batch-render the final times with that job.
+# Run it on the HPC, scp the result, point plot7_3d_volume.jl at it.
 #
 # Four reductions, in the order they matter: keep only the fields asked for, only the records asked for,
 # crop z to the active layer (Lz = 25h is mostly quiescent), and store float32. On an Nz=1024 run that is
@@ -38,7 +40,7 @@ parser.add_argument("--filename", required=True, help="Path to the full 3D simul
 parser.add_argument("--output", default=None, help="Output path; default is <stem>_subset.nc beside the input")
 parser.add_argument("--fields", default="u,v,w,b,wb_rs,Π_K,Π_A,ε_Ks,ε_As",
                     help="Comma-separated variables to keep. Bare budget names get the _ℓ<scale> suffix (see --scale). "
-                         "u, v and w are what X13 derives Q, enstrophy and speed from, so keep them unless sure")
+                         "u, v and w are what plot7_3d_volume.jl derives Q, enstrophy and speed from, so keep them unless sure")
 parser.add_argument("--scale", default="1", help="Filter scale ℓ whose per-scale budget terms to keep ('' to disable the suffixing)")
 parser.add_argument("--times", type=float, nargs="+", default=None, help="Target times to keep (nearest record each); default every record")
 parser.add_argument("--every", type=int, default=None, help="Instead of --times, keep every Nth record")
@@ -111,7 +113,7 @@ z_lo = float(z_faces[k0]) if z_faces is not None else float(z_c[k0] - 0.5 * (z_c
 z_hi = float(z_faces[k1 + 1]) if z_faces is not None else float(z_c[k1] + 0.5 * (z_c[1] - z_c[0]))
 print(f"Cropping z to {k1 - k0 + 1} of {z_c.size} cells: faces {z_lo:.4f} to {z_hi:.4f}")
 if args.zlim <= 4.0:
-    print(f"  note: X13 defaults to plotting |z| < 4 and derives Q by centred differences, so a subset cropped to "
+    print(f"  note: plot7_3d_volume.jl defaults to plotting |z| < 4 and derives Q by centred differences, so a subset cropped to "
           f"{args.zlim} leaves them one-sided at the boundary. Plot with a smaller --zlim, or subset with a larger one.")
 #---
 
@@ -153,6 +155,6 @@ shutil.move(tmp, outfile)
 before, after = Path(filename).stat().st_size, Path(outfile).stat().st_size
 print(f"Done: {before/2**30:.2f} GiB -> {after/2**30:.3f} GiB  ({before/after:.0f}x smaller)")
 print(f"Copy it over, then e.g.:\n"
-      f"  julia --project postprocessing/X13_3d_volume.jl {Path(outfile).name} "
+      f"  julia --project postprocessing/plot7_3d_volume.jl {Path(outfile).name} "
       f"--field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale {args.scale} --mode isosurface")
 #---

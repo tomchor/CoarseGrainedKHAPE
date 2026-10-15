@@ -32,7 +32,7 @@ stem = Path(filename).stem
 ref_suffix = ""
 #---
 
-#+++ Load the simulation output and assemble the budgets from its online terms (lazily, as plot6_panels.py)
+#+++ Load the simulation output and assemble the budgets from its online terms (lazily, as X6_panels.py)
 print("Loading simulation dataset and budgets...")
 ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
 ke_budget, ape_budget = online_budgets(ds)
