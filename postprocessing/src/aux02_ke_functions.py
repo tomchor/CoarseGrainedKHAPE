@@ -4,6 +4,8 @@ Kinetic energy calculation functions
 This module contains functions for calculating kinetic energy (KE).
 """
 
+import resource
+import time
 import xarray as xr
 from src.aux00_utils import (integrate, calculate_gradient, condense_velocities,
                          make_gaussian_filter, filter_fields, FILTER_DIMS)
@@ -255,7 +257,8 @@ def calculate_cross_scale_ke_flux(τ, S̄, index_dims=("i", "j")):
 #+++ Cross-scale energy transfer pipeline
 def calculate_energy_transfer(ds, filter_scales,
                               ds_filt=None, rho_sorted=None, dz_sorted=None, n_workers=18,
-                              include_pi_k=True, filtered_reference=False, frozen_reference=False):
+                              include_pi_k=True, filtered_reference=False, frozen_reference=False,
+                              integrals_only=False):
     """Calculate cross-scale KE and APE transfer terms at each filter scale.
 
     Parameters
@@ -284,13 +287,19 @@ def calculate_energy_transfer(ds, filter_scales,
     frozen_reference : bool
         True when `rho_sorted` repeats one profile at every time (--fixed-reference), so
         ⟨ρ_*⟩ is filtered once per scale and broadcast. See filtered_reference_profile.
+    integrals_only : bool
+        If True, return only the volume integrals, each scale's computed before the next scale is
+        built. The fields behind them are then dropped scale by scale; held lazily for every scale, as
+        they are otherwise, each keeps the eager Υˡ of the whole time series alive (43 GiB per scale for
+        51 records at Nz=1024). The integrals are the same numbers either way.
 
     Returns
     -------
     xr.Dataset
         Dataset with Π_A, the SFS APE->KE exchange term and its resolved
         counterpart w̄·b_rˡ (plus their volume integrals) indexed by
-        filter_scale, and Π_K (with ∫Π_K dV) when include_pi_k=True.
+        filter_scale, and Π_K (with ∫Π_K dV) when include_pi_k=True. With
+        integrals_only, the volume integrals alone, computed.
     """
     filtered_dimensions = list(FILTER_DIMS)
     tensor_dimensions   = FILTER_DIMS
@@ -393,7 +402,13 @@ def calculate_energy_transfer(ds, filter_scales,
             "∫w̄·b_rˡ dV":           int_wbar_b_r_l,
             **ke_vars,
         }
-        transfer_list.append(xr.Dataset(transfer_vars))
+        if integrals_only:
+            t0 = time.time()
+            transfer_list.append(xr.Dataset({k: v for k, v in transfer_vars.items() if k.startswith("∫")}).compute())
+            peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20   # KiB on Linux
+            print(f"  integrals computed in {time.time() - t0:.0f} s; peak memory so far {peak:.1f} GiB")
+        else:
+            transfer_list.append(xr.Dataset(transfer_vars))
 
     scale_coord = xr.DataArray(filter_scales, dims="filter_scale",
                                name="filter_scale")

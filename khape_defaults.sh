@@ -60,3 +60,42 @@ submit_simulation_job() {
          -l walltime=08:00:00 \
          -v "$vars,RANKS=$ngpus,KHAPE_MPI_DEPOT=$KHAPE_MPI_DEPOT,KHAPE_MPI_ENV=$KHAPE_MPI_ENV" simulation.pbs
 }
+
+# The default number of jobs the sweep transfer (postprocessing/sweep2_energy_transfer.py) splits a run's records across.
+# Its memory grows with records x cells: the 3D Nz=512 run took 689 GiB of a 730 GiB node in one job, and at Nz=1024 one
+# record's sorted column of the padded domain alone is 421 M slots, 6.3 GiB with its slot heights. Beyond Nz=1024
+# SWEEP_PARTS has to be given.
+default_sweep_parts() {
+    if   [ "$1" -le 512 ];  then echo 1
+    elif [ "$1" -le 1024 ]; then echo 6
+    else echo "error: no default SWEEP_PARTS for NZ=$1; give SWEEP_PARTS=" >&2; return 2
+    fi
+}
+
+# submit_sweep_transfer NAME PARTS DEPEND VARS
+# Submit postprocessing/sweep_transfer.pbs (from postprocessing/) as job NAME, with VARS (a comma-separated KEY=VALUE
+# list) in its environment, after DEPEND (a PBS dependency such as afterok:123, or empty), and print the id of the job
+# after which the transfer file is whole and sweep3 has run.
+#   PARTS=1   one job: sweep2, then sweep3. Prints its id.
+#   PARTS>1   PARTS jobs at once, each over its share of the records (PART=K/PARTS), then a small one after all of them
+#             that joins their files and runs sweep3 (MERGE_PARTS=PARTS). Prints that one's id.
+submit_sweep_transfer() {
+    local name=$1 parts=$2 depend=$3 vars=$4
+    local after=(); [ -n "$depend" ] && after=(-W depend=$depend)
+    if [ "$parts" = "1" ]; then
+        qsub -N "$name" -A "$KHAPE_ACCOUNT" -o "logs/${name}.log" -e "logs/${name}.log" -v "$vars" "${after[@]}" sweep_transfer.pbs
+        return
+    fi
+    local k part job jobs=""
+    for k in $(seq 1 "$parts"); do
+        part="${name}_part${k}of${parts}"
+        job=$(qsub -N "$part" -A "$KHAPE_ACCOUNT" -o "logs/${part}.log" -e "logs/${part}.log" -v "$vars,PART=$k/$parts" \
+                   "${after[@]}" sweep_transfer.pbs) || return
+        jobs="$jobs:$job"
+    done
+    job=$(qsub -N "${name}_merge" -A "$KHAPE_ACCOUNT" -o "logs/${name}_merge.log" -e "logs/${name}_merge.log" \
+               -l select=1:ncpus=2:mem=32GB:ngpus=0 -l walltime=02:00:00 -v "$vars,MERGE_PARTS=$parts" \
+               -W depend=afterok$jobs sweep_transfer.pbs) || return
+    echo "Submitted the sweep transfer in $parts parts (${jobs#:}) and the job that joins them ($job)" >&2
+    echo "$job"
+}
