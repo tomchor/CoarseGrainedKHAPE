@@ -21,6 +21,9 @@ parser = argparse.ArgumentParser(description="Time-evolution snapshots: buoyancy
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc", help="Path to simulation NetCDF file")
 parser.add_argument("--times", type=float, nargs="+", default=[20, 50, 80],
                     help="Snapshot times, one column each (nearest available is used)")
+parser.add_argument("--top", default="ω", choices=["ω", "b"],
+                    help="Field on the top row: spanwise vorticity (default) or buoyancy. b_r is always the bottom row, "
+                         "and the buoyancy contours are overlaid on both either way")
 parser.add_argument("--zlim", type=float, default=4.0, help="Half-height of the plotted z window")
 parser.add_argument("--clim-percentile", type=float, default=99.5, help="Percentile of |data| used to set symmetric color limits")
 args = parser.parse_args()
@@ -53,8 +56,16 @@ if len(set(t_sel)) < len(t_sel):     # two requests on one record would duplicat
 ds = ds.sel(time=t_sel)
 
 zsl = slice(-args.zlim, +args.zlim)
-b_fields   = [xz_slice(ds.b.sel(time=t).sel(z_aac=zsl)).squeeze()   for t in t_sel]
-b_r_fields = [xz_slice(ds.b_r.sel(time=t).sel(z_aac=zsl)).squeeze() for t in t_sel]
+# The z crop is by dimension name: ω sits on the faces (z_aaf, x_faa) where b and b_r sit on the centres,
+# so a hard-coded z_aac would silently fail on it.
+def _snaps(name):
+    da = ds[name]
+    zdim = next(d for d in da.dims if d.startswith("z_"))
+    return [xz_slice(da.sel(time=t).sel({zdim: zsl})).squeeze() for t in t_sel]
+
+b_fields   = _snaps("b")       # always loaded: the contour overlay and its levels come from b
+b_r_fields = _snaps("b_r")
+top_fields = b_fields if args.top == "b" else _snaps("ω")
 print("Done.")
 #---
 
@@ -73,9 +84,10 @@ def _sym_clim(fields):
     v = max(np.nanpercentile(np.abs(_xzdata(f)[2]), args.clim_percentile) for f in fields)
     return -v, +v
 
-b_vmin,   b_vmax   = _sym_clim(b_fields)
+b_vmin,   b_vmax   = _sym_clim(b_fields)        # also sets the contour levels, so needed either way
+top_vmin, top_vmax = _sym_clim(top_fields)
 b_r_vmin, b_r_vmax = _sym_clim(b_r_fields)
-print(f"  b   colour range: [{b_vmin:+.3e}, {b_vmax:+.3e}]")
+print(f"  {args.top}   colour range: [{top_vmin:+.3e}, {top_vmax:+.3e}]")
 print(f"  b_r colour range: [{b_r_vmin:+.3e}, {b_r_vmax:+.3e}]")
 
 # Buoyancy contours overlaid on both rows, at levels fixed across every panel so the overlay is itself
@@ -90,8 +102,9 @@ ncol = len(t_sel)
 fig, axes = plt.subplots(2, ncol, figsize=(5.0 * ncol + 0.9, 6.3), constrained_layout=True,
                          gridspec_kw=dict(wspace=0, hspace=0), squeeze=False)
 
+top_label = r"$b$ (buoyancy)" if args.top == "b" else r"$\omega_y$ (spanwise vorticity)"
 rows = [
-    (b_fields,   r"$b$ (buoyancy)",            "RdBu_r", b_vmin,   b_vmax),
+    (top_fields, top_label,                    "RdBu_r", top_vmin, top_vmax),
     (b_r_fields, r"$b_r$ (relative buoyancy)", "PuOr_r", b_r_vmin, b_r_vmax),
 ]
 
@@ -145,13 +158,15 @@ for ax, letter in zip(axes.flat, "abcdefghijkl"):
 
 label = run_label(ds.attrs)
 if label:
-    axes[1, -1].text(0.98, 0.04, label, transform=axes[1, -1].transAxes, fontsize=10, ha="right", va="bottom",
-                     bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
+    # Bottom-left panel, not bottom-right: the run parameters apply to the whole figure, so they belong at
+    # the start of the reading order rather than tucked in the last panel where they read as a caption to it.
+    axes[1, 0].text(0.02, 0.04, label, transform=axes[1, 0].transAxes, fontsize=10, ha="left", va="bottom",
+                    bbox=dict(facecolor="white", edgecolor="none", pad=2, alpha=0.85))
 
 t_tag = "-".join(f"{t:.0f}" for t in t_sel)
-# PDF, as the other paper figures (plot2, and X3 among the extra ones). The pcolormesh layers are rasterized above, so the file
+# PDF, as the other paper figures (plot5 and plot6, and X3 and X5 among the extra ones). The pcolormesh layers are rasterized above, so the file
 # stays small while the contours, axes and text remain vector.
-outfile = str(FIGURES / f"{stem}_b_br_snapshots_t{t_tag}.pdf")
+outfile = str(FIGURES / f"{stem}_omega_br_snapshots_t{t_tag}.pdf")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")

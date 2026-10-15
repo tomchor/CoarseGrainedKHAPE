@@ -200,7 +200,7 @@ if args.part is not None:
     target_filename = part_filename(part_k, n_parts)
     energy_transfer.attrs.update(sweep_part=args.part, sweep_records=f"{records[0]}:{records[-1] + 1}")
 if not args.keep_fields:
-    # Every reader of the sweep (sweep3, plot4, compare_extension and the S scripts) uses only the ∫ integrals, which
+    # Every reader of the sweep (sweep3, plot5, compare_extension and the X scripts) uses only the ∫ integrals, which
     # calculate_energy_transfer has computed already: a few MB, written at once. The 4D fields behind them are kept only
     # when asked for: they are about 860 GB at Nz=2048 and 3.4 TB at Nz=4096.
     energy_transfer.to_netcdf(target_filename)

@@ -31,7 +31,7 @@ stem = Path(filename).stem
 ref_suffix = ""
 #---
 
-#+++ Assemble the budgets from the simulation's online terms (lazily, as plot6_panels.py)
+#+++ Assemble the budgets from the simulation's online terms (lazily, as X6_panels.py)
 print("Loading KE and APE budgets...")
 ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
 ke_budget, ape_budget = online_budgets(ds)
