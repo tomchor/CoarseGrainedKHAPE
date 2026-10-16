@@ -127,7 +127,12 @@ allow_virtual_storage!() = foreach(code -> get!(NCDatasets.NCSymbols, code, :con
 allow_virtual_storage!()
 
 # NCDatasets indexes in the file's own order, which is the reverse of Python's: (x, y, z, time).
-ds = NCDataset(filepath, "r")
+# NaN rather than `missing` for masked values. A file that declares a _FillValue otherwise reads as
+# Union{Missing, Float64}: Makie's contour! has no method for that (the wall overlay throws), and read3d's
+# Float64.() throws on any value the fill value masks, such as the NaN last record of a tendency. Every
+# variable of a 03_subset_3d.py subset declares one (xarray's default for floats); the simulation's own
+# files declare none, so for them nothing changes. A masked value stays NaN, which `prepare` filters out.
+ds = NCDataset(filepath, "r"; maskingvalue = NaN)
 x, y, z = ds["x_caa"][:], ds["y_aca"][:], ds["z_aac"][:]
 times   = ds["time"][:]
 n = isnothing(tsel) ? length(times) : argmin(abs.(times .- tsel))
