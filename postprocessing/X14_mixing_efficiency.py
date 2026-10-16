@@ -13,10 +13,15 @@ import argparse
 parser = argparse.ArgumentParser(description="Mixing efficiency η = ε_Aˢ/(ε_Aˢ + ε_Kˢ) against time, one line per filter scale")
 parser.add_argument("--filename", default="output/khi_Nz1024_Ri0.10.nc",
                     help="Path to simulation NetCDF file (the dissipations are assembled from its online terms)")
-parser.add_argument("--filter-scales", type=float, nargs="+", default=[7, 1], help="Filter length scales, one line each")
+parser.add_argument("--filter-scales", type=float, nargs="+", default=[7, 1], help="Filter length scales, one line each, at most four")
 parser.add_argument("--max-time", type=float, default=None,
                     help="Right edge of the time axis; default is the end of the record set")
 args = parser.parse_args()
+# Colour tells the scales apart in the first two panels, so each scale needs one of its own: cycling the palette would
+# draw two scales alike, and zipping the scales with it would drop those past its end without a word.
+SCALE_COLORS = ["C0", "C3", "C2", "C1"]
+if len(args.filter_scales) > len(SCALE_COLORS):
+    parser.error(f"at most {len(SCALE_COLORS)} filter scales, one colour each; {len(args.filter_scales)} given")
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k, v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -54,7 +59,7 @@ fig, axes = plt.subplots(nrows, 1, figsize=(7.5, 3.6 * nrows), constrained_layou
 ax_e, ax = axes[0], axes[1]
 
 series = {}
-for ℓ, color in zip(args.filter_scales, ["C0", "C3", "C2", "C1"]):
+for ℓ, color in zip(args.filter_scales, SCALE_COLORS):
     actual = float(ke_budget.filter_scale.sel(filter_scale=ℓ, method="nearest"))
     ε_K = sink(ke_budget,  "∫-ε_Kˢ dV", ℓ)
     ε_A = sink(ape_budget, "∫-ε_Aˢ dV", ℓ)
