@@ -19,9 +19,10 @@
 # context on a plain CPU node, so this is an ordinary batch job. Verified on crhtc73, 2026-10-03.
 # vglrun is also installed and would render in hardware, but it needs an X server bound to a GPU, which is
 # a separate piece of setup; the software path needs nothing and is fast enough for stills -- measured at
-# about 90 s per six-panel figure at Nz=1024, plus a few minutes of Julia startup and precompilation.
+# about 2 min per six-panel figure at Nz=1024 at the default 800 steps per ray (90 s at Makie's 200),
+# plus a few minutes of Julia startup and precompilation.
 #
-# The times render sequentially, so the walltime scales with how many are asked for: 200 of them is about
+# The times render sequentially, so the walltime scales with how many are asked for: 150 of them is about
 # 5 h, which is what the 6 h request covers. A handful finishes in minutes and leaves the rest unused --
 # PBS charges what is used, not what is asked, though a shorter request does schedule sooner.
 set -eo pipefail
@@ -42,7 +43,7 @@ LEVELS=${LEVELS:-6}
 # so the fraction list ended up on the command line a second time as a stray argument.
 FRACTIONS=$(echo "${FRACTIONS:-}" | tr ':' ',')
 if [ -n "$FRACTIONS" ]; then LEVEL_ARGS=(--fractions "$FRACTIONS"); else LEVEL_ARGS=(--levels "$LEVELS"); fi
-SAMPLES=${SAMPLES:-200}
+SAMPLES=${SAMPLES:-800}
 # Empty means Makie's automatic shell width; passed as an array for the reason FRACTIONS is.
 ISORANGE=${ISORANGE:-}
 if [ -n "$ISORANGE" ]; then ISO_ARGS=(--isorange "$ISORANGE"); else ISO_ARGS=(); fi

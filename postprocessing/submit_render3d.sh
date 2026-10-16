@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Submit the 3D isosurface rendering job: plot7_3d_volume.jl at one or more output times.
-# Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [SAMPLES=200] [ISORANGE=0.03] [ZLIM=4] [OVERLAY=b]
+# Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [SAMPLES=800] [ISORANGE=0.03] [ZLIM=4] [OVERLAY=b]
 #    or: bash submit_render3d.sh FROM=60 TO=160 EVERY=10 [...]
 #   TIMES    output times to render, comma- or space-separated (quote if spaces). One figure per time
 #   FROM/TO/EVERY  a strided range instead of a list: FROM to TO inclusive in steps of EVERY, which has no
@@ -15,8 +15,8 @@
 #   LEVELS   isosurfaces per panel; 2 is much faster to a first look, 6 shows the nested structure
 #   FRACTIONS  place the surfaces explicitly instead, as fractions of each panel's range, e.g.
 #            0.1,0.5,0.85. Alternative to LEVELS, not a companion -- setting both is an error
-#   SAMPLES  ray-march steps per ray for the isosurfaces (Makie default 200). 800 sharpens the edges of small
-#            surfaces, and measured at Nz=1024 it costs little: a six-panel figure in ~2 min against ~90 s. The figure name does
+#   SAMPLES  ray-march steps per ray for the isosurfaces (default 800; Makie's own is 200). 800 sharpens the edges
+#            of small surfaces and costs little: at Nz=1024 a six-panel figure takes ~2 min, against ~90 s at 200. The figure name does
 #            not record it, so a render at another SAMPLES replaces the last one at that time
 #   ISORANGE shell half-width of each isosurface, as a fraction of the panel range; empty (default) is
 #            Makie's automatic value, a tenth of the smallest gap between levels (~0.034 at LEVELS=6). Not a
@@ -40,7 +40,7 @@ COLS=2
 SCALE=1
 LEVELS=6
 FRACTIONS=""
-SAMPLES=200
+SAMPLES=800
 ISORANGE=""
 ZLIM=4
 DERIVED=filtered
