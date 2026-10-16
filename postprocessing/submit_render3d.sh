@@ -38,7 +38,7 @@
 #            only, while still animating the whole window. A later phase can then set the scale, at the cost
 #            of saturating the frames outside it, where a term exceeds that scale. Default: every frame
 #   FPS      frames per second of the movie (default 10)
-#   PREVIEW  1 for a quick test of an animation: ANIMATE=1 with one frame every 10 time units (EVERY=10) at
+#   PREVIEW  1 for a quick test of an animation: ANIMATE=1 with one frame every 20 time units (EVERY=20) at
 #            half the resolution (PX_PER_UNIT=1), under names of its own (<name>_preview.mp4 and its own
 #            ranges file and frames), so it never replaces the full animation. Levels and samples are as
 #            usual; any option given explicitly overrides the preview's
@@ -122,7 +122,7 @@ case "$PREVIEW" in (0|1) ;; (*) echo "error: PREVIEW=$PREVIEW must be 0 or 1" >&
 # PX_PER_UNIT given explicitly still wins.
 if [ "$PREVIEW" = 1 ]; then
     ANIMATE=1
-    EVERY=${EVERY:-10}
+    EVERY=${EVERY:-20}
     PX_PER_UNIT=${PX_PER_UNIT:-1}
 fi
 PX_PER_UNIT=${PX_PER_UNIT:-2}
