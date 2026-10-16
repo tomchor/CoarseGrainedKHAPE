@@ -2,6 +2,7 @@
 # Submit the 3D isosurface rendering job: plot7_3d_volume.jl at one or more output times.
 # Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [SAMPLES=800] [ISORANGE=0.02] [ZLIM=4] [OVERLAY=b]
 #    or: bash submit_render3d.sh FROM=60 TO=160 EVERY=10 [...]
+#    or: bash submit_render3d.sh ANIMATE=1 [FROM=10] [TO=...] [EVERY=...] [RANGE_STAT=max] [FPS=10] [RANGES=...] [...]
 #   TIMES    output times to render, comma- or space-separated (quote if spaces). One figure per time
 #   FROM/TO/EVERY  a strided range instead of a list: FROM to TO inclusive in steps of EVERY, which has no
 #            default (the wrapper does not open the run to find its output interval). Exclusive with TIMES
@@ -26,10 +27,23 @@
 #   DERIVED  velocity the derived fields (Q, enstrophy, speed) are built from: 'filtered' (default, the
 #            online field at SCALE) or 'full' (the raw one)
 #   OVERLAY  reference field drawn as contours on the bounding walls ('' for none)
+#   ANIMATE  1 for an animation instead of figures: every record from FROM (default 10) to TO (default the
+#            last), or every EVERY in time, with each panel on one scale fixed over those records, so a surface
+#            means the same value in every frame. The job measures every panel's scale first, then renders the
+#            frames into animations/frames/<name>/ and joins them into animations/<name>.mp4. TIMES is refused
+#   RANGE_STAT  how a panel's fixed scale comes from its scale at each record: max (default), or pNN for a
+#            percentile over time (p90 lets the peak frames saturate a little for more contrast elsewhere)
+#   FPS      frames per second of the movie (default 10)
+#   RANGES   a ranges file from an earlier animation job (animations/<name>_ranges.toml) to reuse instead of
+#            measuring again, e.g. to re-render at another FPS or RANGE_STAT
 #
 # No GPU is requested: the job makes its own OpenGL context with Xvfb and Mesa's software rasteriser.
 # See 04_render3d.pbs.
 TIMES=""
+ANIMATE=0
+RANGE_STAT=max
+FPS=10
+RANGES=""
 FROM=""
 TO=""
 EVERY=""
@@ -63,7 +77,11 @@ for arg in "$@"; do case $arg in
   ZLIM=*)    ZLIM="${arg#*=}";;
   DERIVED=*) DERIVED="${arg#*=}";;
   OVERLAY=*) OVERLAY="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED= or OVERLAY=)" >&2; exit 2;;
+  ANIMATE=*) ANIMATE="${arg#*=}";;
+  RANGE_STAT=*) RANGE_STAT="${arg#*=}";;
+  FPS=*)     FPS="${arg#*=}";;
+  RANGES=*)  RANGES="${arg#*=}";;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, FPS= or RANGES=)" >&2; exit 2;;
 esac; done
 # LEVELS is a count, FRACTIONS a list. Passing one to the other fails deep inside the render, where the
 # time is logged as a warning and skipped -- and since the figure's name encodes neither, the previous
@@ -84,11 +102,23 @@ case "$FRACTIONS" in (*[!0-9.,]*)
     echo "error: FRACTIONS=$FRACTIONS must be a comma-separated list of numbers, e.g. 0.4,0.85" >&2
     exit 2;;
 esac
+case "$ANIMATE" in (0|1) ;; (*) echo "error: ANIMATE=$ANIMATE must be 0 or 1" >&2; exit 2;; esac
+if [ "$ANIMATE" = 1 ]; then
+    [ -z "$TIMES" ] || { echo "error: an animation takes FROM/TO/EVERY, not TIMES" >&2; exit 2; }
+    FROM=${FROM:-10}
+    case "$RANGE_STAT" in (max|p[0-9]*) ;; (*) echo "error: RANGE_STAT=$RANGE_STAT must be max or pNN, e.g. p90" >&2; exit 2;; esac
+    case "$FPS" in (*[!0-9]*|""|0) echo "error: FPS=$FPS must be a positive whole number" >&2; exit 2;; esac
+    if [ -n "$RANGES" ]; then
+        # The job resolves a relative path from postprocessing/, where this is run, so make it absolute here.
+        [ -f "$RANGES" ] || { echo "error: RANGES=$RANGES does not exist" >&2; exit 2; }
+        RANGES=$(cd "$(dirname "$RANGES")" && pwd)/$(basename "$RANGES")
+    fi
+fi
 # A list or a range, not both: silently preferring one would hide a typo in the other.
 if [ -n "$TIMES" ] && { [ -n "$FROM" ] || [ -n "$TO" ]; }; then
     echo "error: give TIMES= or FROM=/TO=, not both" >&2; exit 2
 fi
-if [ -z "$TIMES" ]; then
+if [ -z "$TIMES" ] && [ "$ANIMATE" = 0 ]; then
     { [ -n "$FROM" ] && [ -n "$TO" ] && [ -n "$EVERY" ]; } ||
         { echo "error: give TIMES=100,120,140, or all of FROM=60 TO=160 EVERY=10" >&2; exit 2; }
     # awk, not seq: the times are floats and seq's output format depends on the locale.
@@ -116,6 +146,10 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
-           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
+           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,FPS=$FPS,RANGES=$RANGES$KHAPE_REDIRECT \
            04_render3d.pbs)
-echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS, samples=$SAMPLES, isorange=$ISORANGE): $JOB"
+if [ "$ANIMATE" = 1 ]; then
+    echo "Submitted 3D animation (Nz=$NZ, t=$FROM to ${TO:-end} every ${EVERY:-record}, range_stat=$RANGE_STAT, fps=$FPS): $JOB"
+else
+    echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS, samples=$SAMPLES, isorange=$ISORANGE): $JOB"
+fi

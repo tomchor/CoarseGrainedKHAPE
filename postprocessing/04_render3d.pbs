@@ -11,7 +11,9 @@
 #PBS -l select=1:ncpus=4:mem=64GB:ngpus=0
 #PBS -l job_priority=regular
 
-# plot7_3d_volume.jl (GLMakie isosurfaces) at one or more output times.
+# plot7_3d_volume.jl (GLMakie isosurfaces) at one or more output times, or, with ANIMATE=1, an animation:
+# every record from FROM to TO (every EVERY in time, or every record), each panel on a scale fixed over those
+# records, joined into animations/<run>_3dvol_<panels>_l<SCALE>.mp4.
 #
 # No GPU: GLMakie needs an OpenGL context, not a GPU, and Casper's compute nodes have neither a display nor
 # the NVIDIA driver exposed to one. Xvfb (/usr/bin/Xvfb, present without the usual xvfb-run wrapper) plus
@@ -22,8 +24,8 @@
 # about 2 min per six-panel figure at Nz=1024 at the default 800 steps per ray (90 s at Makie's 200),
 # plus a few minutes of Julia startup and precompilation.
 #
-# The times render sequentially, so the walltime scales with how many are asked for: 150 of them is about
-# 5 h, which is what the 6 h request covers. A handful finishes in minutes and leaves the rest unused --
+# The times render sequentially, in one Julia process, so the walltime scales with how many are asked for:
+# 150 of them is about 5 h, which is what the 6 h request covers; an animation's measuring pass adds little. A handful finishes in minutes and leaves the rest unused --
 # PBS charges what is used, not what is asked, though a shorter request does schedule sooner.
 set -eo pipefail
 
@@ -32,7 +34,15 @@ REPO=$(cd .. && pwd)
 
 NZ=${NZ:-1024}
 # Colon-separated, because `qsub -v` splits its own list on commas and a space would not survive it.
-TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
+ANIMATE=${ANIMATE:-0}
+if [ "$ANIMATE" = 1 ]; then
+    # An animation is a window of records, not a list: plot7 picks them from the run, which the wrapper
+    # never opens. TO empty runs to the last record, EVERY empty takes every record.
+    FROM=${FROM:-10}; TO=${TO:-}; EVERY=${EVERY:-}
+    RANGE_STAT=${RANGE_STAT:-max}; FPS=${FPS:-10}; RANGES=${RANGES:-}
+else
+    TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
+fi
 # Colon-separated on the way in, for the same reason TIMES is; plot7 wants commas.
 FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
 COLS=${COLS:-2}
@@ -106,29 +116,50 @@ save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK
 LOG=logs/${JOB_NAME}.out
 : > "$LOG"
 echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  samples=$SAMPLES  isorange=$ISORANGE  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY" | tee -a "$LOG"
-echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
+PLOT7=($JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE"
+       --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface
+       "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" --samples "$SAMPLES" --isorange "$ISORANGE"
+       --zlim "$ZLIM" --overlay "$OVERLAY")
 
-# One invocation per time: each writes its own figure, named by the time, and a failure at one time is
-# reported rather than losing the rest of the run.
-# A time that fails is reported and the rest continue, but the job exits non-zero at the end. Figures are
-# named by time alone, so a failed render leaves the previous one in place: without this the job reports
-# success and the stale figure reads as a result. PBS marking it failed is the only reliable signal.
+if [ "$ANIMATE" = 1 ]; then
+    # Named as plot7 names a figure, less the time. The frames get a directory of their own, so a movie can
+    # never overwrite a standalone figure, and plot7 clears stale frames from it before rendering.
+    case "$FIELDS" in (*,*) TAG="$(echo "$FIELDS" | tr ',' '\n' | wc -l | tr -d ' ')panel";; (*) TAG=$FIELDS;; esac
+    NAME="$(basename "$FILE" .nc)_3dvol_${TAG}${SCALE:+_l$SCALE}"
+    ANIM_DIR=$REPO/animations
+    WINDOW=(--from "$FROM")
+    [ -n "$TO" ] && WINDOW+=(--to "$TO")
+    [ -n "$EVERY" ] && WINDOW+=(--every "$EVERY")
+    echo "animate: from=$FROM to=${TO:-end} every=${EVERY:-record} range_stat=$RANGE_STAT fps=$FPS ranges=${RANGES:-measured}" | tee -a "$LOG"
+    # Pass 1, the scales: each panel's percentile at every record in the window. Skipped when RANGES names a
+    # file from an earlier job, so the same scales can serve another stride or frame rate.
+    if [ -z "$RANGES" ]; then
+        RANGES=$ANIM_DIR/${NAME}_ranges.toml
+        time "${PLOT7[@]}" "${WINDOW[@]}" --measure "$RANGES" 2>&1 | tee -a "$LOG"
+    fi
+    # Pass 2, the frames against those scales, then the movie. plot7 exits non-zero if any frame fails, and
+    # makes no movie then, since a missing frame would end the sequence there.
+    time "${PLOT7[@]}" "${WINDOW[@]}" --ranges "$RANGES" --range-stat "$RANGE_STAT" \
+        --frame-dir "$ANIM_DIR/frames/$NAME" --movie "$ANIM_DIR/$NAME.mp4" --fps "$FPS" 2>&1 | tee -a "$LOG"
+    ls -la "$ANIM_DIR/$NAME.mp4" "$RANGES" | tee -a "$LOG"
+    qstat -f "$PBS_JOBID" >> "$LOG"
+    exit 0
+fi
+
+echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
+# Every time in one process, which saves Julia's startup on each, and draws each figure exactly as a single
+# --time would. A time that fails is reported and the rest continue, but plot7 exits non-zero at the end:
+# figures are named by time alone, so a failed render leaves the previous one in place, and without this the
+# job reports success and the stale figure reads as a result. PBS marking it failed is the only reliable signal.
 failed=0
-for T in $(echo "$TIMES" | tr ':' ' '); do
-    echo "=== t = $T ===" | tee -a "$LOG"
-    time $JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE" \
-        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface \
-        "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" --samples "$SAMPLES" --isorange "$ISORANGE" \
-        --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
-        || { failed=$((failed + 1)); echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"; }
-done
+time "${PLOT7[@]}" --times "$(echo "$TIMES" | tr ':' ',')" 2>&1 | tee -a "$LOG" || failed=1
 
 echo "Figures in $REPO/figures/" | tee -a "$LOG"
 ls -la "$REPO"/figures/*6panel* 2>/dev/null | tee -a "$LOG" || true
 qstat -f "$PBS_JOBID" >> "$LOG"
 if [ "$failed" -gt 0 ]; then
-    echo "error: $failed of the requested times failed to render; any figure of that name on disk is from an" \
-         "earlier run" | tee -a "$LOG"
+    echo "error: some of the requested times failed to render (see above); any figure of that name on disk is" \
+         "from an earlier run" | tee -a "$LOG"
     exit 1
 fi
 #---
