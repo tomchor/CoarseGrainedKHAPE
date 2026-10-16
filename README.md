@@ -260,14 +260,14 @@ When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it 
 
 ### Render 3D isosurfaces
 
-`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default: the six-term budget set at ℓ = 1, in three rows of two (`COLS`), with 800 ray-march steps per isosurface ray (`SAMPLES`) and Makie's automatic shell width (`ISORANGE`).
+`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default: the six-term budget set at ℓ = 1, in three rows of two (`COLS`), with 800 ray-march steps per isosurface ray (`SAMPLES`) and a shell half-width of 0.02 of each panel's range (`ISORANGE`; `auto` for Makie's own, ~0.034 at six levels).
 
 ```bash
 cd postprocessing
 bash submit_render3d.sh TIMES=100,120,140                      # default Nz=1024, the six budget terms at l=1
 bash submit_render3d.sh FROM=60 TO=160 EVERY=10                # a strided range instead of a list: 11 figures
 bash submit_render3d.sh TIMES=120 LEVELS=2                     # one time, fewer isosurfaces: much faster
-bash submit_render3d.sh TIMES=120 SAMPLES=200 ISORANGE=0.02     # coarser rays, thinner shells
+bash submit_render3d.sh TIMES=120 SAMPLES=200 ISORANGE=auto     # Makie's own rays and shells
 bash submit_render3d.sh TIMES=100,140 FIELDS=Q,enstrophy       # other panels; bare names pick up _l<SCALE>
 bash submit_render3d.sh TIMES=120 FILE=/glade/derecho/scratch/someone/khi_Nz1024_Ri0.10.nc
 # one row per budget: tendency / conversion / flux / dissipation

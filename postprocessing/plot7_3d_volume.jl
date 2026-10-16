@@ -90,13 +90,15 @@ px_per_unit = parse(Float64, get(opts, "px-per-unit", "2"))
 # A 3D contour is not a mesh: Makie raymarches the box and draws a step wherever the value lies within
 # ±isorange of a level, lighting it with a normal finite-differenced at the step size. --samples is the
 # number of steps per ray (800 by default: Makie's 200 is coarser than the data at Nz=1024, and 800 cost
-# ~2 min per six-panel figure there against ~90 s), and --isorange the
-# shell half-width in the normalised (-1, 1) units every panel is drawn in (default: Makie's, a tenth of
-# the smallest gap between levels). The visible surface is where a ray first meets level ± isorange, so
-# a wider shell draws each surface that much further out: on the Nz=128 run, Q's −0.515 blobs show at the
-# default (~0.034), vanish at 0.015 and spread into sheets at 0.06. More samples only sharpen the edges.
+# ~2 min per six-panel figure there against ~90 s). --isorange is the shell half-width in the normalised
+# (-1, 1) units every panel is drawn in: 0.02 by default, and "auto" for Makie's own, a tenth of the
+# smallest gap between levels (~0.034 at the default six). The visible surface is where a ray first meets
+# level ± isorange, so a wider shell draws each surface that much further out: on the Nz=128 run, Q's
+# −0.515 blobs show at ~0.034, vanish at 0.015 and spread into sheets at 0.06. More samples only sharpen
+# the edges.
 samples  = parse(Int, get(opts, "samples", "800"))
-isorange = haskey(opts, "isorange") ? parse(Float64, opts["isorange"]) : Makie.automatic
+isorange_arg = get(opts, "isorange", "0.02")
+isorange = isorange_arg == "auto" ? Makie.automatic : parse(Float64, isorange_arg)
 derived_from = get(opts, "derived-from", "filtered")
 derived_from in ("filtered", "full") || error("--derived-from must be filtered or full; got $derived_from")
 # How the overlay is drawn. `wall` paints it on the bounding planes behind the data, `iso` draws it as
