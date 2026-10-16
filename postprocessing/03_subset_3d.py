@@ -18,7 +18,9 @@
 #     are copied here, with the z extent and size in `underlying_grid_reconstruction_kwargs` rewritten to
 #     match the crop -- otherwise Lz, z_min/z_max and dV would describe the uncropped domain.
 #   - `virtual_rank_files` is dropped. A merged file on the HPC carries it and check_rank_files refuses
-#     the file when the rank files are absent, which they will be once it has been copied away.
+#     the file when the rank files are absent, which they will be once it has been copied away. So the
+#     source's rank files are checked before anything is read: a missing one would put fill values in
+#     the subset with nothing left to say so.
 #+++ Imports
 import logging
 import os
@@ -27,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import netCDF4
 import xarray as xr
-from src.aux00_utils import model_grid_suffix
+from src.aux00_utils import check_rank_files, model_grid_suffix
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -60,6 +62,7 @@ outfile = args.output or str(Path(filename).with_name(Path(filename).stem + "_su
 
 #+++ Open and resolve the field names
 ds = xr.open_dataset(filename, decode_times=False, chunks={"time": 1})
+check_rank_files(filename, ds)   # load_dataset_and_grid's guard, which a plain open_dataset skips
 if model_grid_suffix(ds):
     raise SystemExit("this file holds more than one grid (a --save_sorted run). Subsetting the sorted column too is not "
                      "handled here; rerun the simulation without --save_sorted, or extend this script")
