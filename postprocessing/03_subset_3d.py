@@ -42,7 +42,9 @@ parser.add_argument("--filename", required=True, help="Path to the full 3D simul
 parser.add_argument("--output", default=None, help="Output path; default is <stem>_subset.nc beside the input")
 parser.add_argument("--fields", default="u,v,w,b,wb_rs,Π_K,Π_A,ε_Ks,ε_As",
                     help="Comma-separated variables to keep. Bare budget names get the _ℓ<scale> suffix (see --scale). "
-                         "u, v and w are what plot7_3d_volume.jl derives Q, enstrophy and speed from, so keep them unless sure")
+                         "plot7_3d_volume.jl derives Q, enstrophy and speed from the velocity filtered at --scale (its default, "
+                         "--derived-from filtered) or from u, v and w (--derived-from full), so each of u, v and w kept brings "
+                         "its filtered counterpart along; keep them unless sure")
 parser.add_argument("--scale", default="1", help="Filter scale ℓ whose per-scale budget terms to keep ('' to disable the suffixing)")
 parser.add_argument("--times", type=float, nargs="+", default=None, help="Target times to keep (nearest record each); default every record")
 parser.add_argument("--every", type=int, default=None, help="Instead of --times, keep every Nth record")
@@ -79,6 +81,12 @@ def resolve(name):
 
 
 wanted = [resolve(f) for f in args.fields.split(",")]
+# plot7_3d_volume.jl derives Q, enstrophy and speed from the filtered velocity at its --scale by default, and given only
+# the raw one falls back to it with a warning, so a subset without the filtered velocity would draw different derived
+# fields from the run it was cut from. Each raw component kept brings its filtered counterpart along, when the run has it.
+if args.scale:
+    filtered = [f"{c}_ℓ{args.scale}" for c in ("u", "v", "w") if c in wanted]
+    wanted += [name for name in filtered if name in ds and name not in wanted]
 print(f"Keeping {len(wanted)} fields: {', '.join(wanted)}")
 
 # Every time-independent variable comes along: these are the grid's own (Δx_caa, Δy_aca, Δz_aac, ...), which
