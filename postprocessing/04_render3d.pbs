@@ -40,6 +40,7 @@ if [ "$ANIMATE" = 1 ]; then
     # never opens. TO empty runs to the last record, EVERY empty takes every record.
     FROM=${FROM:-10}; TO=${TO:-}; EVERY=${EVERY:-}
     RANGE_STAT=${RANGE_STAT:-max}; FPS=${FPS:-10}; RANGES=${RANGES:-}
+    PREVIEW=${PREVIEW:-0}   # only names the files here: the wrapper has already set the preview's EVERY and PX_PER_UNIT
 else
     TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
 fi
@@ -61,6 +62,7 @@ DERIVED=${DERIVED:-filtered}
 # No default here: submit_render3d.sh always passes OVERLAY, b unless given OVERLAY= for no overlay. Should `qsub -v`
 # drop that empty variable rather than export it, even ${OVERLAY-b} would read it as unset and draw b.
 OVERLAY=${OVERLAY:-}
+PX_PER_UNIT=${PX_PER_UNIT:-2}
 OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
 FILE=${FILE:-$OUT_DIR/khi_Nz${NZ}_Ri0.10.nc}
 JOB_NAME="render3d_Nz${NZ}_Ri0.10"
@@ -115,17 +117,18 @@ save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK
 #+++ Render
 LOG=logs/${JOB_NAME}.out
 : > "$LOG"
-echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  samples=$SAMPLES  isorange=$ISORANGE  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY" | tee -a "$LOG"
+echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  samples=$SAMPLES  isorange=$ISORANGE  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY  px_per_unit=$PX_PER_UNIT" | tee -a "$LOG"
 PLOT7=($JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE"
        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface
        "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" --samples "$SAMPLES" --isorange "$ISORANGE"
-       --zlim "$ZLIM" --overlay "$OVERLAY")
+       --zlim "$ZLIM" --overlay "$OVERLAY" --px-per-unit "$PX_PER_UNIT")
 
 if [ "$ANIMATE" = 1 ]; then
     # Named as plot7 names a figure, less the time. The frames get a directory of their own, so a movie can
     # never overwrite a standalone figure, and plot7 clears stale frames from it before rendering.
     case "$FIELDS" in (*,*) TAG="$(echo "$FIELDS" | tr ',' '\n' | wc -l | tr -d ' ')panel";; (*) TAG=$FIELDS;; esac
     NAME="$(basename "$FILE" .nc)_3dvol_${TAG}${SCALE:+_l$SCALE}"
+    [ "$PREVIEW" = 1 ] && NAME="${NAME}_preview"   # its own movie, ranges and frames: a test never replaces the real one
     ANIM_DIR=$REPO/animations
     WINDOW=(--from "$FROM")
     [ -n "$TO" ] && WINDOW+=(--to "$TO")
