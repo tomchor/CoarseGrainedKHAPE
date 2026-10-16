@@ -76,8 +76,11 @@ ranges_file  = get(opts, "ranges", nothing)
 isnothing(measure_file) || isnothing(ranges_file) || error("--measure and --ranges are the two passes; give one")
 range_stat   = get(opts, "range-stat", "max")
 range_stat == "max" || occursin(r"^p\d+(\.\d+)?$", range_stat) || error("--range-stat must be max or pNN; got $range_stat")
-range_window = haskey(opts, "range-window") ? Tuple(parse.(Float64, split(opts["range-window"], ":"))) : (-Inf, Inf)
-length(range_window) == 2 || error("--range-window takes FROM:TO; got $(opts["range-window"])")
+# Either end may be left open: "90:" is from t = 90 to the last measured time.
+window_ends = split(get(opts, "range-window", ":"), ":")
+length(window_ends) == 2 || error("--range-window takes FROM:TO, either end optional; got $(opts["range-window"])")
+range_window = (isempty(window_ends[1]) ? -Inf : parse(Float64, window_ends[1]),
+                isempty(window_ends[2]) ? Inf : parse(Float64, window_ends[2]))
 # Frames for a movie: frame_0001.png, ... in --frame-dir, numbered in time order, instead of the usual named
 # figures, so an animation can never overwrite a standalone figure. --movie joins them with Makie's own
 # ffmpeg (FFMPEG_jll), at --fps frames per second.
