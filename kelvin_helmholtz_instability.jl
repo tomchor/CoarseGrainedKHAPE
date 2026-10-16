@@ -1,32 +1,42 @@
 # Kelvin-Helmholtz instability simulation
+
+# Before anything loads MPI: MPI.jl asks UCX (under the system OpenMPI of a multi-GPU run) to leave SIGSEGV to Julia,
+# which stops its threads for GC with it, and not to cache memory types, but from its __init__, after MPItrampoline has
+# loaded UCX, which reads its settings as it loads. UCX's handler then caught an idle thread's GC safepoint and aborted
+# the run. simulation.pbs exports both for its ranks; setting them here covers any other launch.
+get!(ENV, "UCX_ERROR_SIGNALS", "SIGILL,SIGBUS,SIGFPE")
+get!(ENV, "UCX_MEMTYPE_CACHE", "no")
+
 using Oceananigans
 using CairoMakie
 using Printf
 using Random
+using Logging
 using ArgParse
 using CUDA: has_cuda_gpu
 
 using Oceananigans.Architectures: on_architecture
-using Oceananigans.Grids: topology, znode, minimum_yspacing
+using Oceananigans.Grids: topology, znode, minimum_yspacing, xnodes, znodes
 import Oceananigans.Utils: actuates_next_iteration
 
 using Oceanostics: PotentialEnergyEquation, KineticEnergyEquation, FlowDiagnostics, GaussianFilter, StrainRateTensor, SubFilterKineticEnergyEquation
 using Oceanostics: AvailablePotentialEnergyCrossScaleFlux
 using Oceanostics: SubFilterKineticEnergy
 using Oceanostics: SubFilterAvailablePotentialToKineticEnergyConversion
-using Oceanostics.AvailablePotentialEnergyEquation: reference_height, reference_buoyancy, ThreeDimensionalSort, HeavisideIntegral, VerticalSort, ProfileLookup
+using Oceanostics.AvailablePotentialEnergyEquation: reference_height, ThreeDimensionalSort, HeavisideIntegral, ProfileLookup
 using Oceanostics.AvailablePotentialEnergyEquation: AvailablePotentialEnergyDissipationRate
 using Oceanostics.FilteredAvailablePotentialEnergyEquation: FilteredAvailablePotentialEnergy,
-      FilteredAvailablePotentialEnergyDissipationRate, FilteredAvailablePotentialToKineticEnergyConversion
+      FilteredAvailablePotentialEnergyDissipationRate, FilteredAvailablePotentialToKineticEnergyConversion,
+      FilteredAvailablePotentialEnergyDisplacementPotential
 using Oceanostics.AvailablePotentialEnergyEquation: BackgroundPotentialEnergy, AvailablePotentialEnergy, ReferenceBuoyancyAnomaly
 using Oceanostics.ProgressMessengers
 
 @info "Finished loading packages"
-Random.seed!(546)
 
 include("utils.jl")
 include("online_diagnostics.jl")   # the one budget term Oceanostics does not provide
 include("filtered_reference_profile.jl")   # ⟨b✶⟩, the vertically filtered reference profile, on a coarse column
+include("distributed_diagnostics.jl")   # the sorted column and the filter's x-pass, which need the whole domain
 
 #+++ Parse command-line arguments
 let s = ArgParseSettings()
@@ -111,6 +121,13 @@ let s = ArgParseSettings()
                     pipeline differences for its own tendencies in `pytest --offline-check`. The online tendencies come from \
                     TimeDerivative and need no pair, so it is off by default, at half the 3D output."
             action = :store_true
+
+        "--ranks"
+            help = "Number of MPI ranks, one GPU each, the domain is split across in x (default: 1, a single GPU or CPU \
+                    and no MPI). Launch with as many MPI processes (`mpiexec -n R`); each rank writes its own files \
+                    (<name>_rank<r>.nc), which merge_rank_output.jl stitches into the single-GPU layout."
+            arg_type = Int
+            default = 1
     end
     global parsed_args = parse_args(s, as_symbols=true)
 end
@@ -148,12 +165,6 @@ end
 #---
 
 #+++ Create grid
-if has_cuda_gpu()
-    arch = GPU()
-else
-    @warn "No CUDA GPU detected. Running on CPU."
-    arch = CPU()
-end
 x_aspect_ratio = 1   # Δx / Δz ratio
 y_aspect_ratio = 1   # Δy / Δz ratio
 
@@ -169,11 +180,42 @@ Ny = closest_factor_number((2, 3, 5), Ny)
 
 params = (; params..., Nx, Ny)
 
+# One GPU (or the CPU) and no MPI by default. `--ranks R` splits the domain into R x-slabs, one per MPI rank and GPU
+# (distributed_diagnostics.jl says why x only): R must divide Ny, for the FFT pressure solver's transposes, and Nx, for
+# the filter's gather of the slabs. Under mpiexec the number of processes must be R as well: with `--ranks 1` every
+# process would run the whole simulation and write the same file.
+if has_cuda_gpu()
+    child_arch = GPU()
+else
+    @warn "No CUDA GPU detected. Running on CPU."
+    child_arch = CPU()
+end
+
+launched_processes = parse(Int, get(ENV, "OMPI_COMM_WORLD_SIZE", get(ENV, "PMI_SIZE", "1")))
+launched_processes == params.ranks ||
+    error("launched as $launched_processes MPI processes, but --ranks is $(params.ranks); they must match")
+
+if params.ranks > 1
+    params.Nx % params.ranks == 0 && params.Ny % params.ranks == 0 ||
+        error("--ranks $(params.ranks) must divide both Nx = $(params.Nx) and Ny = $(params.Ny)")
+    arch = Distributed(child_arch; partition = Partition(x = params.ranks))
+    rank = arch.local_rank
+else
+    arch = child_arch
+    rank = 0
+end
+
+# Every rank takes part in every collective (reductions, halo exchanges, the gathers), the progress messages included,
+# but only rank 0 prints them: the others keep their warnings and errors.
+rank == 0 || global_logger(ConsoleLogger(stderr, Logging.Warn))
+
+global_topology = (Periodic, Periodic, Bounded)
+
 grid = RectilinearGrid(arch; size=(params.Nx, params.Ny, params.Nz),
                        x=(-params.Lx/2, params.Lx/2),
                        y=(-params.Ly/2, params.Ly/2),
                        z=(-params.Lz/2, params.Lz/2),
-                       topology=(Periodic, Periodic, Bounded))
+                       topology=global_topology)
 #---
 
 #+++ Define Reynolds number, viscosity and diffusivity
@@ -198,14 +240,25 @@ b = model.tracers.b
 #+++ Define initial conditions: shear flow with stratification and perturbation
 shear_flow(x, z) = params.U * tanh(z / params.h) # Base shear flow
 stratification(x, z) = params.B₀ * tanh(z / params.h) # Base stratification
-# Small perturbation to trigger instability
-perturbation(x, z) = params.perturbation_amplitude * abs(randn()) * exp(-z^2) * sin(x * params.k_max - π)
 
-# Set initial conditions
+# Small perturbation to trigger instability, at w's nodes: A |n| exp(-z²) sin(k_max x - π), with n a standard normal
+# drawn per point. The noise is drawn once for the whole domain from its own seeded generator, and every point takes the
+# draw of its global index, so any decomposition, one GPU or R ranks, starts from the same w. (Drawn inside `set!`,
+# every rank would repeat one sequence over its own slab, and on one GPU the draws would follow the CPU threads that
+# evaluate the function.) The two-argument `set!` hands each rank its part of the global array.
+let
+    global_grid = RectilinearGrid(CPU(); size=(params.Nx, params.Ny, params.Nz), x=(-params.Lx/2, params.Lx/2),
+                                  y=(-params.Ly/2, params.Ly/2), z=(-params.Lz/2, params.Lz/2), topology=global_topology)
+    x = reshape(xnodes(global_grid, Center()), :, 1, 1)
+    z = reshape(znodes(global_grid, Face()), 1, 1, :)
+    noise = abs.(randn(Xoshiro(546), params.Nx, params.Ny, params.Nz + 1))
+    set!(model.velocities.w, @. params.perturbation_amplitude * noise * exp(-z^2) * sin(x * params.k_max - π))
+end
+
+# Set initial conditions; setting the model also projects the velocity, the w above included, onto a divergence-free one
 uᵢ(x, y, z) = shear_flow(x, z)
 bᵢ(x, y, z) = stratification(x, z)
-wᵢ(x, y, z) = perturbation(x, z)
-set!(model, u=uᵢ, b=bᵢ, w=wᵢ)
+set!(model, u=uᵢ, b=bᵢ)
 #---
 
 #+++ Setup simulation
@@ -222,7 +275,9 @@ walltime = Walltime()
 Δx = minimum_xspacing(grid)
 
 ε = KineticEnergyEquation.DissipationRate(model)
-ε̄ = Average(ε, dims=(1, 2)) |> Field
+# The horizontal average as an integral over the area: on a `Distributed` grid Oceananigans' (0.113.3) `Average`
+# divides the sum over every rank by one rank's cell count, and so comes out R times too large.
+ε̄ = Field(Field(Integral(ε, dims=(1, 2))) / (params.Lx * params.Ly))
 
 #+++ Minimum Kolmogorov scale, after Kaminski & Smyth (2019, JFM 862, 639-658, doi:10.1017/jfm.2018.973)
 # L_K is built from the horizontally averaged dissipation ε̄(z) evaluated at the height where it
@@ -265,15 +320,20 @@ end
 #---
 
 
-progress(simulation) = @info (PercentageProgress(with_prefix=false, with_units=false)
-                              + walltime
-                              + TimeStep()
-                              + "CFL = " * AdvectiveCFLNumber(with_prefix=false)
-                              + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
-                              + MaxWVelocity()
-                              + "step dur = " * walltime_per_timestep
-                              + kolmogorov_resolution
-                              )(simulation)
+# The message is built on every rank and only then logged: it reduces over the whole domain (the CFL number, max|w|,
+# L_K), which every rank must take part in, and a disabled `@info` (every rank but 0) never evaluates its message.
+function progress(simulation)
+    message = (PercentageProgress(with_prefix=false, with_units=false)
+               + walltime
+               + TimeStep()
+               + "CFL = " * AdvectiveCFLNumber(with_prefix=false)
+               + "Diffusive CFL = " * DiffusiveCFLNumber(with_prefix=false)
+               + MaxWVelocity()
+               + "step dur = " * walltime_per_timestep
+               + kolmogorov_resolution
+               )(simulation)
+    @info message
+end
 simulation.callbacks[:progress] = Callback(progress, IterationInterval(20))
 #---
 
@@ -324,26 +384,29 @@ to_center(ψ) = @at (Center, Center, Center) ψ
 
 # Per-direction Gaussian stencil widths matching scipy's truncate=4 (radius = ⌊4σ/Δ + ½⌋ cells), capped at one
 # period along a periodic direction, which is as far as the filter's wrapping reaches (the offline filter caps
-# identically).
+# identically). The sizes and topology are the whole domain's: on a `Distributed` grid `size(grid)` is one rank's
+# slab, and its x is `FullyConnected` rather than `Periodic`.
 _stencil_radius(σ, Δ, N, periodic) = min(max(1, floor(Int, 4σ / Δ + 0.5)), periodic ? N : typemax(Int))
 function _filter_N(σ)
     Δs = (minimum_xspacing(grid), minimum_yspacing(grid), minimum_zspacing(grid))
-    return ntuple(d -> 2 * _stencil_radius(σ, Δs[d], size(grid, d), topology(grid, d) === Periodic) + 1, 3)
+    Ns = (params.Nx, params.Ny, params.Nz)
+    return ntuple(d -> 2 * _stencil_radius(σ, Δs[d], Ns[d], global_topology[d] === Periodic) + 1, 3)
 end
 
 # One reusable, offline-matched filter per scale, shared by the KE diagnostics here, the written filtered
 # fields, and the sub-filter APE terms below.
+#
+# It returns one Field per operand, built the first time that operand is filtered and handed back every time after:
+# Oceanostics' diagnostics each filter the velocities and the buoyancy they need themselves, so ū and v̄ would
+# otherwise exist three times per scale, w̄ six times and b̄ four, each a full field. Every diagnostic wraps what the
+# filter returns in `Field(...)`, which of a Field is the Field itself, so all of them share one.
 function matched_filter(ℓ)
     σ = _FWHM_to_σ(ℓ)
-    return GaussianFilter(; dims=(1, 2, 3), σ, boundary=:edge, N=_filter_N(σ))
+    gf = GaussianFilter(; dims=(1, 2, 3), σ, boundary=:edge, N=_filter_N(σ))
+    filtered = IdDict{Any, Any}()
+    return ψ -> get!(() -> Field(gf(ψ)), filtered, ψ)
 end
-
-# The written filtered fields use the same offline-matched filter as every sub-filter term below, so
-# `u_ℓ<ℓ>`, `v_ℓ<ℓ>`, `w_ℓ<ℓ>`, `b_ℓ<ℓ>` are the fields those terms are built from (Oceanostics' own defaults
-# truncate at 2σ and shrink the stencil at the walls, which is not what the offline pipeline does).
-_fields = (u=u_center, v=v_center, w=w_center, b=b)
-_filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => matched_filter(ℓ)(f) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
-filtered_fields = (; _filt_pairs...)
+filters = Dict(ℓ => matched_filter(ℓ) for ℓ in filter_ℓs)
 
 # Oceanostics wraps every composed sub-filter expression in a KernelFunctionOperation carrying a trivial
 # passthrough kernel (see `subfilter_ape_ccc` and friends upstream). That is not cosmetic: a writer is
@@ -354,17 +417,37 @@ filtered_fields = (; _filt_pairs...)
 @inline _passthrough_ccc(i, j, k, grid, a) = @inbounds a[i, j, k]
 flatten(op) = KernelFunctionOperation{Center, Center, Center}(_passthrough_ccc, grid, op)
 
+# A TimeDerivative only an output writer reads. The writer builds its own derivative from the operand
+# (`construct_output(::TimeDerivative, ...)` in Oceananigans), so the two full fields `TimeDerivative(operand)`
+# allocates would never be written; this one points them at the operand instead.
+function writer_time_derivative(operand::Field)
+    LX, LY, LZ = location(operand)
+    G, T, O = typeof(operand.grid), eltype(operand), typeof(operand)
+    return TimeDerivative{LX, LY, LZ, G, T, O, O, Float64, Float64}(operand, operand, operand, 0.0, 1.2, operand.grid)
+end
+
+# The written filtered fields use the same offline-matched filter as every sub-filter term below, so
+# `u_ℓ<ℓ>`, `v_ℓ<ℓ>`, `w_ℓ<ℓ>`, `b_ℓ<ℓ>` are the fields those terms are built from (Oceanostics' own defaults
+# truncate at 2σ and shrink the stencil at the walls, which is not what the offline pipeline does).
+# The 3D writer reads each through a view of its interior, which costs no memory. The 2D writer gets it behind a
+# passthrough, so that its j=1 slice reads the filtered field rather than filtering again for the slice.
+_fields = (u=u_center, v=v_center, w=w_center, b=b)
+_filt_pairs = [Symbol("$(n)_ℓ$(ℓ)") => filters[ℓ](f) for ℓ in filter_ℓs for (n, f) in pairs(_fields)]
+filtered_fields    = (; _filt_pairs...)
+filtered_fields_2d = map(flatten, filtered_fields)
+
 _ke_pairs = Pair{Symbol, Any}[]
 for ℓ in filter_ℓs
-    gf = matched_filter(ℓ)
+    gf = filters[ℓ]
 
     Πₖ   = SubFilterKineticEnergyEquation.KineticEnergyCrossScaleFlux(model, gf; dims=(1, 2, 3))
     ε_Ks = SubFilterKineticEnergyEquation.SubFilterKineticEnergyDissipationRate(model, gf) # εˢ = filter(ε) - εˡ
-    K_s  = SubFilterKineticEnergy(model, gf)   # Kˢ = filter(K) - Kˡ = ½τⁱⁱ, the energy the budget below is of
+    # Kˢ = filter(K) - Kˡ = ½τⁱⁱ, the energy the budget below is of: one Field for its output, its integral and its tendency
+    K_s  = Field(SubFilterKineticEnergy(model, gf))
     push!(_ke_pairs, Symbol("Π_K_ℓ$(ℓ)")        => Πₖ,   Symbol("Π_K_ℓ$(ℓ)_int")  => Integral(Πₖ),
                      Symbol("ε_Ks_ℓ$(ℓ)")       => ε_Ks, Symbol("ε_Ks_ℓ$(ℓ)_int") => Integral(ε_Ks),
                      Symbol("K_s_ℓ$(ℓ)")        => K_s,  Symbol("K_s_ℓ$(ℓ)_int")  => Integral(K_s),
-                     Symbol("dKs_dt_ℓ$(ℓ)")     => TimeDerivative(K_s),
+                     Symbol("dKs_dt_ℓ$(ℓ)")     => writer_time_derivative(K_s),
                      Symbol("dKs_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(K_s)))
 
     # Individual strain (S̄ⁱʲ) and sub-filter stress (τⁱʲ) components at cell centers, for the
@@ -385,10 +468,12 @@ ke_transfer_fields = (; _ke_pairs...)
 
 #+++ Online Winters et al. (1995) sorted reference state and the sub-filter APE budget  (Oceanostics)
 # Sorting the buoyancy field adiabatically into its minimum-PE state assigns every parcel a reference
-# height z✶. The simulation does this once per output, on the GPU, with `VerticalSort`: the sorted column
-# itself, on a 1×1×N grid, which is the reference profile b✶(z✶) every APE term below is measured against.
+# height z✶. The simulation does this once per output, on the GPU, with `sorted_column` (distributed_diagnostics.jl):
+# the sorted column itself, N cells on a Flat cross-section, which is the reference profile b✶(z✶) every APE term
+# below is measured against. It is what Oceanostics' `VerticalSort` builds, but of the whole domain on every rank of a
+# distributed run, and without the column halos that cost VerticalSort 9× its data.
 # The two model-grid methods describe the same reference state and differ only in where they put cells of
-# *equal* buoyancy; they are validation outputs (`inv06`), gated behind --save_sorted:
+# *equal* buoyancy; they are validation outputs (`inv06`), gated behind --save_sorted (one GPU only):
 #   ThreeDimensionalSort  z✶ on the model grid; tied cells take consecutive slots (z✶ spreads over a cell)
 #   HeavisideIntegral     z✶ on the model grid; tied cells share their layer's mid-height (Winters eq. 11)
 #
@@ -406,15 +491,14 @@ ke_transfer_fields = (; _ke_pairs...)
 # nothing else from it, and it doubles the 3D output, so production runs leave it off.
 output_schedule = offline_check ? ConsecutiveIterations(TimeInterval(params.output_interval)) : TimeInterval(params.output_interval)
 
-z✶_1dsort = reference_height(model, method=VerticalSort())
-b✶_1dsort = reference_buoyancy(z✶_1dsort)   # self-recomputing; writing it triggers the sort
+b✶_1dsort, z✶_1dsort = sorted_column(b)   # b✶ self-recomputing (reading it gathers and sorts); z✶ fixed
 
 # Every APE term shares this one sort: `ProfileLookup` takes the column as an external (b✶, z✶) pair,
 # refreshes it on every compute! when it is a Field, and skips the O(N log N) sort. The reference profile's
 # own time derivative feeds R; R is the output, not ∂ₜb✶, so no writer advances it: a TimeDerivativeCallback
 # does, around each output, as does each scale's ∂ₜ⟨b✶⟩ below.
-lookup = ProfileLookup(z✶_1dsort)
-∂ₜb✶ = TimeDerivativeCallback(reference_buoyancy(z✶_1dsort), schedule=PrecedingIterations(output_schedule))
+lookup = ProfileLookup(b✶_1dsort, z✶_1dsort)
+∂ₜb✶ = TimeDerivativeCallback(b✶_1dsort, schedule=PrecedingIterations(output_schedule))
 simulation.callbacks[:∂ₜb✶] = ∂ₜb✶
 
 # R against the full field's reference height; Rˡ below uses the filtered field's, and Rˢ = filter(R) - Rˡ.
@@ -424,9 +508,11 @@ R_full = ReferenceTendencyCorrection(model, ∂ₜb✶.func, z✶_lookup)
 # The online local available potential energy Eₐ = ∫_{z✶}^{z}[b✶(z̃) - b] dz̃ (Holliday & McIntyre 1981),
 # per unit mass, the same integral the offline `local_potential_energies_timeseries` builds (`inv07` checks
 # the two). It reads the same lookup as every sub-filter term, so it adds no sort; ∫Eₐ with ∫E_b (below,
-# under --save_sorted) gives the online TPE = BPE + APE split, which ∫pe closes.
-E_a = AvailablePotentialEnergy(model, z✶_lookup)
+# under --save_sorted) gives the online TPE = BPE + APE split, which ∫pe closes. It is one Field for its output, its
+# integral and every scale's Ē_A below, as the total APE dissipation ε_A is for every scale's ε̃ˢ.
+E_a = Field(AvailablePotentialEnergy(model, z✶_lookup))
 ∫E_a = Integral(E_a)
+ε_A = Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup))
 
 # The sub-filter APE terms use the filtered-reference scale decomposition (Wenegrat, Chor & Barkan
 # Eqs. 2.3-2.5, 2.19-2.22). Measuring the resolved reservoir against the unfiltered b✶ instead is the
@@ -443,10 +529,11 @@ E_a = AvailablePotentialEnergy(model, z✶_lookup)
 _ape_pairs    = Pair{Symbol, Any}[]   # both writers: the terms the panels animation draws
 _ape_3d_pairs = Pair{Symbol, Any}[]   # 3D writer only: the two halves of S̃, which the tests read
 for ℓ in filter_ℓs
-    gf = matched_filter(ℓ)
-    b✶_flt = filtered_reference_profile(reference_buoyancy(z✶_1dsort), grid, _FWHM_to_σ(ℓ))   # ⟨b✶⟩ on the column's N slots
+    gf = filters[ℓ]
+    b✶_flt = filtered_reference_profile(b✶_1dsort, grid, _FWHM_to_σ(ℓ))   # ⟨b✶⟩ on the column's N slots
     lookup_flt = ProfileLookup(b✶_flt, z✶_1dsort)                         # heights unchanged; only b✶ filtered
-    z✶ˡ_flt = reference_height(Field(gf(b)); method=lookup_flt)            # z̃✶(b̄), the inverse of ⟨b✶⟩
+    z✶ˡ_flt = reference_height(gf(b); method=lookup_flt)                   # z̃✶(b̄), the inverse of ⟨b✶⟩
+    Υ̃ = Field(FilteredAvailablePotentialEnergyDisplacementPotential(model, z✶ˡ_flt))   # z̃✶(b̄) - z: one for Π̃_A and ε̃ˡ
 
     # τˡ(w, b_r) = filter(w b_r) - w̄ b_rˡ, the sub-filter half of the APE↔KE conversion. It is a *term* in
     # both budgets (+1 in the KE residual, -1 in the APE one) and the field `plot_kelvin_helmholtz_instability.jl`
@@ -469,25 +556,25 @@ for ℓ in filter_ℓs
                     FilteredAvailablePotentialToKineticEnergyConversion(model, gf; method=lookup_flt))
 
     # S̃ = Ē_A - L̃: the filtered full-field APE against b✶, less the filtered field's APE against ⟨b✶⟩.
-    # Both halves are written on their own (3D writer) so the offline check can compare each.
-    Ea_flt = Field(gf(Field(AvailablePotentialEnergy(model, z✶_lookup))))   # Ē_A
+    # Both halves are written on their own (3D writer) so the offline check can compare each; S̃ itself is one Field
+    # for its output, its integral and its tendency.
+    Ea_flt = gf(E_a)                                                         # Ē_A
     L      = FilteredAvailablePotentialEnergy(model, z✶ˡ_flt)               # L̃ = Ẽ_A(b̄, z)
-    E_as   = flatten(Ea_flt - L)                                             # S̃
-    Π_A    = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 2, 3))    # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
-    ε_As   = flatten(Field(gf(Field(AvailablePotentialEnergyDissipationRate(model, z✶_lookup)))) -
-                     FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt))   # ε̃ˢ
+    E_as   = Field(flatten(Ea_flt - L))                                      # S̃
+    Π_A    = AvailablePotentialEnergyCrossScaleFlux(model, gf, z✶ˡ_flt; dims=(1, 2, 3), upsilon=Υ̃)   # Π̃_A = -τ(uᵢ,b)∂ᵢΥ̃
+    ε_As   = flatten(gf(ε_A) - FilteredAvailablePotentialEnergyDissipationRate(model, gf, z✶ˡ_flt; upsilon=Υ̃))   # ε̃ˢ
     # R̃ˡ follows the same reference, so its tendency is ∂ₜ⟨b✶⟩ rather than ∂ₜb✶ (Eq. 2.18).
     ∂ₜb✶_flt = TimeDerivativeCallback(b✶_flt, schedule=PrecedingIterations(output_schedule))
     simulation.callbacks[Symbol("∂ₜb✶_flt_ℓ$(ℓ)")] = ∂ₜb✶_flt
     R_l  = ReferenceTendencyCorrection(model, ∂ₜb✶_flt.func, z✶ˡ_flt)
-    R_s  = flatten(Field(gf(R_full)) - R_l)
+    R_s  = flatten(gf(R_full) - R_l)
 
     push!(_ape_pairs, Symbol("ε_As_ℓ$(ℓ)")  => ε_As, Symbol("ε_As_ℓ$(ℓ)_int") => Integral(ε_As),
                       Symbol("Π_A_ℓ$(ℓ)")   => Π_A,  Symbol("Π_A_ℓ$(ℓ)_int")  => Integral(Π_A),
                       Symbol("E_as_ℓ$(ℓ)")  => E_as, Symbol("E_as_ℓ$(ℓ)_int") => Integral(E_as),
                       Symbol("wb_rs_ℓ$(ℓ)") => wb_rs, Symbol("wb_rs_ℓ$(ℓ)_int") => Integral(wb_rs),
                       Symbol("R_s_ℓ$(ℓ)")   => R_s,  Symbol("R_s_ℓ$(ℓ)_int")  => Integral(R_s),
-                      Symbol("dEas_dt_ℓ$(ℓ)")     => TimeDerivative(E_as),
+                      Symbol("dEas_dt_ℓ$(ℓ)")     => writer_time_derivative(E_as),
                       Symbol("dEas_dt_ℓ$(ℓ)_int") => TimeDerivative(Integral(E_as)))
     push!(_ape_3d_pairs, Symbol("L_ℓ$(ℓ)") => L, Symbol("Ea_flt_ℓ$(ℓ)") => Ea_flt)
 end
@@ -506,7 +593,9 @@ twod_extra    = (; b_r = ReferenceBuoyancyAnomaly(model, z✶_lookup), sfs_ape_f
 
 # Validation-only outputs: the two model-grid sorts, ∫E_b, and the column itself. `inv06` compares the three
 # methods against each other and against the offline sort, `inv07` reads the column. None of them enters the
-# budget, so --save_sorted changes no budget number; it costs two extra 3D sorts per output.
+# budget, so --save_sorted changes no budget number; it costs two extra 3D sorts per output. Both model-grid methods
+# sort each rank's slab on its own on a `Distributed` grid, so they are refused there.
+save_sorted && params.ranks > 1 && error("--save_sorted needs a single GPU: its model-grid sorts would each sort one rank's slab")
 sorted_fields = NamedTuple()
 if save_sorted
     z✶_3dsort    = reference_height(model, method=ThreeDimensionalSort())
@@ -525,13 +614,20 @@ simulation_name = "khi_Nz$(params.Nz)_Ri$(@sprintf("%.2f", params.Ri))"
 # repo directory (which does not work: `output/.gitkeep` is tracked, so git reports it deleted).
 output_dir = get(ENV, "KHAPE_OUTPUT_DIR", "output")
 mkpath(output_dir)
-output_filename = joinpath(output_dir, "$(simulation_name).nc")
+# With --ranks R every rank writes its own slab to its own files, `<name>_rank<r>.nc` (Oceananigans' NetCDFWriter has
+# no notion of ranks: given one filename, every rank would write the same file); merge_rank_output.jl stitches them
+# into the single-GPU layout afterwards.
+rank_suffix = params.ranks > 1 ? "_rank$(rank)" : ""
+output_filename = joinpath(output_dir, "$(simulation_name)$(rank_suffix).nc")
 
 if !(model.closure isa ScalarDiffusivity)
     ν = viscosity(model)
     κ = diffusivity(model, Val(:b))
     outputs = (; outputs..., ν, κ)
 end
+
+# The 2D writer's tuple: the same outputs, with the filtered fields behind their passthroughs (see `filtered_fields_2d`)
+outputs_2d = (; outputs..., filtered_fields_2d...)
 
 # The 3D writer updates the TimeDerivatives among its outputs, and R's callbacks theirs, on PrecedingIterations
 # of `output_schedule`, which falls back to every iteration for a schedule it cannot anticipate, as the
@@ -550,8 +646,8 @@ simulation.output_writers[:fields] = NetCDFWriter(model, (; outputs..., budget_f
                                                   global_attributes = params,
                                                   overwrite_files = true)
 
-output_filename_2d = joinpath(output_dir, "$(simulation_name)_2d.nc")
-simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., twod_extra...),
+output_filename_2d = joinpath(output_dir, "$(simulation_name)_2d$(rank_suffix).nc")
+simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs_2d..., twod_extra...),
                                                        schedule = TimeInterval(params.output_interval),
                                                        filename = output_filename_2d,
                                                        array_type = Array{Float32},
@@ -560,15 +656,18 @@ simulation.output_writers[:twod_fields] = NetCDFWriter(model, (; outputs..., two
                                                        overwrite_files = true)
 
 @info "Output will be saved to: $(output_filename)"
+
+params.ranks > 1 && validate_staged_filters((; outputs..., budget_fields..., outputs_2d..., twod_extra...))
 #---
 
 #+++ Run simulation
-show_gpu_status()
+show_gpu_status(label = params.ranks > 1 ? "rank $rank of $(params.ranks)" : "")
 @info @sprintf("""
 ================================================================================
   Kelvin-Helmholtz instability simulation
 ================================================================================
   Grid:          Nx=%d, Ny=%d, Nz=%d
+  Ranks:         %d (x-slabs of %d)
   Domain:        Lx=%.1f, Ly=%.1f, Lz=%.1f
   Stop time:     %.1f
   Richardson:    Ri = %.4f
@@ -580,6 +679,7 @@ show_gpu_status()
 ================================================================================
 """,
     params.Nx, params.Ny, params.Nz,
+    params.ranks, params.Nx ÷ params.ranks,
     params.Lx, params.Ly, params.Lz,
     params.stop_time,
     params.Ri,
@@ -593,7 +693,11 @@ run!(simulation)
 #---
 
 #+++ Plot results
-@info "Creating animation..."
-plot_filepath = output_filename_2d
-include("plot_kelvin_helmholtz_instability.jl")
+# A distributed run's 2D output is one file per rank until merge_rank_output.jl stitches them together, so
+# simulation.pbs draws its animation after the merge.
+if params.ranks == 1
+    @info "Creating animation..."
+    plot_filepath = output_filename_2d
+    include("plot_kelvin_helmholtz_instability.jl")
+end
 #---

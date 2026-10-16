@@ -12,7 +12,7 @@ and `02_plot_budgets.py` consume:
     <stem>_sfs_ke_budget_integrated.nc    <stem>_sfs_ape_budget_integrated.nc
 
 The 3D fields are not copied: they are in the simulation output already, and whoever needs them calls
-`online_budgets` on it (the tests, `plot5_budgets.py`, `plot6_panels.py`, `X2_panels.py`, `X4_thumbnail.py`) or
+`online_budgets` on it (the tests, `plot6_budgets.py`, `X6_panels.py`, `X2_panels.py`, `X4_thumbnail.py`) or
 on the x–z slices of the `_2d.nc` file (`anim1_panels.py`).
 
 Only the records whose `TimeDerivative` spans a time step are kept: every record but the first (iteration 0,

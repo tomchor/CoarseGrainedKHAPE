@@ -3,9 +3,10 @@
 # The sub-filter APE terms measure the resolved reservoir against the rest state *as the filter sees it*:
 # the sorted column b✶(z✶) convolved with the vertical marginal of the same Gaussian the x–z filter uses
 # (Wenegrat, Chor & Barkan, Eq. 2.3). This file holds everything that builds that profile from the
-# `VerticalSort` column; `filtered_reference_profile` is the one entry point the simulation calls.
+# sorted column (`sorted_column` in distributed_diagnostics.jl); `filtered_reference_profile` is the one entry point
+# the simulation calls.
 #
-# The column is a 1×1×N grid spanning Lz uniformly, so a filter carrying the *physical* σ convolves in true
+# The column is a grid of N cells spanning Lz uniformly, so a filter carrying the *physical* σ convolves in true
 # height — true only because the model grid is uniform in z. On a stretched grid the column's slot heights
 # vary (slot k is ΔV_k/(Lx·Ly)) while its grid stays uniform, so the convolution would silently run in index
 # space; ⟨b✶⟩ would then have to be built on the model grid instead. Same restriction the offline
@@ -37,8 +38,9 @@
 using Oceananigans: RectilinearGrid
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture, on_architecture
+using Oceananigans.DistributedComputations: child_architecture
 using Oceananigans.Fields: Field
-using Oceananigans.Grids: Center, Face, topology, znode
+using Oceananigans.Grids: Bounded, Center, Face, Flat, znode
 
 #+++ Coarse column
 # Levels per σ on the coarse grid the online ⟨b✶⟩ is filtered on; see `coarse_column`.
@@ -80,19 +82,20 @@ end
 """
     coarse_column(grid, N, σ)
 
-Coarse 1×1×M column spanning the model `grid`'s height, and the block size `n` that maps the N-slot sorted
+Coarse column of M cells spanning the model `grid`'s height, and the block size `n` that maps the N-slot sorted
 column onto it, for a Gaussian of standard deviation `σ`. Returns `(coarse, n, M)`.
+
+Like the sorted column it reads (`sorted_column` in distributed_diagnostics.jl), it has a `Flat` cross-section and
+lives on the child architecture: every rank of a `Distributed` model builds the same profile from its own copy of
+the column, and a grid on the `Distributed` architecture would split the column's single x–y cell across ranks.
 """
 function coarse_column(grid, N, σ)
     M_target = ceil(Int, REFERENCE_FILTER_K * grid.Lz / σ)
     n = max(1, fld(N, min(M_target, N)))          # slots per coarse cell
     M = fld(N, n)                                  # drops at most n-1 slots at the top
-    tx, ty, tz = topology(grid)
     z_bottom = znode(1, 1, 1, grid, Center(), Center(), Face())
-    coarse = RectilinearGrid(architecture(grid), eltype(grid);
-                             size = (1, 1, M), topology = (tx, ty, tz),
-                             x = (0, grid.Lx), y = (0, grid.Ly),
-                             z = (z_bottom, z_bottom + grid.Lz))
+    coarse = RectilinearGrid(child_architecture(architecture(grid)), eltype(grid);
+                             size = M, topology = (Flat, Flat, Bounded), z = (z_bottom, z_bottom + grid.Lz))
     return coarse, n, M
 end
 #---
@@ -129,7 +132,7 @@ function coarse_filter(grid, coarse, σ)
     Δ  = grid.Lz / size(coarse, 3)
     hw = max(1, floor(Int, 4σ / Δ + 0.5))          # truncate at 4σ, matching scipy
     FT = eltype(grid)
-    w  = on_architecture(architecture(grid), FT[exp(-(m * Δ)^2 / (2σ^2)) for m = -hw:hw])
+    w  = on_architecture(architecture(coarse), FT[exp(-(m * Δ)^2 / (2σ^2)) for m = -hw:hw])
     return ψ -> KernelFunctionOperation{Center, Center, Center}(_gauss_column_ccc, coarse, ψ, w, hw)
 end
 #---
@@ -138,11 +141,11 @@ end
 """
     filtered_reference_profile(b✶, grid, σ)
 
-⟨b✶⟩: the sorted column's buoyancy `b✶` (a `Field` on the 1×1×N column grid, as `reference_buoyancy` of a
-`VerticalSort` reference height returns it) filtered with the vertical marginal of the Gaussian of standard
-deviation `σ`, returned as a `Field` on the same column grid, so it pairs with the column's heights in a
-`ProfileLookup`. Block-averages the column onto the coarse grid of `coarse_column`, filters there, and
-interpolates back; recomputed on every `compute!`, so the lookup tracks the flow.
+⟨b✶⟩: the sorted column's buoyancy `b✶` (a `Field` on the column grid of N cells, as `sorted_column` returns it)
+filtered with the vertical marginal of the Gaussian of standard deviation `σ`, returned as a `Field` on the same
+column grid, so it pairs with the column's heights in a `ProfileLookup`. Block-averages the column onto the coarse
+grid of `coarse_column`, filters there, and interpolates back; recomputed on every `compute!`, so the lookup tracks
+the flow.
 """
 function filtered_reference_profile(b✶::Field, grid, σ)
     column_grid = b✶.grid

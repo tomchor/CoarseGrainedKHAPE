@@ -16,6 +16,9 @@ parser = argparse.ArgumentParser(description="Plot 2x2 panel of SFS KE and APE b
 parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
                     help="Path to simulation NetCDF file (the budgets are assembled from its online terms)")
 parser.add_argument("--filter-scales", type=float, nargs=2, default=[7, 1], help="Two filter length scales for left and right columns")
+parser.add_argument("--max-time", type=float, default=None,
+                    help="Right edge of the time axis; default is the end of the record set. The data always runs to "
+                         "the last record with a closed TimeDerivative window, whatever this is set to")
 parser.add_argument("--tendency-sign", choices=["negative", "positive"], default="positive",
                     help="Plot -∂ₜE (negative — sums to zero with other terms) or ∂ₜE (positive)")
 args = parser.parse_args()
@@ -43,24 +46,29 @@ tendency_sign = -1 if positive_tendency else 1
 ke_tendency_label  = r"$\partial_t E_K^s$"  if positive_tendency else r"$-\partial_t E_K^s$"
 ape_tendency_label = r"$\partial_t E_A^s$"  if positive_tendency else r"$-\partial_t E_A^s$"
 
+# Order here sets both the plot order and the legend order. The tendency leads, as the term the others sum
+# to, and the dissipation closes: it is the only sink, so the row reads sources first and the sink last.
 ke_terms = {
     ke_tendency_label:        ("∫-∂ₜ SFS KE dV",    budget_colors["tendency"]),
     r"$\Pi_K$":               ("∫Π_K dV",           budget_colors["flux"]),
-    r"$-\varepsilon_K^s$":    ("∫-ε_Kˢ dV",         budget_colors["dissipation"]),
     r"$E_A^s \to E_K^s$":     ("∫(SFS APE->KE) dV", budget_colors["exchange"]),
+    r"$-\varepsilon_K^s$":    ("∫-ε_Kˢ dV",         budget_colors["dissipation"]),
 }
 ape_terms = {
     ape_tendency_label:      ("∫-∂ₜ SFS APE dV",    budget_colors["tendency"]),
     r"$\Pi_A$":              ("∫Π_A dV",            budget_colors["flux"]),
-    r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
     r"$E_K^s \to E_A^s$":    ("∫(SFS KE->APE) dV",  budget_colors["exchange"]),
     r"$R^s$":                ("∫Rˢ dV",             "C4"),
+    r"$-\varepsilon_A^s$":   ("∫-ε_Aˢ dV",          budget_colors["dissipation"]),
 }
 #---
 
 #+++ Plot 2×2 figure
 print("Creating 2×2 budget panel plot...")
-fig, axes = plt.subplots(2, 2, figsize=(14, 7), constrained_layout=True)
+fig, axes = plt.subplots(2, 2, figsize=(14, 7.6), constrained_layout=True)
+# Room between the rows for the KE legend, which sits under row 0. At the default spacing it has
+# nowhere to go and overlaps the tops of row 1's panels.
+fig.get_layout_engine().set(hspace=0.16)
 
 budget_configs = [
     (0, ke_budget,  ke_terms,  "residual_K",  "SFS KE budget terms"),
@@ -86,7 +94,10 @@ for row, budget, terms, residual_var, row_title in budget_configs:
         else:
             ax.set_xlabel("")
             ax.tick_params(labelbottom=False)
-        ax.set_xlim(right=140)
+        # Tight to the run: 0 to the last output time, with no matplotlib margin either side. The data
+        # itself starts one record in and ends at the last closed TimeDerivative window (t = 198 on a run
+        # to 200), so the small gaps at the ends are real and say where the budget is defined.
+        ax.set_xlim(0, args.max_time if args.max_time is not None else float(ke_budget.time.max()))
         ax.grid(True, alpha=0.3, lw=0.5)
         ax.set_title("")
 
@@ -104,17 +115,37 @@ for col in range(2):
 #---
 
 #+++ Legend and labels
-ke_handles, ke_labels = axes[0, 1].get_legend_handles_labels()
+# One horizontal legend under each row, outside the axes. Inside the panels they collided with the data at
+# Nz=1024 and could only be kept clear by adding headroom, which is whitespace spent on the legend rather
+# than on the curves. Out here the axes keep their own limits.
+#
+# They are anchored to the left-hand axes of the row and pushed past its right edge, so each legend centres
+# on the row rather than on its first panel. Row 1's sits lower, clearing the "Time" label beneath it.
+ke_handles, ke_labels   = axes[0, 1].get_legend_handles_labels()
 ape_handles, ape_labels = axes[1, 1].get_legend_handles_labels()
-axes[0, 1].legend(ke_handles, ke_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1)
-rs_idx = ape_labels.index(r"$R^s$")
-rs_handle = ape_handles.pop(rs_idx)
-rs_label  = ape_labels.pop(rs_idx)
-blank = Line2D([], [], linestyle="None")
-n_pad = len(ape_handles) - 1
-ape_handles = [rs_handle] + [blank] * n_pad + ape_handles
-ape_labels  = [rs_label]  + [""]    * n_pad + ape_labels
-axes[1, 1].legend(ape_handles, ape_labels, fontsize=13, loc="upper right", frameon=True, fancybox=True, framealpha=0.1, ncol=2)
+
+# The tendency leads: it is the term the others sum to, so the legend reads in the order the budget does.
+solo_idx = ape_labels.index(ape_tendency_label)
+ape_handles.insert(0, ape_handles.pop(solo_idx))
+ape_labels.insert(0, ape_labels.pop(solo_idx))
+
+# Centred on the row, which means centred between the left edge of its first panel and the right edge of
+# its last -- not on the figure, whose left margin carries the y label, and not a guessed offset in axes
+# coordinates, which depends on the inter-column gap. constrained_layout only resolves those positions at
+# draw time, so the figure is drawn once and then frozen: adding legends afterwards would otherwise make
+# the engine re-run on save and shift the axes out from under them.
+fig.canvas.draw()
+fig.set_layout_engine("none")
+
+# `drop` is how far below the row's axes the legend's top sits, in figure fraction. Row 1's clears the
+# "Time" label beneath it; row 0's has only the inter-row gap to sit in, and sits high in it so it reads as
+# belonging to the row above rather than floating between the two.
+for row, (handles, labels, drop) in enumerate([(ke_handles, ke_labels, 0.015),
+                                               (ape_handles, ape_labels, 0.060)]):
+    left, right = axes[row, 0].get_position(), axes[row, -1].get_position()
+    fig.legend(handles, labels, fontsize=13, ncol=len(labels), frameon=False,
+               loc="upper center", bbox_transform=fig.transFigure,
+               bbox_to_anchor=((left.x0 + right.x1) / 2, left.y0 - drop))
 
 for ax, letter in zip(axes.flat, "abcd"):
     ax.text(0.02, 0.97, f"({letter})", transform=ax.transAxes,

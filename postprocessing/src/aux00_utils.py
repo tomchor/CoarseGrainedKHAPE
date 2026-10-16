@@ -28,6 +28,22 @@ def output_flag(ds, name):
     return bool(int(ds.attrs[name]))
 #---
 
+#+++ Virtually merged files
+# The 3D file of a multi-GPU run is merged virtually (merge_rank_output.jl): its fields are HDF5 virtual datasets that
+# read each rank's slab from the rank files beside it, which its `virtual_rank_files` attribute lists. A missing rank
+# file reads as fill values rather than failing, so whatever reads the fields checks they are all there first. A
+# standalone copy (`nccopy -k nc4` of the merged file) holds the data itself but keeps the attribute, which is deleted
+# from the copy as part of making it (README, Multi-GPU runs).
+def check_rank_files(filename, ds):
+    """Raise if `filename` (opened as `ds`) is a virtual merge and any rank file it reads from is missing."""
+    missing = [name for name in ds.attrs.get("virtual_rank_files", "").split() if not (Path(filename).parent / name).exists()]
+    if missing:
+        raise FileNotFoundError(f"{filename} lists rank files {missing} in `virtual_rank_files` that are not beside it. A "
+                                "virtual merge would read their slabs as fill values: restore them. A standalone copy made "
+                                "with nccopy holds the data itself and only kept the attribute: delete it from the copy with "
+                                f"`ncatted -h -a virtual_rank_files,global,d,, {filename}`")
+#---
+
 #+++ Multi-grid output files
 # A NetCDFWriter holding outputs on more than one grid disambiguates by suffixing every dimension name
 # (`z_aac` -> `z_aac_grid1`) and prefixing the grid metadata groups (`underlying_grid_reconstruction_kwargs`
@@ -353,6 +369,7 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True,
     """
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False, chunks={})
+    check_rank_files(filename, ds)
 
     # A `--save_sorted` run writes the sorted column on its own grid, which makes the writer suffix
     # every dimension name; strip the model grid's suffix so the rest of the pipeline sees the plain

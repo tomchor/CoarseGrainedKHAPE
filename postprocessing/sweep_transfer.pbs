@@ -19,9 +19,20 @@ OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where simulation.pbs wrote the run; kelv
 PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}
 FIXED_REF=${FIXED_REF:-0}
 EXTENSION=${EXTENSION:-edge}   # must match the sweep_filter run this reads; see sweep_filter.pbs
+# A run too large for one node is split across jobs (submit_sweep_transfer in khape_defaults.sh): PART=K/N computes the
+# K-th share of the records into a file of its own, and the job after all N, MERGE_PARTS=N, joins them and runs sweep3.
+PART=${PART:-}
+MERGE_PARTS=${MERGE_PARTS:-}
 [ "$EXTENSION" = "edge" ] && EXT_TAG="" || EXT_TAG="_${EXTENSION}"
 [ "$FIXED_REF" = "1" ] && FIXED_REF_FLAG="--fixed-reference" && REF_SUFFIX="_fixed_ref" || { FIXED_REF_FLAG=""; REF_SUFFIX=""; }
 JOB_NAME="sweep_transfer_Nz${NZ}_Ri0.10${REF_SUFFIX}${EXT_TAG}"
+if [ -n "$PART" ]; then
+    JOB_NAME="${JOB_NAME}_part${PART%/*}of${PART#*/}"; SPLIT_FLAG="--part $PART"
+elif [ -n "$MERGE_PARTS" ]; then
+    JOB_NAME="${JOB_NAME}_merge"; SPLIT_FLAG="--merge-parts $MERGE_PARTS"
+else
+    SPLIT_FLAG=""
+fi
 qalter -N "$JOB_NAME" "$PBS_JOBID"
 
 # Clear the environment from any previously loaded modules
@@ -34,10 +45,12 @@ module li
 
 echo $CUDA_VISIBLE_DEVICES
 
-time $PYTHON -u sweep2_energy_transfer.py --filename $OUT_DIR/${SIM}.nc --n-workers 18 --extension $EXTENSION $FIXED_REF_FLAG 2>&1 | tee logs/${JOB_NAME}.out
-# sweep3 reads the default (edge) transfer file, so it is only meaningful for the edge run. An `if`
-# rather than `cond && cmd`: under `set -e` a false test as the last command would fail the job.
-if [ "$EXTENSION" = "edge" ]; then
+time $PYTHON -u sweep2_energy_transfer.py --filename $OUT_DIR/${SIM}.nc --n-workers 18 --extension $EXTENSION $FIXED_REF_FLAG $SPLIT_FLAG \
+    2>&1 | tee logs/${JOB_NAME}.out
+# sweep3 reads the default (edge) transfer file, so it is only meaningful for the edge run, and only once that file is
+# whole, which a share of the records (PART) is not. An `if` rather than `cond && cmd`: under `set -e` a false test as
+# the last command would fail the job.
+if [ "$EXTENSION" = "edge" ] && [ -z "$PART" ]; then
     time $PYTHON -u sweep3_plot_transfer_spectrum.py --filename $OUT_DIR/${SIM}.nc $FIXED_REF_FLAG 2>&1 | tee -a logs/${JOB_NAME}.out
 fi
 
