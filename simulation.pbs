@@ -123,12 +123,13 @@ if [ "$RANKS" -gt 1 ]; then
         || echo "warning: the animation failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
 fi
 
-# The figures that need nothing but the simulation's own files, drawn as soon as it has finished: plot4 reads the
-# _2d.nc file, plot6 and X6 assemble the SFS budgets from the 3D file themselves (plot5 needs the sweep and stays in
-# plots.pbs). A failed figure is reported, not fatal: the run is complete, and the jobs chained on this one with
-# afterok should still start.
-for script in plot4_omega_br_snapshots.py plot6_budgets.py X6_panels.py; do
-    time $PYTHON -u postprocessing/$script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
+# Every paper figure script, postprocessing/plot*.py, in name order, as plots.pbs runs them; the X* extra figures are
+# not drawn, and plot7_3d_volume.jl is Julia and has its own job (04_render3d.pbs). plot5 reads the sweep output, which
+# does not exist yet when this job runs, so it fails here, or draws an earlier sweep of the same run name if one is on
+# disk; plots.pbs draws it after the sweep. A failed figure is reported, not fatal: the run is complete, and the jobs
+# chained on this one with afterok should still start.
+for script in postprocessing/plot*.py; do
+    time $PYTHON -u $script --filename $OUT_DIR/${SIM}.nc 2>&1 | tee -a logs/kelvin_helmholtz_${NZ}.out \
         || echo "warning: $script failed (see above); the simulation itself completed" | tee -a logs/kelvin_helmholtz_${NZ}.out
 done
 

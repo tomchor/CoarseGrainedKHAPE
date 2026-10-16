@@ -4,7 +4,7 @@ Computes Available Potential Energy (APE) from three-dimensional Kelvin-Helmholt
 
 ## Pipeline overview
 
-1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then draws the three figures that need nothing else (`plot4_omega_br_snapshots.py` and `plot6_budgets.py` into `figures/`, `X6_panels.py` into `postprocessing/extra_figures/`). Above `NZ=512` it runs on several GPUs, and the same job merges their files before it draws those figures (see [Multi-GPU runs](#multi-gpu-runs))
+1. **Julia simulation** (`simulation.pbs`) — runs the KH instability on a GPU, writes NetCDF output, and then runs every paper figure script, `postprocessing/plot*.py`, as `plots.pbs` does (`plot5`, which needs the sweep, is only drawn properly by `plots.pbs`). Above `NZ=512` it runs on several GPUs, and the same job merges their files before it draws those figures (see [Multi-GPU runs](#multi-gpu-runs))
 2. **Post-processing** — `postprocessing/budgeting.pbs` assembles the SFS KE and APE budgets from the terms the simulation computed online and plots them (the offline computation of those terms lives in `postprocessing/offline/` and runs only as a CI cross-check)
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
@@ -128,7 +128,7 @@ bash submit_simulation.sh NZ=1024 NGPUS=8
 
 The grid is isotropic (Δx = Δy = Δz) on a domain of one KH wavelength λ in x, λ/3 in y and 25h in z, so `NZ` sets the whole grid: 288 × 96 × 512 cells at `NZ=512`. The Reynolds number scales as Re = Re₀ Nz^(4/3) (Kolmogorov resolution at fixed domain height), with Re₀ = 0.1 by default, i.e. Re = 410 at Nz=512.
 
-When the run ends, the same job draws the three figures that need nothing but the simulation's own files: `plot4_omega_br_snapshots.py` (from the `_2d.nc` file) and `plot6_budgets.py` into `figures/`, and `X6_panels.py` into `postprocessing/extra_figures/` (the last two assemble the SFS budgets from the 3D file themselves). A figure that fails is logged as a warning rather than failing the job, so jobs chained on the simulation with `afterok` still start. The wrapper checks `KHAPE_PYTHON` at submission and passes it to the job for this.
+When the run ends, the same job runs every paper figure script, `postprocessing/plot*.py`, in name order, into `figures/`; the `X*` extra figures are not drawn. `plot4_omega_br_snapshots.py` reads the `_2d.nc` file and `plot6_budgets.py` assembles the SFS budgets from the 3D file itself. `plot5_sweep_spectrum_hovmoller.py` reads the sweep output, which does not exist yet at that point, so it fails there, or draws an earlier sweep of the same run name if one is on disk; `plots.pbs` draws it after the sweep. A figure that fails is logged as a warning rather than failing the job, so jobs chained on the simulation with `afterok` still start. The wrapper checks `KHAPE_PYTHON` at submission and passes it to the job for this.
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
 resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale. These
