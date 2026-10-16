@@ -34,8 +34,8 @@ ds = load_dataset_and_grid(filename, pad=False).chunk({"time": 1})
 ke_budget, ape_budget = online_budgets(ds)
 
 def sink(budget, var, ℓ):
-    """The dissipation at scale ℓ, as a positive rate, over the records where the budget is defined."""
-    return -budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time").isel(time=slice(1, None))
+    """The dissipation at scale ℓ, as a positive rate, over the records online_budgets keeps (see differenced_records)."""
+    return -budget[var].sel(filter_scale=ℓ, method="nearest").dropna("time")
 #---
 
 #+++ Plot
