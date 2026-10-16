@@ -70,7 +70,10 @@ OVERLAY=${OVERLAY:-}
 PX_PER_UNIT=${PX_PER_UNIT:-2}
 OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
 FILE=${FILE:-$OUT_DIR/khi_Nz${NZ}_Ri0.10.nc}
+# By mode, as submit_render3d.sh names the job and its PBS log, so a preview and a full animation running at
+# once keep separate logs.
 JOB_NAME="render3d_Nz${NZ}_Ri0.10"
+[ "$ANIMATE" = 1 ] && JOB_NAME="${JOB_NAME}_$([ "${PREVIEW:-0}" = 1 ] && echo preview || echo anim)"
 qalter -N "$JOB_NAME" "$PBS_JOBID" || true
 
 module li

@@ -174,7 +174,10 @@ source "$(dirname "$0")/../khape_defaults.sh"
 TIMES_COLON=$(echo "$TIMES"   | tr ', ' '::' | tr -s ':')
 FIELDS_COLON=$(echo "$FIELDS" | tr ','   ':')   # same reason: the panel list is comma-separated too
 FRACS_COLON=$(echo "$FRACTIONS" | tr ',' ':')   # and the fraction list
+# Named by mode, so a preview and a full animation can run at once without sharing a log: each job empties its
+# .out when it starts. Figures keep the plain name.
 NAME="render3d_Nz${NZ}_Ri0.10"
+[ "$ANIMATE" = 1 ] && NAME="${NAME}_$([ "$PREVIEW" = 1 ] && echo preview || echo anim)"
 JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
