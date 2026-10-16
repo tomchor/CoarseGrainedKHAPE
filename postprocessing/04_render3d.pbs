@@ -27,6 +27,11 @@
 # The times render sequentially, in one Julia process, so the walltime scales with how many are asked for:
 # 150 of them is about 5 h, which is what the 6 h request covers; an animation's measuring pass adds little. A handful finishes in minutes and leaves the rest unused --
 # PBS charges what is used, not what is asked, though a shorter request does schedule sooner.
+#
+# Cores: 4 by default; submit_render3d.sh NCPUS= asks for more with qsub -l, which overrides the select line
+# below. Mesa's llvmpipe rasteriser is multithreaded and takes its thread count from LP_NUM_THREADS, set here
+# to the cores PBS granted; softpipe, its fallback, uses one whatever it is given. Which one rendered is in
+# the log ("OpenGL renderer: ..."), and every frame logs its own time, so the two can be compared directly.
 set -eo pipefail
 
 [ -n "${PBS_O_WORKDIR:-}" ] && cd "$PBS_O_WORKDIR"   # postprocessing/, where the wrapper submits from
@@ -94,6 +99,10 @@ $JULIA --version
 $JULIA --project="$REPO" -e 'using Pkg; Pkg.instantiate()'
 #---
 
+# The per-run log, started here so the renderer the smoke test reports lands in it with the rest.
+LOG=logs/${JOB_NAME}.out
+: > "$LOG"
+
 #+++ Virtual display
 # A free display number, so two of these on one node do not collide. Killed on exit however the job ends.
 for n in $(seq 99 160); do
@@ -106,17 +115,21 @@ trap 'kill $XVFB_PID 2>/dev/null || true' EXIT
 sleep 3
 export DISPLAY=":$DISPLAY_NUM"
 export LIBGL_ALWAYS_SOFTWARE=1
-echo "Xvfb on $DISPLAY (pid $XVFB_PID), software OpenGL"
+export LP_NUM_THREADS=${NCPUS:-4}   # PBS sets NCPUS to the cores of the chunk it granted
+echo "Xvfb on $DISPLAY (pid $XVFB_PID), software OpenGL, LP_NUM_THREADS=$LP_NUM_THREADS"
 
 # Fail here rather than after a long render if the context cannot be made.
 $JULIA --project="$REPO" -e 'using GLMakie; GLMakie.activate!(visible=false)
 fig = Figure(size=(200,150)); Axis(fig[1,1]); lines!(1:10, rand(10))
-save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK")'
+save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK")
+# Which rasteriser Mesa picked: llvmpipe (multithreaded) or softpipe (one thread). Read from the context the
+# smoke test just drew with, which is the one plot7 renders through.
+screen = GLMakie.singleton_screen(false); GLMakie.ShaderAbstractions.switch_context!(screen.glscreen)
+gl(s) = unsafe_string(GLMakie.ModernGL.glGetString(s))
+println("OpenGL renderer: ", gl(GLMakie.ModernGL.GL_RENDERER), " | version: ", gl(GLMakie.ModernGL.GL_VERSION))' 2>&1 | tee -a "$LOG"
 #---
 
 #+++ Render
-LOG=logs/${JOB_NAME}.out
-: > "$LOG"
 echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  samples=$SAMPLES  isorange=$ISORANGE  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY  px_per_unit=$PX_PER_UNIT" | tee -a "$LOG"
 PLOT7=($JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE"
        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface

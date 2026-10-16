@@ -79,7 +79,7 @@ an EXIT trap. Two traps: `xvfb-run` is **not** installed on Casper, only the `Xv
 `julia +1.13` is a juliaup feature that Casper's `julia` reads as a filename, so the job finds 1.13 the way
 `simulation.pbs` does. `TIMES` and `FIELDS` travel colon-separated because `qsub -v` splits its own list on
 commas, which is also why a strided range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. Software rendering costs about 2 min per six-panel figure at Nz=1024 (measured, at the default `SAMPLES=800` ray-march steps; 90 s at Makie's 200), so the job renders its
-times sequentially; the job's 6 h walltime covers about 150 of them; `03_subset_3d.py` is still the quicker loop
+times sequentially, in one Julia process; the job's 6 h walltime covers about 150 of them at its default 4 cores (`NCPUS`; Mesa's llvmpipe takes them all through `LP_NUM_THREADS`, and the log names the renderer and times every frame); `03_subset_3d.py` is still the quicker loop
 for tuning camera, levels and colours, since no `qsub` round trip beats a local render.
 
 ### Local post-processing (no PBS)

@@ -611,9 +611,14 @@ for (frame, record) in enumerate(records)
     # A record that fails is reported and the rest continue; the process exits non-zero at the end, so a
     # batch job is marked failed rather than leaving the previous figure at that time looking like a result.
     try
+        # Timed in two parts, so a job's log shows whether reading and deriving the fields or drawing them dominates.
+        t_start = time()
         prepared = [f == "." ? nothing : prepare(f) for f in fields]
         ov = isempty(overlay) ? nothing : prepare(overlay)
+        t_drawn = time()
         render(prepared, ov, isnothing(frame_dir) ? figure_name(t) : joinpath(frame_dir, @sprintf("frame_%04d.png", frame)))
+        @info @sprintf("t = %.1f took %.1f s: %.1f s preparing the fields, %.1f s rendering", t, time() - t_start,
+                       t_drawn - t_start, time() - t_drawn)
     catch err
         global failed = failed + 1
         @error "t = $t failed" exception = (err, catch_backtrace())
