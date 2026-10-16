@@ -42,6 +42,8 @@
 #            half the resolution (PX_PER_UNIT=1), under names of its own (<name>_preview.mp4 and its own
 #            ranges file and frames), so it never replaces the full animation. Levels and samples are as
 #            usual; any option given explicitly overrides the preview's
+#   NCPUS    cores for the job (default 4). Mesa's llvmpipe renders with all of them; the log says whether
+#            llvmpipe is what ran ("OpenGL renderer: ...") and how long each frame took
 #   PX_PER_UNIT  pixels per figure unit (default 2; the preview's 1 has a quarter of the pixels)
 #   RANGES   a ranges file from an earlier animation job (animations/<name>_ranges.toml) to reuse instead of
 #            measuring again, e.g. to re-render at another FPS or RANGE_STAT
@@ -52,6 +54,7 @@ TIMES=""
 ANIMATE=0
 PREVIEW=0
 PX_PER_UNIT=""
+NCPUS=4
 RANGE_STAT=max
 RANGE_WINDOW=""
 FPS=10
@@ -92,11 +95,12 @@ for arg in "$@"; do case $arg in
   ANIMATE=*) ANIMATE="${arg#*=}";;
   PREVIEW=*) PREVIEW="${arg#*=}";;
   PX_PER_UNIT=*) PX_PER_UNIT="${arg#*=}";;
+  NCPUS=*)   NCPUS="${arg#*=}";;
   RANGE_STAT=*) RANGE_STAT="${arg#*=}";;
   RANGE_WINDOW=*) RANGE_WINDOW="${arg#*=}";;
   FPS=*)     FPS="${arg#*=}";;
   RANGES=*)  RANGES="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, RANGE_WINDOW=, FPS=, RANGES=, PREVIEW= or PX_PER_UNIT=)" >&2; exit 2;;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, RANGE_WINDOW=, FPS=, RANGES=, PREVIEW=, PX_PER_UNIT= or NCPUS=)" >&2; exit 2;;
 esac; done
 # LEVELS is a count, FRACTIONS a list. Passing one to the other fails deep inside the render, where the
 # time is logged as a warning and skipped -- and since the figure's name encodes neither, the previous
@@ -127,6 +131,7 @@ if [ "$PREVIEW" = 1 ]; then
 fi
 PX_PER_UNIT=${PX_PER_UNIT:-2}
 case "$PX_PER_UNIT" in (*[!0-9.]*|"") echo "error: PX_PER_UNIT=$PX_PER_UNIT must be a positive number" >&2; exit 2;; esac
+case "$NCPUS" in (*[!0-9]*|""|0) echo "error: NCPUS=$NCPUS must be a positive whole number" >&2; exit 2;; esac
 case "$ANIMATE" in (0|1) ;; (*) echo "error: ANIMATE=$ANIMATE must be 0 or 1" >&2; exit 2;; esac
 if [ "$ANIMATE" = 1 ]; then
     [ -z "$TIMES" ] || { echo "error: an animation takes FROM/TO/EVERY, not TIMES" >&2; exit 2; }
@@ -174,6 +179,7 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
+           -l select=1:ncpus=$NCPUS:mem=64GB:ngpus=0 \
            -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,RANGE_WINDOW=$RANGE_WINDOW,FPS=$FPS,RANGES=$RANGES,PREVIEW=$PREVIEW,PX_PER_UNIT=$PX_PER_UNIT$KHAPE_REDIRECT \
            04_render3d.pbs)
 if [ "$ANIMATE" = 1 ]; then
