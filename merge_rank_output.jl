@@ -10,7 +10,9 @@
 # where it lies (see *Virtual datasets*), so the merge takes seconds where copying the ~3.8 TB of an Nz=1024 run took
 # 7 h, and the rank files must stay beside it. The 2D file is written out (9 GB at Nz=1024): NCDatasets needs
 # `allow_virtual_storage!` to read a virtual file, and the animation reads that one in Julia. A standalone copy of the
-# 3D file, which the rank files are no longer needed for, is `nccopy -k nc4 <stem>.nc <copy>.nc` (hours at Nz=1024).
+# 3D file, which the rank files are no longer needed for, is `nccopy -k nc4 <stem>.nc <copy>.nc` (hours at Nz=1024)
+# followed by `ncatted -h -a virtual_rank_files,global,d,, <copy>.nc`: nccopy keeps the global attributes, and the
+# Python loader refuses a file that lists rank files it cannot find.
 #
 # What a rank file holds: its own x-slab of every field, on the dimensions a single-GPU file has (`x_caa`, `x_faa`,
 # …), with real coordinates; every variable without an x dimension (time, the `_int` volume integrals, ε̄, L_K, …)
@@ -350,7 +352,7 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     length(ARGS) == 1 && !startswith(only(ARGS), "--") ||
         error("usage: julia --project merge_rank_output.jl <dir>/<stem> (the 3D file is merged virtually; for a standalone " *
-              "copy, `nccopy -k nc4 <stem>.nc <copy>.nc`)")
+              "copy, `nccopy -k nc4 <stem>.nc <copy>.nc`, then `ncatted -h -a virtual_rank_files,global,d,, <copy>.nc`)")
     stem = only(ARGS)
     merge_ranks(stem; virtual = true)
     merge_ranks(stem * "_2d"; virtual = false)

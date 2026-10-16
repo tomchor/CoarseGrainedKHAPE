@@ -179,7 +179,9 @@ What changes when `NGPUS > 1`:
   file; Julia readers of the virtual 3D file need `allow_virtual_storage!()` from `merge_rank_output.jl` first.
 - For a standalone 3D file, which no longer needs the rank files, copy the virtual one with netCDF's own
   `nccopy -k nc4 khi_Nz<NZ>_Ri0.10.nc <copy>.nc` (hours at Nz=1024, and better on a login node than in a job,
-  whose memory limit counts the page cache of all that I/O).
+  whose memory limit counts the page cache of all that I/O), then delete from the copy the attribute that lists the
+  rank files, `ncatted -h -a virtual_rank_files,global,d,, <copy>.nc`. nccopy carries it over, and the Python loader
+  refuses a file that lists rank files it cannot find.
 - `SAVE_SORTED` and `VALIDATE` are refused: the two model-grid sorts of the validation-only view would each sort one
   rank's slab.
 
