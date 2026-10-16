@@ -87,6 +87,15 @@ ov_clip   = parse(Float64, get(opts, "overlay-clip", "0.45"))
 # raster however it is saved -- a PDF would just embed the same bitmap. Raising this is the only way to
 # sharpen the edges; it does not touch the marching-cubes faceting, which is set by the data grid.
 px_per_unit = parse(Float64, get(opts, "px-per-unit", "2"))
+# A 3D contour is not a mesh: Makie raymarches the box and draws a step wherever the value lies within
+# ±isorange of a level, lighting it with a normal finite-differenced at the step size. --samples is the
+# number of steps per ray (Makie's default, 200, is coarser than the data at Nz=1024), and --isorange the
+# shell half-width in the normalised (-1, 1) units every panel is drawn in (default: Makie's, a tenth of
+# the smallest gap between levels). The visible surface is where a ray first meets level ± isorange, so
+# a wider shell draws each surface that much further out: on the Nz=128 run, Q's −0.515 blobs show at the
+# default (~0.034), vanish at 0.015 and spread into sheets at 0.06. More samples only sharpen the edges.
+samples  = parse(Int, get(opts, "samples", "200"))
+isorange = haskey(opts, "isorange") ? parse(Float64, opts["isorange"]) : Makie.automatic
 derived_from = get(opts, "derived-from", "filtered")
 derived_from in ("filtered", "full") || error("--derived-from must be filtered or full; got $derived_from")
 # How the overlay is drawn. `wall` paints it on the bounding planes behind the data, `iso` draws it as
@@ -417,8 +426,10 @@ for (i, (kind, p, title)) in enumerate(panels)
         # are. :absorption looks better but needs an opacity curve matched to the field's range.
         volume!(ax, xr, yr, zr, p.data; algorithm = :mip, colormap = p.colormap, colorrange = p.colorrange)
     else
-        contour!(ax, xr, yr, zr, p.data; levels = p.levels, colormap = p.colormap,
-                 colorrange = p.colorrange, alpha, transparency = true)
+        c = contour!(ax, xr, yr, zr, p.data; levels = p.levels, colormap = p.colormap,
+                     colorrange = p.colorrange, alpha, transparency = true, isorange)
+        # contour! takes no `samples`; it lives on the volume plot the recipe draws with.
+        c.plots[1].samples[] = samples
     end
     # The overlay goes on last so Makie sorts it in front; grey keeps it off the panel's own colour scale,
     # and its levels are a symmetric pair about the field's middle, which for b is the interface either side.
