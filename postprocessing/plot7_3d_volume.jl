@@ -325,11 +325,18 @@ function panel_title(p, letter)
     return Makie.LaTeXStrings.latexstring(prefix * (p.neg ? "-" : "") * body)
 end
 
+# Every number in the title in one fixed-width form: three significant figures in scientific notation, the
+# integral always signed, and U+2212 for the minus, which is as wide as + in the figure font where a hyphen is
+# not. The line is centred, so with %g its width changed with every digit count and sign (0.359, 0.0203,
+# -0.0701) and the whole line slid sideways from frame to frame of an animation; measured, this holds it to
+# the same width for any value.
+fixed_width(v; signed = true) = replace(signed ? @sprintf("%+.2e", v) : @sprintf("%.2e", v), "-" => "−")
+
 """The second title line: the panel's own range, and its volume integral where the file carries one."""
 function scale_line(p)
-    s = @sprintf("range = ±%.3g", p.scale)
+    s = "range = ±" * fixed_width(p.scale; signed = false)
     p.fixed && (s *= " (fixed)")
-    isnothing(p.integral) || (s *= @sprintf("    ∫dV = %.3g", p.integral))
+    isnothing(p.integral) || (s *= "    ∫dV = " * fixed_width(p.integral))
     return s
 end
 
