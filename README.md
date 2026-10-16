@@ -260,13 +260,14 @@ When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it 
 
 ### Render 3D isosurfaces
 
-`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default, and the default panels are the six-term budget set at ℓ = 1.
+`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default: the six-term budget set at ℓ = 1, in three rows of two (`COLS`), with 800 ray-march steps per isosurface ray (`SAMPLES`) and Makie's automatic shell width (`ISORANGE`).
 
 ```bash
 cd postprocessing
 bash submit_render3d.sh TIMES=100,120,140                      # default Nz=1024, the six budget terms at l=1
 bash submit_render3d.sh FROM=60 TO=160 EVERY=10                # a strided range instead of a list: 11 figures
 bash submit_render3d.sh TIMES=120 LEVELS=2                     # one time, fewer isosurfaces: much faster
+bash submit_render3d.sh TIMES=120 SAMPLES=200 ISORANGE=0.02     # coarser rays, thinner shells
 bash submit_render3d.sh TIMES=100,140 FIELDS=Q,enstrophy       # other panels; bare names pick up _l<SCALE>
 bash submit_render3d.sh TIMES=120 FILE=/glade/derecho/scratch/someone/khi_Nz1024_Ri0.10.nc
 # one row per budget: tendency / conversion / flux / dissipation
@@ -277,7 +278,7 @@ A `-` prefix on a field negates it, for a term that enters two budgets with oppo
 
 **The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
 
-Software rendering costs about **90 seconds per six-panel figure** at Nz=1024, measured on a Casper CPU node, so the job is sequential in the times and its 6 h walltime covers about 200 of them. A handful finishes in minutes; PBS charges what is used, not what is asked, though a shorter request does schedule sooner. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `03_subset_3d.py` (below) is for.
+Software rendering costs about **2 minutes per six-panel figure** at Nz=1024 and the default `SAMPLES=800` (90 s at 200), measured on a Casper CPU node, so the job is sequential in the times and its 6 h walltime covers about 150 of them. `ISORANGE` is not a smoothing knob: the visible surface sits at level ± `ISORANGE`, so a wider shell draws each surface further out and weak features near a level appear or vanish with it. Neither setting is in the figure name, so a render at another value replaces the last one at that time. A handful finishes in minutes; PBS charges what is used, not what is asked, though a shorter request does schedule sooner. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `03_subset_3d.py` (below) is for.
 
 ### Subset a run for local plotting
 

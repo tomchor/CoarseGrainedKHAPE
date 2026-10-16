@@ -56,7 +56,7 @@ bash submit_sweep.sh NZ=1024 FILTER=0 PLOTS=1  # the transfer alone (six parts) 
 ### 3D isosurface figures
 ```bash
 cd postprocessing
-bash submit_render3d.sh TIMES=100,120,140              # plot7 at each time; default panels are the six budget terms at ℓ=1
+bash submit_render3d.sh TIMES=100,120,140              # plot7 at each time; default panels are the six budget terms at ℓ=1, three rows of two
 bash submit_render3d.sh FROM=60 TO=160 EVERY=10       # a strided range instead of a list (EVERY has no default)
 bash submit_render3d.sh TIMES=120 LEVELS=2             # fewer isosurfaces: much faster under software rendering
 bash submit_render3d.sh TIMES=120 FILE=/glade/.../khi_Nz1024_Ri0.10.nc
@@ -69,8 +69,8 @@ rendering (a long software render should not be how a broken display announces i
 an EXIT trap. Two traps: `xvfb-run` is **not** installed on Casper, only the `Xvfb` binary it wraps, and
 `julia +1.13` is a juliaup feature that Casper's `julia` reads as a filename, so the job finds 1.13 the way
 `simulation.pbs` does. `TIMES` and `FIELDS` travel colon-separated because `qsub -v` splits its own list on
-commas, which is also why a strided range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. Software rendering costs about 90 s per six-panel figure at Nz=1024 (measured), so the job renders its
-times sequentially; the job's 6 h walltime covers about 200 of them; `03_subset_3d.py` is still the quicker loop
+commas, which is also why a strided range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. Software rendering costs about 2 min per six-panel figure at Nz=1024 (measured, at the default `SAMPLES=800` ray-march steps; 90 s at Makie's 200), so the job renders its
+times sequentially; the job's 6 h walltime covers about 150 of them; `03_subset_3d.py` is still the quicker loop
 for tuning camera, levels and colours, since no `qsub` round trip beats a local render.
 
 ### Local post-processing (no PBS)
