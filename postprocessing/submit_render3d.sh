@@ -8,7 +8,7 @@
 #   NZ       vertical resolution, used to name the job and find the run
 #   FILE     the 3D file to read; default $KHAPE_OUTPUT_DIR/khi_Nz<NZ>_Ri0.10.nc. Give it to render a run
 #            that lives somewhere else, e.g. a colleague's scratch
-#   COLS     panels per row (plot7 default 3). A two-row budget figure of eight fields wants COLS=4
+#   COLS     panels per row (default 2: the six budget terms in three rows). An eight-field figure in two rows wants COLS=4
 #   FIELDS   comma-separated panels; default is the six-term budget set. A "-" prefix negates a field
 #            (a term entering two budgets with opposite sign) and a lone "." leaves a cell empty
 #   SCALE    filter scale ℓ whose per-scale terms to draw (the _ℓ<ℓ> suffix the bare names pick up)
@@ -29,7 +29,7 @@ EVERY=""
 NZ=1024
 FILE=""
 FIELDS="Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As"
-COLS=3
+COLS=2
 SCALE=1
 LEVELS=6
 FRACTIONS=""

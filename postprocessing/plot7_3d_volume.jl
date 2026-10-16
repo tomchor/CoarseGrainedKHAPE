@@ -46,7 +46,7 @@ end
 fields  = String.(split(get(opts, "field", "b"), ","))
 scale   = get(opts, "scale", "")               # appended as _ℓ<scale> to any name that needs it (see resolve)
 mode    = get(opts, "mode", "both")            # volume | isosurface | both
-cols    = parse(Int, get(opts, "cols", "3"))
+cols    = parse(Int, get(opts, "cols", "2"))
 tsel    = haskey(opts, "time") ? parse(Float64, opts["time"]) : nothing
 zlim    = parse(Float64, get(opts, "zlim", "4.0"))
 pct     = parse(Float64, get(opts, "clim-percentile", "99.0"))
