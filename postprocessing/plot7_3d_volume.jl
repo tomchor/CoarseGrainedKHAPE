@@ -363,8 +363,9 @@ function field_stats(spec)
     return (quantile(abs.(finite), pct / 100), minimum(finite), maximum(finite))
 end
 
-"""A panel's fixed (range, signed) from a --measure file: --range-stat of its series within --range-window,
-and signed if it changed sign at any of those times."""
+"""Each panel's fixed (range, signed) from a --measure file: --range-stat of its series within --range-window,
+and signed if it changed sign at any of those times; with the measured times that window actually spans, which
+the colourbar label states."""
 function fixed_ranges(file)
     d = TOML.parsefile(file)
     meta = d["meta"]
@@ -378,13 +379,14 @@ function fixed_ranges(file)
     sel = findall(τ -> range_window[1] <= τ <= range_window[2], ts)
     isempty(sel) && error("no measured time in --range-window $(range_window); $file holds t = $(ts[1]) to $(ts[end])")
     q = range_stat == "max" ? nothing : parse(Float64, range_stat[2:end]) / 100
-    return Dict(map(collect(d["fields"])) do (name, s)
+    fields = Dict(map(collect(d["fields"])) do (name, s)
         p, mn, mx = (Float64.(s[k])[sel] for k in ("p", "min", "max"))
         ok = isfinite.(p)
         any(ok) || error("$name is non-finite at every measured time in the window")
         hi = isnothing(q) ? maximum(p[ok]) : quantile(p[ok], q)
         name => (; hi, signed = any(mn[ok] .< 0 .< mx[ok]))
     end)
+    return (; fields, span = (ts[first(sel)], ts[last(sel)]))
 end
 fixed = isnothing(ranges_file) ? nothing : fixed_ranges(ranges_file)
 
@@ -408,8 +410,8 @@ function prepare(spec)
     hi     = absq(pct)
     # Under --ranges both the scale and the signedness come from the run, not from this record.
     if !isnothing(fixed)
-        haskey(fixed, name) || error("$name is not in $ranges_file; measure it with the same --field and --overlay")
-        hi, signed = fixed[name].hi, fixed[name].signed
+        haskey(fixed.fields, name) || error("$name is not in $ranges_file; measure it with the same --field and --overlay")
+        hi, signed = fixed.fields[name].hi, fixed.fields[name].signed
     end
     crange = (-1.0, 1.0)
     cmap   = cgrad(cmap_name)
@@ -557,14 +559,22 @@ function render(prepared, ov, outfile)
 
     # One colourbar for the figure: every panel is on the same normalised scale, so six of them said the same
     # thing six times. Its ticks are fractions of each panel's own range; the ranges themselves are in the titles.
+    # Under --ranges the label also says which times the fixed ranges come from: a frame outside them may exceed
+    # its panels' ranges, which no surface can show, since every one sits at or inside 0.85 of the range. Here
+    # rather than in the figure title, because it qualifies exactly what this label defines.
+    cbar_label = "fraction of each panel's range" *
+                 (isnothing(fixed) ? "" : @sprintf("\n(ranges: %s over t = %g–%g)", range_stat, fixed.span...))
     Colorbar(fig[1:nrows, ncols + 1]; colormap = cgrad(cmap_name), colorrange = (-1.0, 1.0),
              ticks = ([-1, -0.5, 0, 0.5, 1], ["-1", "-0.5", "0", "0.5", "1"]),
-             label = "fraction of each panel's range", height = Relative(0.5), width = 14,
+             label = cbar_label, height = Relative(0.5), width = 14,
              labelsize = 20, ticklabelsize = 18)
 
     colgap!(fig.layout, 0)
     rowgap!(fig.layout, 0)
-    Label(fig[0, :], @sprintf("t = %.1f      Re = %d,  Ri = %.2f%s", t, round(Int, Re), Ri,
+    # The time padded to five figures with U+2007, the figure space, which is a digit wide: "t = 90.0" and
+    # "t = 100.0" are then one width, and the centred title does not shift as an animation passes t = 100.
+    t_str = lpad(@sprintf("%.1f", t), 5, '\u2007')
+    Label(fig[0, :], @sprintf("t = %s      Re = %d,  Ri = %.2f%s", t_str, round(Int, Re), Ri,
                               isempty(scale) ? "" : @sprintf("      ℓ = %s", scale)),
           fontsize = 17, padding = (0, 0, 0, 10))
 
