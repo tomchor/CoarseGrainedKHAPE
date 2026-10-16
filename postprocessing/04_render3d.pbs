@@ -34,7 +34,7 @@ NZ=${NZ:-1024}
 TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
 # Colon-separated on the way in, for the same reason TIMES is; plot7 wants commas.
 FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
-COLS=${COLS:-3}
+COLS=${COLS:-2}
 SCALE=${SCALE:-1}
 LEVELS=${LEVELS:-6}
 # Colon-separated in, commas out, as TIMES and FIELDS are. Empty means "use LEVELS". The two are passed as
