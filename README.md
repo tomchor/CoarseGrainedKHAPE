@@ -278,7 +278,30 @@ A `-` prefix on a field negates it, for a term that enters two budgets with oppo
 
 **The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
 
-Software rendering costs about **2 minutes per six-panel figure** at Nz=1024 and the default `SAMPLES=800` (90 s at 200), measured on a Casper CPU node, so the job is sequential in the times and its 6 h walltime covers about 150 of them. `ISORANGE` is not a smoothing knob: the visible surface sits at level ± `ISORANGE`, so a wider shell draws each surface further out and weak features near a level appear or vanish with it. Neither setting is in the figure name, so a render at another value replaces the last one at that time. A handful finishes in minutes; PBS charges what is used, not what is asked, though a shorter request does schedule sooner. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `03_subset_3d.py` (below) is for.
+Software rendering costs about **2 minutes per six-panel figure** at Nz=1024 and the default `SAMPLES=800` (90 s at 200), measured on a Casper CPU node, so the job renders its times one after another, in one Julia process, and its 6 h walltime covers about 150 of them. `ISORANGE` is not a smoothing knob: the visible surface sits at level ± `ISORANGE`, so a wider shell draws each surface further out and weak features near a level appear or vanish with it. Neither setting is in the figure name, so a render at another value replaces the last one at that time. A handful finishes in minutes; PBS charges what is used, not what is asked, though a shorter request does schedule sooner. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `03_subset_3d.py` (below) is for.
+
+### Animate the 3D fields
+
+`ANIMATE=1` makes the job render a window of records as an animation instead of figures. A standalone figure scales each panel by its own 99th percentile at that time, which in a movie would hide growth and decay; an animation fixes each panel's scale over the whole window instead, so a surface means the same value in every frame, and structure appears as the billow grows and fades as it decays.
+
+```bash
+bash submit_render3d.sh ANIMATE=1                              # every record from t = 10 to the end, at 10 fps
+bash submit_render3d.sh ANIMATE=1 FROM=20 TO=150 EVERY=4       # a window, one frame every 4 time units
+bash submit_render3d.sh ANIMATE=1 RANGE_STAT=p90 FPS=15 \
+    RANGES=../animations/khi_Nz1024_Ri0.10_3dvol_6panel_l1_ranges.toml   # reuse the measured scales
+```
+
+The job runs two passes of `plot7_3d_volume.jl`. The first (`--measure`) draws nothing: it writes every panel's 99th percentile of |field|, and its minimum and maximum, at each record to `animations/<name>_ranges.toml`. The second (`--ranges`) renders the frames against those scales into `animations/frames/<name>/` and joins them into `animations/<name>.mp4` with Makie's own ffmpeg, so no module is needed; `<name>` is the figure's name without the time, e.g. `khi_Nz1024_Ri0.10_3dvol_6panel_l1`. Each panel's fixed scale is `RANGE_STAT` of its series (`max` by default, so nothing saturates; `pNN` for a percentile over time), and a panel that changes sign at any record keeps its symmetric pair of surfaces in every frame. `FROM` defaults to 10, past the small-amplitude phase that a fixed scale would render as empty frames; `TO` to the last record; `EVERY` to every record. `RANGES` reuses an earlier job's measured scales, skipping the first pass. Every other option (`FIELDS`, `LEVELS`, `SAMPLES`, ...) applies as it does to a figure, and the ranges file refuses a render whose crop, percentile, filter scale or velocity differs from the one it was measured with.
+
+Fixed by the peak, the dissipation panels empty out late in the run: on the Nz=128 test run every budget term peaks during breaking (t ≈ 48–64), and by t = 100 ε_Kˢ and ε_Aˢ are 7–14× below their peaks. `plot7_3d_volume.jl --range-window FROM:TO` takes the scale from part of the window only, when a later phase should set it.
+
+Locally the same two passes are:
+
+```bash
+julia +1.13 --project postprocessing/plot7_3d_volume.jl <file> --field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale 1 --mode isosurface --overlay b --from 10 --measure ranges.toml
+julia +1.13 --project postprocessing/plot7_3d_volume.jl <file> --field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale 1 --mode isosurface --overlay b --from 10 \
+    --ranges ranges.toml --frame-dir frames --movie anim.mp4
+```
 
 ### Subset a run for local plotting
 
