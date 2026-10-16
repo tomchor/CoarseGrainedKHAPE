@@ -44,7 +44,9 @@ FRACTIONS=$(echo "${FRACTIONS:-}" | tr ':' ',')
 if [ -n "$FRACTIONS" ]; then LEVEL_ARGS=(--fractions "$FRACTIONS"); else LEVEL_ARGS=(--levels "$LEVELS"); fi
 ZLIM=${ZLIM:-4}
 DERIVED=${DERIVED:-filtered}
-OVERLAY=${OVERLAY:-b}
+# No default here: submit_render3d.sh always passes OVERLAY, b unless given OVERLAY= for no overlay. Should `qsub -v`
+# drop that empty variable rather than export it, even ${OVERLAY-b} would read it as unset and draw b.
+OVERLAY=${OVERLAY:-}
 OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
 FILE=${FILE:-$OUT_DIR/khi_Nz${NZ}_Ri0.10.nc}
 JOB_NAME="render3d_Nz${NZ}_Ri0.10"
