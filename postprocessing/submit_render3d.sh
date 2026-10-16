@@ -34,6 +34,9 @@
 #            frames into animations/frames/<name>/ and joins them into animations/<name>.mp4. TIMES is refused
 #   RANGE_STAT  how a panel's fixed scale comes from its scale at each record: max (default), or pNN for a
 #            percentile over time (p90 lets the peak frames saturate a little for more contrast elsewhere)
+#   RANGE_WINDOW  FROM:TO, either end optional (e.g. 90:): take each panel's fixed scale from these times
+#            only, while still animating the whole window. A later phase can then set the scale, at the cost
+#            of saturating the frames outside it, where a term exceeds that scale. Default: every frame
 #   FPS      frames per second of the movie (default 10)
 #   PREVIEW  1 for a quick test of an animation: ANIMATE=1 with one frame every 10 time units (EVERY=10) at
 #            half the resolution (PX_PER_UNIT=1), under names of its own (<name>_preview.mp4 and its own
@@ -50,6 +53,7 @@ ANIMATE=0
 PREVIEW=0
 PX_PER_UNIT=""
 RANGE_STAT=max
+RANGE_WINDOW=""
 FPS=10
 RANGES=""
 FROM=""
@@ -89,9 +93,10 @@ for arg in "$@"; do case $arg in
   PREVIEW=*) PREVIEW="${arg#*=}";;
   PX_PER_UNIT=*) PX_PER_UNIT="${arg#*=}";;
   RANGE_STAT=*) RANGE_STAT="${arg#*=}";;
+  RANGE_WINDOW=*) RANGE_WINDOW="${arg#*=}";;
   FPS=*)     FPS="${arg#*=}";;
   RANGES=*)  RANGES="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, FPS=, RANGES=, PREVIEW= or PX_PER_UNIT=)" >&2; exit 2;;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, RANGE_WINDOW=, FPS=, RANGES=, PREVIEW= or PX_PER_UNIT=)" >&2; exit 2;;
 esac; done
 # LEVELS is a count, FRACTIONS a list. Passing one to the other fails deep inside the render, where the
 # time is logged as a warning and skipped -- and since the figure's name encodes neither, the previous
@@ -127,6 +132,9 @@ if [ "$ANIMATE" = 1 ]; then
     [ -z "$TIMES" ] || { echo "error: an animation takes FROM/TO/EVERY, not TIMES" >&2; exit 2; }
     FROM=${FROM:-10}
     case "$RANGE_STAT" in (max|p[0-9]*) ;; (*) echo "error: RANGE_STAT=$RANGE_STAT must be max or pNN, e.g. p90" >&2; exit 2;; esac
+    # Two numbers, either of them optional, around one colon.
+    [ -z "$RANGE_WINDOW" ] || [[ "$RANGE_WINDOW" =~ ^[0-9.]*:[0-9.]*$ ]] ||
+        { echo "error: RANGE_WINDOW=$RANGE_WINDOW must be FROM:TO, either end optional, e.g. 90:200 or 90:" >&2; exit 2; }
     case "$FPS" in (*[!0-9]*|""|0) echo "error: FPS=$FPS must be a positive whole number" >&2; exit 2;; esac
     if [ -n "$RANGES" ]; then
         # The job resolves a relative path from postprocessing/, where this is run, so make it absolute here.
@@ -166,10 +174,10 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
-           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,FPS=$FPS,RANGES=$RANGES,PREVIEW=$PREVIEW,PX_PER_UNIT=$PX_PER_UNIT$KHAPE_REDIRECT \
+           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,RANGE_WINDOW=$RANGE_WINDOW,FPS=$FPS,RANGES=$RANGES,PREVIEW=$PREVIEW,PX_PER_UNIT=$PX_PER_UNIT$KHAPE_REDIRECT \
            04_render3d.pbs)
 if [ "$ANIMATE" = 1 ]; then
-    echo "Submitted 3D $([ "$PREVIEW" = 1 ] && echo "animation preview" || echo animation) (Nz=$NZ, t=$FROM to ${TO:-end} every ${EVERY:-record}, range_stat=$RANGE_STAT, fps=$FPS, px_per_unit=$PX_PER_UNIT): $JOB"
+    echo "Submitted 3D $([ "$PREVIEW" = 1 ] && echo "animation preview" || echo animation) (Nz=$NZ, t=$FROM to ${TO:-end} every ${EVERY:-record}, range_stat=$RANGE_STAT, range_window=${RANGE_WINDOW:-all}, fps=$FPS, px_per_unit=$PX_PER_UNIT): $JOB"
 else
     echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS, samples=$SAMPLES, isorange=$ISORANGE): $JOB"
 fi

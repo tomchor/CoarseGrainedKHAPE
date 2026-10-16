@@ -39,7 +39,7 @@ if [ "$ANIMATE" = 1 ]; then
     # An animation is a window of records, not a list: plot7 picks them from the run, which the wrapper
     # never opens. TO empty runs to the last record, EVERY empty takes every record.
     FROM=${FROM:-10}; TO=${TO:-}; EVERY=${EVERY:-}
-    RANGE_STAT=${RANGE_STAT:-max}; FPS=${FPS:-10}; RANGES=${RANGES:-}
+    RANGE_STAT=${RANGE_STAT:-max}; RANGE_WINDOW=${RANGE_WINDOW:-}; FPS=${FPS:-10}; RANGES=${RANGES:-}
     PREVIEW=${PREVIEW:-0}   # only names the files here: the wrapper has already set the preview's EVERY and PX_PER_UNIT
 else
     TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
@@ -133,7 +133,7 @@ if [ "$ANIMATE" = 1 ]; then
     WINDOW=(--from "$FROM")
     [ -n "$TO" ] && WINDOW+=(--to "$TO")
     [ -n "$EVERY" ] && WINDOW+=(--every "$EVERY")
-    echo "animate: from=$FROM to=${TO:-end} every=${EVERY:-record} range_stat=$RANGE_STAT fps=$FPS ranges=${RANGES:-measured}" | tee -a "$LOG"
+    echo "animate: from=$FROM to=${TO:-end} every=${EVERY:-record} range_stat=$RANGE_STAT range_window=${RANGE_WINDOW:-all} fps=$FPS ranges=${RANGES:-measured}" | tee -a "$LOG"
     # Pass 1, the scales: each panel's percentile at every record in the window. Skipped when RANGES names a
     # file from an earlier job, so the same scales can serve another stride or frame rate.
     if [ -z "$RANGES" ]; then
@@ -142,7 +142,10 @@ if [ "$ANIMATE" = 1 ]; then
     fi
     # Pass 2, the frames against those scales, then the movie. plot7 exits non-zero if any frame fails, and
     # makes no movie then, since a missing frame would end the sequence there.
-    time "${PLOT7[@]}" "${WINDOW[@]}" --ranges "$RANGES" --range-stat "$RANGE_STAT" \
+    # The scale may come from part of the window (RANGE_WINDOW); the frames are always the whole of it.
+    RANGE_ARGS=(--range-stat "$RANGE_STAT")
+    [ -n "$RANGE_WINDOW" ] && RANGE_ARGS+=(--range-window "$RANGE_WINDOW")
+    time "${PLOT7[@]}" "${WINDOW[@]}" --ranges "$RANGES" "${RANGE_ARGS[@]}" \
         --frame-dir "$ANIM_DIR/frames/$NAME" --movie "$ANIM_DIR/$NAME.mp4" --fps "$FPS" 2>&1 | tee -a "$LOG"
     ls -la "$ANIM_DIR/$NAME.mp4" "$RANGES" | tee -a "$LOG"
     qstat -f "$PBS_JOBID" >> "$LOG"
