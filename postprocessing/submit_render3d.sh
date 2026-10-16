@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Submit the 3D isosurface rendering job: plot7_3d_volume.jl at one or more output times.
-# Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [SAMPLES=200] [ZLIM=4] [OVERLAY=b]
+# Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [SAMPLES=200] [ISORANGE=0.03] [ZLIM=4] [OVERLAY=b]
 #    or: bash submit_render3d.sh FROM=60 TO=160 EVERY=10 [...]
 #   TIMES    output times to render, comma- or space-separated (quote if spaces). One figure per time
 #   FROM/TO/EVERY  a strided range instead of a list: FROM to TO inclusive in steps of EVERY, which has no
@@ -18,6 +18,10 @@
 #   SAMPLES  ray-march steps per ray for the isosurfaces (Makie default 200). 800 sharpens the edges of small
 #            surfaces; render time grows about in proportion under software rendering. The figure name does
 #            not record it, so a render at another SAMPLES replaces the last one at that time
+#   ISORANGE shell half-width of each isosurface, as a fraction of the panel range; empty (default) is
+#            Makie's automatic value, a tenth of the smallest gap between levels (~0.034 at LEVELS=6). Not a
+#            smoothing knob: the visible surface sits at level ± ISORANGE, so a wider shell draws it further
+#            out and weak features near a level appear or vanish with it. Not in the figure name either
 #   ZLIM     crop to |z| < ZLIM
 #   DERIVED  velocity the derived fields (Q, enstrophy, speed) are built from: 'filtered' (default, the
 #            online field at SCALE) or 'full' (the raw one)
@@ -37,6 +41,7 @@ SCALE=1
 LEVELS=6
 FRACTIONS=""
 SAMPLES=200
+ISORANGE=""
 ZLIM=4
 DERIVED=filtered
 OVERLAY=b
@@ -54,10 +59,11 @@ for arg in "$@"; do case $arg in
   LEVELS=*)  LEVELS="${arg#*=}";;
   FRACTIONS=*) FRACTIONS="${arg#*=}";;
   SAMPLES=*) SAMPLES="${arg#*=}";;
+  ISORANGE=*) ISORANGE="${arg#*=}";;
   ZLIM=*)    ZLIM="${arg#*=}";;
   DERIVED=*) DERIVED="${arg#*=}";;
   OVERLAY=*) OVERLAY="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ZLIM=, DERIVED= or OVERLAY=)" >&2; exit 2;;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED= or OVERLAY=)" >&2; exit 2;;
 esac; done
 # LEVELS is a count, FRACTIONS a list. Passing one to the other fails deep inside the render, where the
 # time is logged as a warning and skipped -- and since the figure's name encodes neither, the previous
@@ -68,6 +74,10 @@ case "$LEVELS" in (*[!0-9]*|"")
 esac
 case "$SAMPLES" in (*[!0-9]*|"")
     echo "error: SAMPLES=$SAMPLES must be a whole number of steps per ray, e.g. 800" >&2
+    exit 2;;
+esac
+case "$ISORANGE" in (*[!0-9.]*)
+    echo "error: ISORANGE=$ISORANGE must be a positive number, e.g. 0.03, or empty for Makie's default" >&2
     exit 2;;
 esac
 case "$FRACTIONS" in (*[!0-9.,]*)
@@ -106,6 +116,6 @@ JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
-           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
+           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE$KHAPE_REDIRECT \
            04_render3d.pbs)
-echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS, samples=$SAMPLES): $JOB"
+echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS, samples=$SAMPLES, isorange=${ISORANGE:-auto}): $JOB"
