@@ -61,7 +61,7 @@ bash submit_render3d.sh FROM=60 TO=160 EVERY=10       # a strided range instead 
 bash submit_render3d.sh TIMES=120 LEVELS=2             # fewer isosurfaces: much faster under software rendering
 bash submit_render3d.sh TIMES=120 FILE=/glade/.../khi_Nz1024_Ri0.10.nc
 bash submit_render3d.sh ANIMATE=1 FROM=20 TO=150             # an animation, each panel on one scale fixed over the window
-bash submit_render3d.sh PREVIEW=1                              # a quick test of one: EVERY=10, PX_PER_UNIT=1, _preview names
+bash submit_render3d.sh PREVIEW=1                              # a quick test of one: EVERY=20, PX_PER_UNIT=1, _preview names
 bash submit_render3d.sh ANIMATE=1 RANGE_WINDOW=90:             # scale from t ≥ 90 only (the 3D stage); earlier frames saturate
 ```
 With `ANIMATE=1` the job runs `plot7_3d_volume.jl` twice: `--measure` writes each panel's 99th percentile of |field|
