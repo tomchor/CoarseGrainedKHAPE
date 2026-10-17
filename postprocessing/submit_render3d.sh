@@ -50,6 +50,9 @@
 #            all -- no title, colourbar, axis labels or ticks -- at exactly 1.2:1, 1200 x 1000 figure units, so
 #            2400 x 2000 px at the default PX_PER_UNIT=2. Box, wall contours, levels and camera as usual. Saved as
 #            figures/<run>_3dvol_<field>_l<SCALE>_thumbnail_t<time>.png, beside the figure of that time
+#   BACKGROUND  the thumbnail's background, any Makie colour (default white; black or '#0b1a2e' for a dark one)
+#   FRAME    1 (default) draws the thumbnail's box edges, 0 leaves only the data
+#   AZIMUTH/ELEVATION  the camera, in units of π (plot7's defaults 1.30 and 0.12), for figures and thumbnails alike
 #   RANGES   a ranges file from an earlier animation job (animations/<name>_ranges.toml) to reuse instead of
 #            measuring again, e.g. to re-render at another FPS or RANGE_STAT
 #
@@ -71,6 +74,10 @@ NZ=1024
 FILE=""
 FIELDS=""   # the six-term budget set, or Π_A for a thumbnail; filled in once the arguments are read
 THUMBNAIL=0
+BACKGROUND=white
+FRAME=1
+AZIMUTH=1.30
+ELEVATION=0.12
 COLS=2
 SCALE=1
 LEVELS=6
@@ -107,7 +114,11 @@ for arg in "$@"; do case $arg in
   FPS=*)     FPS="${arg#*=}";;
   RANGES=*)  RANGES="${arg#*=}";;
   THUMBNAIL=*) THUMBNAIL="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, RANGE_WINDOW=, FPS=, RANGES=, PREVIEW=, THUMBNAIL=, PX_PER_UNIT= or NCPUS=)" >&2; exit 2;;
+  BACKGROUND=*) BACKGROUND="${arg#*=}";;
+  FRAME=*)   FRAME="${arg#*=}";;
+  AZIMUTH=*) AZIMUTH="${arg#*=}";;
+  ELEVATION=*) ELEVATION="${arg#*=}";;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, RANGE_WINDOW=, FPS=, RANGES=, PREVIEW=, THUMBNAIL=, BACKGROUND=, FRAME=, AZIMUTH=, ELEVATION=, PX_PER_UNIT= or NCPUS=)" >&2; exit 2;;
 esac; done
 # LEVELS is a count, FRACTIONS a list. Passing one to the other fails deep inside the render, where the
 # time is logged as a warning and skipped -- and since the figure's name encodes neither, the previous
@@ -128,6 +139,8 @@ case "$FRACTIONS" in (*[!0-9.,]*)
     echo "error: FRACTIONS=$FRACTIONS must be a comma-separated list of numbers, e.g. 0.4,0.85" >&2
     exit 2;;
 esac
+case "$FRAME" in (0|1) ;; (*) echo "error: FRAME=$FRAME must be 0 or 1" >&2; exit 2;; esac
+case "$AZIMUTH$ELEVATION" in (*[!0-9.-]*) echo "error: AZIMUTH and ELEVATION are numbers, in units of π" >&2; exit 2;; esac
 case "$THUMBNAIL" in (0|1) ;; (*) echo "error: THUMBNAIL=$THUMBNAIL must be 0 or 1" >&2; exit 2;; esac
 if [ "$THUMBNAIL" = 1 ]; then
     FIELDS=${FIELDS:-Π_A}
@@ -198,7 +211,7 @@ JOB=$(qsub -N "$NAME" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
            -l select=1:ncpus=$NCPUS:mem=64GB:ngpus=0 \
-           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,RANGE_WINDOW=$RANGE_WINDOW,FPS=$FPS,RANGES=$RANGES,PREVIEW=$PREVIEW,THUMBNAIL=$THUMBNAIL,PX_PER_UNIT=$PX_PER_UNIT,RENDER_THREADS=$NCPUS$KHAPE_REDIRECT \
+           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,RANGE_WINDOW=$RANGE_WINDOW,FPS=$FPS,RANGES=$RANGES,PREVIEW=$PREVIEW,THUMBNAIL=$THUMBNAIL,BACKGROUND=$BACKGROUND,FRAME=$FRAME,AZIMUTH=$AZIMUTH,ELEVATION=$ELEVATION,PX_PER_UNIT=$PX_PER_UNIT,RENDER_THREADS=$NCPUS$KHAPE_REDIRECT \
            04_render3d.pbs)
 if [ "$ANIMATE" = 1 ]; then
     echo "Submitted 3D $([ "$PREVIEW" = 1 ] && echo "animation preview" || echo animation) (Nz=$NZ, t=$FROM to ${TO:-end} every ${EVERY:-record}, range_stat=$RANGE_STAT, range_window=${RANGE_WINDOW:-all}, fps=$FPS, px_per_unit=$PX_PER_UNIT): $JOB"

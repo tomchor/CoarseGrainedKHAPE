@@ -143,8 +143,9 @@ echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  sa
 PLOT7=($JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE"
        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface
        "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" --samples "$SAMPLES" --isorange "$ISORANGE"
-       --zlim "$ZLIM" --overlay "$OVERLAY" --px-per-unit "$PX_PER_UNIT")
-[ "$THUMBNAIL" = 1 ] && PLOT7+=(--thumbnail 1200)   # 1200 x 1000 figure units, exactly 1.2:1
+       --zlim "$ZLIM" --overlay "$OVERLAY" --px-per-unit "$PX_PER_UNIT"
+       --azimuth "${AZIMUTH:-1.30}" --elevation "${ELEVATION:-0.12}")
+[ "$THUMBNAIL" = 1 ] && PLOT7+=(--thumbnail 1200 --background "${BACKGROUND:-white}" --frame "${FRAME:-1}")   # 1200 x 1000 units, exactly 1.2:1
 
 if [ "$ANIMATE" = 1 ]; then
     # Named as plot7 names a figure, less the time. The frames get a directory of their own, so a movie can
