@@ -1,5 +1,6 @@
 import os
 import re
+import warnings
 from pathlib import Path
 import numpy as np
 import xarray as xr
@@ -369,6 +370,12 @@ def load_dataset_and_grid(filename, min_margin=None, extension="edge", pad=True,
     """
     print(f"Loading data from {filename}...")
     ds = xr.open_dataset(filename, decode_times=False, chunks={})
+    if ds["b"].encoding.get("contiguous"):
+        # A virtual merge reads as contiguous, which chunks={} makes one chunk holding every record: open it per record
+        ds.close()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="The specified chunks separate the stored chunks")
+            ds = xr.open_dataset(filename, decode_times=False, chunks={"time": 1})
     check_rank_files(filename, ds)
 
     # A `--save_sorted` run writes the sorted column on its own grid, which makes the writer suffix
