@@ -44,7 +44,7 @@ ds_filt = xr.open_dataset(filtered_filename, decode_times=False).chunk({"time": 
 filter_scales = ds_filt.filter_scale.values
 print(f"  Filtered fields loaded from: {filtered_filename}  ({time.time()-t0:.1f}s)")
 print(f"  Filter length scales: {filter_scales}")
-print(f"  Filter dimensions: x and z")
+print(f"  Filter dimensions: x, y and z")
 
 t0 = time.time()
 sorted_density_filename = str(PP_OUTPUT / (Path(filename).stem + "_sorted_density.nc"))

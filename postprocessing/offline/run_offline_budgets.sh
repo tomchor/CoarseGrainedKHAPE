@@ -5,11 +5,11 @@
 # which runs it and compares every term). Its output goes to an `offline/` subdirectory of the post-processing
 # output directory, so it never overwrites the assembled budgets.
 #
-# Usage: bash offline/run_offline_budgets.sh [output/khi_Nz512_Ri0.10.nc] [--filter-scales 1 7]
+# Usage: bash offline/run_offline_budgets.sh [output/khi_Nz128_Ri0.10.nc] [--filter-scales 1 7]
 #   N_WORKERS  threads for the sort and the APE lookups (default 1)
 set -euo pipefail
 cd "$(dirname "$0")/.."           # postprocessing/, where the scripts import `src.*` from
-FILENAME="${1:-output/khi_Nz512_Ri0.10.nc}"
+FILENAME="${1:-output/khi_Nz128_Ri0.10.nc}"
 shift 1 2>/dev/null || true
 export KHAPE_PP_OUTPUT="${KHAPE_PP_OUTPUT:-$(pwd)/output}/offline"
 mkdir -p "$KHAPE_PP_OUTPUT"

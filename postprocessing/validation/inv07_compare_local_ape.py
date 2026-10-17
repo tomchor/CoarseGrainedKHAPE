@@ -46,7 +46,7 @@ from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import load_dataset_and_grid, integrate, open_grid_group, model_grid_suffix, strip_grid_suffix
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, sorted_timeseries,
                                     local_potential_energies_timeseries)
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -157,9 +157,9 @@ axes = [fig.add_subplot(gs[0, k]) for k in range(3)]
 vmax = max(float(np.nanpercentile(np.abs(on_snap.values), 99)), float(np.nanpercentile(np.abs(off_snap.values), 99)))
 vmax = vmax if vmax > 0 else 1.0
 kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="magma_r", vmin=0, vmax=vmax)
-on_snap.plot(ax=axes[0], **kw);  axes[0].set_title(f"Online Eₐ   t = {t_sel:.1f}")
-off_snap.plot(ax=axes[1], **kw); axes[1].set_title(f"Offline Eₐ   t = {t_sel:.1f}")
-diff.plot(ax=axes[2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+xz_slice(on_snap).plot(ax=axes[0], **kw);  axes[0].set_title(f"Online Eₐ   t = {t_sel:.1f}")
+xz_slice(off_snap).plot(ax=axes[1], **kw); axes[1].set_title(f"Offline Eₐ   t = {t_sel:.1f}")
+xz_slice(diff).plot(ax=axes[2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
 axes[2].set_title("Difference (online − offline)")
 for a in axes:
     if zw is not None:

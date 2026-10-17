@@ -7,8 +7,8 @@ import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from src.aux00_utils import load_dataset_and_grid
-from src.aux03_plotting import run_label
+from src.aux00_utils import EXTRA_FIGURES, load_dataset_and_grid
+from src.aux03_plotting import run_label, xz_slice
 from src.aux04_online_budgets import online_budgets
 #---
 
@@ -26,8 +26,7 @@ args = parser.parse_args()
 
 print("\n" + "="*70 + f"\n  {Path(__file__).name}\n  " + "  ".join(f"{k}={v}" for k,v in vars(args).items()) + "\n" + "="*70)
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FIGURES   = REPO_ROOT / "figures"
-FIGURES.mkdir(exist_ok=True)
+EXTRA_FIGURES.mkdir(exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
 #---
@@ -55,15 +54,15 @@ print(f"Selected ℓ   = {ℓ_sel:.4f}  (requested {args.filter_scale})")
 print("Selecting fields...")
 sel = dict(time=t_sel, filter_scale=ℓ_sel, method="nearest")
 
-Π_K      = ke_budget["Π_K"].sel(**sel).squeeze()                  # cross-scale KE flux
-exchange = ke_budget["SFS APE->KE exchange"].sel(**sel).squeeze() # APE->KE exchange
-Π_A      = ape_budget["Π_A"].sel(**sel).squeeze()               # cross-scale APE flux
-ε_Aˢ     = ape_budget["ε_Aˢ"].sel(**sel).squeeze()              # SFS APE dissipation
+Π_K      = xz_slice(ke_budget["Π_K"].sel(**sel)).squeeze()                  # cross-scale KE flux
+exchange = xz_slice(ke_budget["SFS APE->KE exchange"].sel(**sel)).squeeze() # APE->KE exchange
+Π_A      = xz_slice(ape_budget["Π_A"].sel(**sel)).squeeze()               # cross-scale APE flux
+ε_Aˢ     = xz_slice(ape_budget["ε_Aˢ"].sel(**sel)).squeeze()              # SFS APE dissipation
 #---
 
 #+++ Buoyancy field for contours, from the same (unpadded) simulation output
 print("Loading buoyancy field...")
-b = ds["b"].sel(time=t_sel, method="nearest").squeeze()
+b = xz_slice(ds["b"].sel(time=t_sel, method="nearest")).squeeze()
 print("Done.")
 #---
 
@@ -150,7 +149,7 @@ for ax, letter in zip(axes.flat, "abcd"):
             fontsize=12, fontweight="bold", va="top", ha="left",
             bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
 
-outfile = str(FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}.pdf")
+outfile = str(EXTRA_FIGURES / f"{stem}_panels_t{t_sel:.1f}_l{ℓ_sel:.4f}.pdf")
 fig.savefig(outfile, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Figure saved to: {outfile}")

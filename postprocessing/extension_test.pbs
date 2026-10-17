@@ -22,7 +22,7 @@
 
 set -eo pipefail
 
-NZ=${NZ:-2048}
+NZ=${NZ:-512}
 SCALE=${SCALE:-20}
 EXTENSION=${EXTENSION:-odd}
 N_TIME_SKIP=${N_TIME_SKIP:-2}
