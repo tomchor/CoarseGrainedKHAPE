@@ -287,7 +287,12 @@ Software rendering costs about **2 minutes per six-panel figure** at Nz=1024 and
 ```bash
 bash submit_render3d.sh THUMBNAIL=1 TIMES=100,120,140          # Π_A at three times, to choose from
 bash submit_render3d.sh THUMBNAIL=1 TIMES=120 FIELDS=Q          # another field
+bash submit_render3d.sh THUMBNAIL=1 TIMES=100,120,140 FRACTIONS=0.5 ZLIM=2.5 OVERLAY= BACKGROUND=black FRAME=0
+                                                               # bold: one surface pair, tight crop, dark, no box
 ```
+
+`BACKGROUND` (any Makie colour, default white) and `FRAME` (1 draws the box edges, 0 leaves only the data) are the
+thumbnail's own; `AZIMUTH` and `ELEVATION` move the camera (units of π, defaults 1.30 and 0.12) for figures too.
 
 `ANIMATE=1` makes the job render a window of records as an animation instead of figures. A standalone figure scales each panel by its own 99th percentile at that time, which in a movie would hide growth and decay; an animation fixes each panel's scale over the whole window instead, so a surface means the same value in every frame, and structure appears as the billow grows and fades as it decays.
 

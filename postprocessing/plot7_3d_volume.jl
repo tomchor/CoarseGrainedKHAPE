@@ -163,6 +163,10 @@ ov_style in ("wall", "iso") || error("--overlay-style must be wall or iso; got $
 # default 1200 at 2 gives 2400 x 2000). The box frame and the overlay's wall contours stay: they are what
 # makes it read as a volume. The camera, levels and overlay are the usual flags.
 thumb_w = haskey(opts, "thumbnail") ? parse(Int, opts["thumbnail"]) : nothing
+# The thumbnail's background (any Makie colour; a dark one, e.g. black or "#0b1a2e", makes saturated surfaces
+# stand out at the size a journal shows it) and whether the box's edges are drawn (--frame 0 leaves only the data).
+thumb_bg    = parse(Makie.Colors.Colorant, get(opts, "background", "white"))
+thumb_frame = get(opts, "frame", "1") == "1"
 if !isnothing(thumb_w)
     thumb_w > 0 && thumb_w % 6 == 0 || error("--thumbnail W must be a positive multiple of 6, so W/1.2 is whole; got $thumb_w")
     length(fields) == 1 && only(fields) != "." || error("--thumbnail draws one field; got --field $(join(fields, ","))")
@@ -544,10 +548,11 @@ function render(prepared, ov, outfile)
         # Nothing but the box and what is in it: no protrusions, so the box fills the canvas as far as its
         # aspect allows, and hidedecorations! takes the labels, ticks and grid. The padding is a small margin
         # all round; at none the box's outer edges fall on the canvas edge and are cut in half.
-        fig = Figure(size = (thumb_w, thumb_w * 5 ÷ 6), figure_padding = thumb_w ÷ 60)
+        fig = Figure(size = (thumb_w, thumb_w * 5 ÷ 6), figure_padding = thumb_w ÷ 60, backgroundcolor = thumb_bg)
         ax = Axis3(fig[1, 1]; aspect = (Lx, Ly, Lz), azimuth = azim * π, elevation = elev * π,
                    limits = box_limits, viewmode = :fitzoom, protrusions = 0)
         hidedecorations!(ax)
+        thumb_frame || hidespines!(ax)
         draw_panel!(ax, mode, only(prepared), ov)
         save(outfile, fig; px_per_unit = px_per_unit)
         h, w = size(Makie.FileIO.load(outfile))
