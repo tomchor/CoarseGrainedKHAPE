@@ -74,6 +74,9 @@ FILE=${FILE:-$OUT_DIR/khi_Nz${NZ}_Ri0.10.nc}
 # once keep separate logs.
 JOB_NAME="render3d_Nz${NZ}_Ri0.10"
 [ "$ANIMATE" = 1 ] && JOB_NAME="${JOB_NAME}_$([ "${PREVIEW:-0}" = 1 ] && echo preview || echo anim)"
+# A journal thumbnail: one field, no text, 1.2:1 (plot7 --thumbnail). The wrapper has already defaulted FIELDS to Π_A.
+THUMBNAIL=${THUMBNAIL:-0}
+[ "$THUMBNAIL" = 1 ] && JOB_NAME="${JOB_NAME}_thumbnail"
 qalter -N "$JOB_NAME" "$PBS_JOBID" || true
 
 module li
@@ -141,6 +144,7 @@ PLOT7=($JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE
        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface
        "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" --samples "$SAMPLES" --isorange "$ISORANGE"
        --zlim "$ZLIM" --overlay "$OVERLAY" --px-per-unit "$PX_PER_UNIT")
+[ "$THUMBNAIL" = 1 ] && PLOT7+=(--thumbnail 1200)   # 1200 x 1000 figure units, exactly 1.2:1
 
 if [ "$ANIMATE" = 1 ]; then
     # Named as plot7 names a figure, less the time. The frames get a directory of their own, so a movie can
@@ -180,7 +184,7 @@ failed=0
 time "${PLOT7[@]}" --times "$(echo "$TIMES" | tr ':' ',')" 2>&1 | tee -a "$LOG" || failed=1
 
 echo "Figures in $REPO/figures/" | tee -a "$LOG"
-ls -la "$REPO"/figures/*6panel* 2>/dev/null | tee -a "$LOG" || true
+ls -la "$REPO"/figures/*_3dvol_* 2>/dev/null | tee -a "$LOG" || true
 qstat -f "$PBS_JOBID" >> "$LOG"
 if [ "$failed" -gt 0 ]; then
     echo "error: some of the requested times failed to render (see above); any figure of that name on disk is" \

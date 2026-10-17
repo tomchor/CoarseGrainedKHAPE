@@ -157,6 +157,18 @@ ov_levels = parse(Int, get(opts, "overlay-levels", ov_style == "wall" ? "10" : "
 # background. Named maps still work via --overlay-colormap.
 ov_cmap   = haskey(opts, "overlay-colormap") ? Symbol(opts["overlay-colormap"]) : cgrad([:gray88, :gray52])
 ov_style in ("wall", "iso") || error("--overlay-style must be wall or iso; got $ov_style")
+# A thumbnail (JFM's, for one): one field, no text at all -- no title, colourbar, axis labels or ticks --
+# at an aspect ratio of exactly 1.2:1. --thumbnail W sets the width in figure units and the height is W/1.2,
+# so W must be a multiple of 6 for a whole number of units; the pixels are those times --px-per-unit (the
+# default 1200 at 2 gives 2400 x 2000). The box frame and the overlay's wall contours stay: they are what
+# makes it read as a volume. The camera, levels and overlay are the usual flags.
+thumb_w = haskey(opts, "thumbnail") ? parse(Int, opts["thumbnail"]) : nothing
+if !isnothing(thumb_w)
+    thumb_w > 0 && thumb_w % 6 == 0 || error("--thumbnail W must be a positive multiple of 6, so W/1.2 is whole; got $thumb_w")
+    length(fields) == 1 && only(fields) != "." || error("--thumbnail draws one field; got --field $(join(fields, ","))")
+    mode != "both" || error("--thumbnail draws one panel; give --mode isosurface or volume")
+    isnothing(frame_dir) && isnothing(measure_file) || error("--thumbnail makes stills; it takes no --frame-dir or --measure")
+end
 mode in ("volume", "isosurface", "both") || error("--mode must be volume, isosurface or both; got $mode")
 length(fields) == 1 || mode != "both" ||
     error("--mode both lays panels out by mode, so it takes one --field; got $(length(fields)). Pick --mode isosurface or volume.")
@@ -475,6 +487,62 @@ function render(prepared, ov, outfile)
     z_span = vcat(z[1] - pad_z, z, z[end] + pad_z)
     edge_pad(a) = (b = vcat(a[1:1, :], a, a[end:end, :]); hcat(b[:, 1:1], b, b[:, end:end]))
 
+    """The panel's own field, and the overlay on its walls or in its volume."""
+    function draw_panel!(ax, kind, p, ov)
+        if kind == "volume"
+            # Maximum-intensity projection: no transfer function to tune, and it shows where the extremes
+            # are. :absorption looks better but needs an opacity curve matched to the field's range.
+            volume!(ax, xr, yr, zr, p.data; algorithm = :mip, colormap = p.colormap, colorrange = p.colorrange)
+        else
+            c = contour!(ax, xr, yr, zr, p.data; levels = p.levels, colormap = p.colormap,
+                         colorrange = p.colorrange, alpha, transparency = true, isorange)
+            # contour! takes no `samples`; it lives on the volume plot the recipe draws with.
+            c.plots[1].samples[] = samples
+        end
+        # The overlay goes on last so Makie sorts it in front; grey keeps it off the panel's own colour scale,
+        # and its levels are a symmetric pair about the field's middle, which for b is the interface either side.
+        if ov !== nothing && ov_style == "wall"
+            # Two bounding planes, textured with the overlay: the far spanwise wall and the floor. `surface!`
+            # with one coordinate held constant is the only way to put a 2D field on an arbitrary plane in a
+            # 3D axis -- Makie's `heatmap!` is xy-only. They sit at the box edges, so nothing in the volume is
+            # hidden, and a pale sequential map keeps them visibly background against the panel's own data.
+            # Line contours, not shading: a filled wall is a second data layer competing with the panel's own,
+            # and no colormap makes it recede enough. Lines read as annotation. They go on the two *vertical*
+            # walls only -- b at fixed z is nearly uniform, so a floor is one flat colour carrying nothing.
+            # `transformation` is how Makie puts a 2D recipe on a plane of a 3D axis.
+            wall_lv = collect(range(ov.colorrange[1], ov.colorrange[2], ov_levels + 2))[2:end-1]
+            wall_kw = (; levels = wall_lv, color = :gray40, linewidth = 1.0)
+            contour!(ax, x_span, z_span, edge_pad(ov.data[:, end, :]); transformation = (:xz, y_wall), wall_kw...)
+            contour!(ax, y_span, z_span, edge_pad(ov.data[end, :, :]); transformation = (:yz, x_wall), wall_kw...)
+        elseif ov !== nothing
+            # One surface means the field's own middle, which for b is the interface itself. More than one
+            # takes a symmetric pair about it, which for a rolled-up billow quickly becomes opaque.
+            ov_lv = ov_levels <= 1 ? [0.0] :
+                    sort(vcat(-ov.colorrange[2] .* fractions(0.25, 0.7, ov_levels ÷ 2),
+                               ov.colorrange[2] .* fractions(0.25, 0.7, ov_levels ÷ 2)))
+            jmax = clamp(round(Int, ov_clip * length(y)), 2, length(y))
+            contour!(ax, xr, y[1] .. y[jmax], zr, ov.data[:, 1:jmax, :]; levels = ov_lv,
+                     colormap = [ov_color, ov_color], colorrange = ov.colorrange,
+                     alpha = ov_alpha, transparency = true)
+        end
+    end
+
+    if !isnothing(thumb_w)
+        # Nothing but the box and what is in it: no protrusions, so the box fills the canvas as far as its
+        # aspect allows, and hidedecorations! takes the labels, ticks and grid. The padding is a small margin
+        # all round; at none the box's outer edges fall on the canvas edge and are cut in half.
+        fig = Figure(size = (thumb_w, thumb_w * 5 ÷ 6), figure_padding = thumb_w ÷ 60)
+        ax = Axis3(fig[1, 1]; aspect = (Lx, Ly, Lz), azimuth = azim * π, elevation = elev * π,
+                   limits = box_limits, viewmode = :fitzoom, protrusions = 0)
+        hidedecorations!(ax)
+        draw_panel!(ax, mode, only(prepared), ov)
+        save(outfile, fig; px_per_unit = px_per_unit)
+        h, w = size(Makie.FileIO.load(outfile))
+        w * 5 == h * 6 || error("$outfile is $w x $h, not 1.2:1")
+        @info "Thumbnail ($w x $h px) saved to: $outfile"
+        return
+    end
+
     # One field: panels are the modes. Several: panels are the fields, in the one mode given.
     panels = length(prepared) == 1 && mode == "both" ?
              [(kind, only(prepared), kind == "volume" ? "volume (MIP)" : "isosurfaces") for kind in ("volume", "isosurface")] :
@@ -515,42 +583,7 @@ function render(prepared, ov, outfile)
         rowgap!(gl, 0)
         ax = Axis3(fig[row, col]; aspect = (Lx, Ly, Lz), xlabel = "x", ylabel = "y", zlabel = "z",
                    azimuth = azim * π, elevation = elev * π, limits = box_limits, viewmode = :fitzoom)
-        if kind == "volume"
-            # Maximum-intensity projection: no transfer function to tune, and it shows where the extremes
-            # are. :absorption looks better but needs an opacity curve matched to the field's range.
-            volume!(ax, xr, yr, zr, p.data; algorithm = :mip, colormap = p.colormap, colorrange = p.colorrange)
-        else
-            c = contour!(ax, xr, yr, zr, p.data; levels = p.levels, colormap = p.colormap,
-                         colorrange = p.colorrange, alpha, transparency = true, isorange)
-            # contour! takes no `samples`; it lives on the volume plot the recipe draws with.
-            c.plots[1].samples[] = samples
-        end
-        # The overlay goes on last so Makie sorts it in front; grey keeps it off the panel's own colour scale,
-        # and its levels are a symmetric pair about the field's middle, which for b is the interface either side.
-        if ov !== nothing && ov_style == "wall"
-            # Two bounding planes, textured with the overlay: the far spanwise wall and the floor. `surface!`
-            # with one coordinate held constant is the only way to put a 2D field on an arbitrary plane in a
-            # 3D axis -- Makie's `heatmap!` is xy-only. They sit at the box edges, so nothing in the volume is
-            # hidden, and a pale sequential map keeps them visibly background against the panel's own data.
-            # Line contours, not shading: a filled wall is a second data layer competing with the panel's own,
-            # and no colormap makes it recede enough. Lines read as annotation. They go on the two *vertical*
-            # walls only -- b at fixed z is nearly uniform, so a floor is one flat colour carrying nothing.
-            # `transformation` is how Makie puts a 2D recipe on a plane of a 3D axis.
-            wall_lv = collect(range(ov.colorrange[1], ov.colorrange[2], ov_levels + 2))[2:end-1]
-            wall_kw = (; levels = wall_lv, color = :gray40, linewidth = 1.0)
-            contour!(ax, x_span, z_span, edge_pad(ov.data[:, end, :]); transformation = (:xz, y_wall), wall_kw...)
-            contour!(ax, y_span, z_span, edge_pad(ov.data[end, :, :]); transformation = (:yz, x_wall), wall_kw...)
-        elseif ov !== nothing
-            # One surface means the field's own middle, which for b is the interface itself. More than one
-            # takes a symmetric pair about it, which for a rolled-up billow quickly becomes opaque.
-            ov_lv = ov_levels <= 1 ? [0.0] :
-                    sort(vcat(-ov.colorrange[2] .* fractions(0.25, 0.7, ov_levels ÷ 2),
-                               ov.colorrange[2] .* fractions(0.25, 0.7, ov_levels ÷ 2)))
-            jmax = clamp(round(Int, ov_clip * length(y)), 2, length(y))
-            contour!(ax, xr, y[1] .. y[jmax], zr, ov.data[:, 1:jmax, :]; levels = ov_lv,
-                     colormap = [ov_color, ov_color], colorrange = ov.colorrange,
-                     alpha = ov_alpha, transparency = true)
-        end
+        draw_panel!(ax, kind, p, ov)
         # Every panel shares one grid and one camera, so repeating the axis labels and tick labels six times is
         # ink that says nothing. They stay on the first panel and come off the rest; the box and grid stay
         # everywhere, so each panel still reads as the same volume.
@@ -586,7 +619,8 @@ end
 #+++ Render, or measure, every requested record
 # One field keeps its name in the filename; several would make it unreadable, so they become "6panel".
 tag = length(fields) == 1 ? only(fields) : "$(length(fields))panel"
-figure_name(t) = joinpath(figures, @sprintf("%s_3dvol_%s%s_t%.1f.png", stem, tag, isempty(scale) ? "" : "_l$scale", t))
+figure_name(t) = joinpath(figures, @sprintf("%s_3dvol_%s%s%s_t%.1f.png", stem, tag, isempty(scale) ? "" : "_l$scale",
+                                            isnothing(thumb_w) ? "" : "_thumbnail", t))
 # Stale frames from an earlier, longer run would otherwise be joined into this one's movie.
 if !isnothing(frame_dir)
     mkpath(frame_dir)

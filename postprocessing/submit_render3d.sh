@@ -3,6 +3,7 @@
 # Usage: bash submit_render3d.sh TIMES=100,120,140 [NZ=1024] [FILE=...] [FIELDS=...] [SCALE=1] [LEVELS=6] [SAMPLES=800] [ISORANGE=0.02] [ZLIM=4] [OVERLAY=b]
 #    or: bash submit_render3d.sh FROM=60 TO=160 EVERY=10 [...]
 #    or: bash submit_render3d.sh PREVIEW=1 [...]   (a quick test of an animation)
+#    or: bash submit_render3d.sh THUMBNAIL=1 TIMES=120 [FIELDS=Π_A] [...]   (one field, no text, 1.2:1)
 #    or: bash submit_render3d.sh ANIMATE=1 [FROM=10] [TO=...] [EVERY=...] [RANGE_STAT=max] [FPS=10] [RANGES=...] [...]
 #   TIMES    output times to render, comma- or space-separated (quote if spaces). One figure per time
 #   FROM/TO/EVERY  a strided range instead of a list: FROM to TO inclusive in steps of EVERY, which has no
@@ -45,6 +46,10 @@
 #   NCPUS    cores for the job (default 4). Mesa's llvmpipe renders with all of them; the log says whether
 #            llvmpipe is what ran ("OpenGL renderer: ...") and how long each frame took
 #   PX_PER_UNIT  pixels per figure unit (default 2; the preview's 1 has a quarter of the pixels)
+#   THUMBNAIL  1 for a journal thumbnail (JFM's) at each of TIMES: one field (FIELDS, default Π_A) with no text at
+#            all -- no title, colourbar, axis labels or ticks -- at exactly 1.2:1, 1200 x 1000 figure units, so
+#            2400 x 2000 px at the default PX_PER_UNIT=2. Box, wall contours, levels and camera as usual. Saved as
+#            figures/<run>_3dvol_<field>_l<SCALE>_thumbnail_t<time>.png, beside the figure of that time
 #   RANGES   a ranges file from an earlier animation job (animations/<name>_ranges.toml) to reuse instead of
 #            measuring again, e.g. to re-render at another FPS or RANGE_STAT
 #
@@ -64,7 +69,8 @@ TO=""
 EVERY=""
 NZ=1024
 FILE=""
-FIELDS="Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As"
+FIELDS=""   # the six-term budget set, or Π_A for a thumbnail; filled in once the arguments are read
+THUMBNAIL=0
 COLS=2
 SCALE=1
 LEVELS=6
@@ -100,7 +106,8 @@ for arg in "$@"; do case $arg in
   RANGE_WINDOW=*) RANGE_WINDOW="${arg#*=}";;
   FPS=*)     FPS="${arg#*=}";;
   RANGES=*)  RANGES="${arg#*=}";;
-  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, RANGE_WINDOW=, FPS=, RANGES=, PREVIEW=, PX_PER_UNIT= or NCPUS=)" >&2; exit 2;;
+  THUMBNAIL=*) THUMBNAIL="${arg#*=}";;
+  *) echo "unknown argument: $arg (expected TIMES=, FROM=, TO=, EVERY=, NZ=, FILE=, FIELDS=, COLS=, SCALE=, LEVELS=, FRACTIONS=, SAMPLES=, ISORANGE=, ZLIM=, DERIVED=, OVERLAY=, ANIMATE=, RANGE_STAT=, RANGE_WINDOW=, FPS=, RANGES=, PREVIEW=, THUMBNAIL=, PX_PER_UNIT= or NCPUS=)" >&2; exit 2;;
 esac; done
 # LEVELS is a count, FRACTIONS a list. Passing one to the other fails deep inside the render, where the
 # time is logged as a warning and skipped -- and since the figure's name encodes neither, the previous
@@ -121,6 +128,13 @@ case "$FRACTIONS" in (*[!0-9.,]*)
     echo "error: FRACTIONS=$FRACTIONS must be a comma-separated list of numbers, e.g. 0.4,0.85" >&2
     exit 2;;
 esac
+case "$THUMBNAIL" in (0|1) ;; (*) echo "error: THUMBNAIL=$THUMBNAIL must be 0 or 1" >&2; exit 2;; esac
+if [ "$THUMBNAIL" = 1 ]; then
+    FIELDS=${FIELDS:-Π_A}
+    case "$FIELDS" in (*,*) echo "error: a thumbnail draws one field; got FIELDS=$FIELDS" >&2; exit 2;; esac
+    [ "$ANIMATE" = 0 ] && [ "$PREVIEW" = 0 ] || { echo "error: THUMBNAIL makes stills; it takes no ANIMATE or PREVIEW" >&2; exit 2; }
+fi
+FIELDS=${FIELDS:-Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As}
 case "$PREVIEW" in (0|1) ;; (*) echo "error: PREVIEW=$PREVIEW must be 0 or 1" >&2; exit 2;; esac
 # A preview is an animation with fewer, smaller frames; what it changes is only a default, so an EVERY or a
 # PX_PER_UNIT given explicitly still wins.
@@ -178,15 +192,16 @@ FRACS_COLON=$(echo "$FRACTIONS" | tr ',' ':')   # and the fraction list
 # .out when it starts. Figures keep the plain name.
 NAME="render3d_Nz${NZ}_Ri0.10"
 [ "$ANIMATE" = 1 ] && NAME="${NAME}_$([ "$PREVIEW" = 1 ] && echo preview || echo anim)"
+[ "$THUMBNAIL" = 1 ] && NAME="${NAME}_thumbnail"
 JOB=$(qsub -N "$NAME" \
            -A "$KHAPE_ACCOUNT" \
            -o "logs/${NAME}.log" \
            -e "logs/${NAME}.log" \
            -l select=1:ncpus=$NCPUS:mem=64GB:ngpus=0 \
-           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,RANGE_WINDOW=$RANGE_WINDOW,FPS=$FPS,RANGES=$RANGES,PREVIEW=$PREVIEW,PX_PER_UNIT=$PX_PER_UNIT,RENDER_THREADS=$NCPUS$KHAPE_REDIRECT \
+           -v NZ=$NZ,TIMES=$TIMES_COLON,FIELDS=$FIELDS_COLON,COLS=$COLS,SCALE=$SCALE,LEVELS=$LEVELS,FRACTIONS=$FRACS_COLON,SAMPLES=$SAMPLES,ISORANGE=$ISORANGE,ZLIM=$ZLIM,DERIVED=$DERIVED,OVERLAY=$OVERLAY,FILE=$FILE,ANIMATE=$ANIMATE,FROM=$FROM,TO=$TO,EVERY=$EVERY,RANGE_STAT=$RANGE_STAT,RANGE_WINDOW=$RANGE_WINDOW,FPS=$FPS,RANGES=$RANGES,PREVIEW=$PREVIEW,THUMBNAIL=$THUMBNAIL,PX_PER_UNIT=$PX_PER_UNIT,RENDER_THREADS=$NCPUS$KHAPE_REDIRECT \
            04_render3d.pbs)
 if [ "$ANIMATE" = 1 ]; then
     echo "Submitted 3D $([ "$PREVIEW" = 1 ] && echo "animation preview" || echo animation) (Nz=$NZ, t=$FROM to ${TO:-end} every ${EVERY:-record}, range_stat=$RANGE_STAT, range_window=${RANGE_WINDOW:-all}, fps=$FPS, px_per_unit=$PX_PER_UNIT): $JOB"
 else
-    echo "Submitted 3D render (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS, samples=$SAMPLES, isorange=$ISORANGE): $JOB"
+    echo "Submitted 3D $([ "$THUMBNAIL" = 1 ] && echo "thumbnail of $FIELDS" || echo render) (Nz=$NZ, times=$(echo "$TIMES_COLON" | tr ':' ' '), levels=$LEVELS, samples=$SAMPLES, isorange=$ISORANGE): $JOB"
 fi

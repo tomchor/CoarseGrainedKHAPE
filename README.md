@@ -281,6 +281,13 @@ Software rendering costs about **2 minutes per six-panel figure** at Nz=1024 and
 
 ### Animate the 3D fields
 
+`THUMBNAIL=1` draws a journal thumbnail (JFM asks for one) at each of `TIMES`: a single field, `Π_A` unless `FIELDS` names another, with no text at all (no title, colourbar, axis labels or ticks), at exactly 1.2:1, 1200 × 1000 figure units, which is 2400 × 2000 px at the default `PX_PER_UNIT=2`. The box frame and the buoyancy contours on the walls stay, since they are what make it read as a volume; levels, samples and camera are as for a figure. It is saved as `figures/<run>_3dvol_<field>_l<SCALE>_thumbnail_t<time>.png`, so it never replaces the six-panel figure, and logs to `logs/render3d_Nz<NZ>_Ri0.10_thumbnail.{log,out}`. plot7 checks the saved image's pixels are 6:5 and fails otherwise. Locally, `--thumbnail 1200` (any multiple of 6) with one `--field`.
+
+```bash
+bash submit_render3d.sh THUMBNAIL=1 TIMES=100,120,140          # Π_A at three times, to choose from
+bash submit_render3d.sh THUMBNAIL=1 TIMES=120 FIELDS=Q          # another field
+```
+
 `ANIMATE=1` makes the job render a window of records as an animation instead of figures. A standalone figure scales each panel by its own 99th percentile at that time, which in a movie would hide growth and decay; an animation fixes each panel's scale over the whole window instead, so a surface means the same value in every frame, and structure appears as the billow grows and fades as it decays.
 
 ```bash
