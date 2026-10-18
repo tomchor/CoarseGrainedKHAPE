@@ -128,10 +128,12 @@ else:
 for ax in axes:
     (ax.set_xlim if time_x else ax.set_ylim)(t0, t1)
 
-# The two scales the budgets are shown at, marked on the total so the detailed figures can be located
-# against the cascade. The secondary ℓ axis identifies them, so the lines are left unlabelled.
-for ℓ_mark in [7, 1]:
-    (ax_T.axhline if time_x else ax_T.axvline)(1.0 / ℓ_mark, color="k", lw=0.9, ls="--", alpha=0.55)
+# The two scales the budgets are shown at, marked on every panel: a feature in the total can then be read
+# against the same scales in its two components without carrying the position across rows by eye. The
+# secondary ℓ axis identifies them, so the lines are left unlabelled.
+for ax in axes:
+    for ℓ_mark in [7, 1]:
+        (ax.axhline if time_x else ax.axvline)(1.0 / ℓ_mark, color="k", lw=0.9, ls="--", alpha=0.55)
 
 cbar = fig.colorbar(pcm, ax=axes.tolist(), orientation="vertical", extend="both",
                     fraction=0.032, pad=0.015)

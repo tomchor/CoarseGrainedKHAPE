@@ -51,10 +51,12 @@ KE_TOL = 1e-8
 
 # SFS APE under the filtered reference: S̃ inherits the same nearest-density lookup as Eₐ, on both of the
 # two profiles it now involves, so it is held to a lookup-sized bound rather than to roundoff. The dip below
-# zero shrinks with the model resolution, not with the profile's: measured min/rms at ℓ=1 is -9.4e-3 at Nz=128,
-# -1.14e-3 at Nz=512 (CI) and -4.8e-5 at Nz=1024. 3e-3 clears the CI resolution and is still two decades below
-# the -0.7 a construction error gives (the unfiltered remainder, before PR #68).
-SFS_APE_TOL = 3e-3
+# zero sits in the small-amplitude phase (t ≈ 8 at ℓ=1) and shrinks with the model resolution, not with the
+# profile's: measured min/rms at ℓ=1 is -2.6e-2 on CI's 3D run (Nz=128, Δ = 0.195h; the offline pipeline
+# reproduces it to 2e-7), -4.3e-3 in 2D at Nz=256, -1.14e-3 in 2D at Nz=512 and -4.8e-5 at Nz=1024. 5e-2 clears
+# the CI resolution and is still a decade below the -0.7 a construction error gives (the unfiltered remainder,
+# before PR #68).
+SFS_APE_TOL = 5e-2
 #---
 
 #+++ Helpers

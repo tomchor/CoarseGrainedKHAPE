@@ -48,10 +48,10 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
 from src.aux00_utils import (load_dataset_and_grid, integrate, make_gaussian_filter, open_grid_group,
-                             model_grid_suffix, strip_grid_suffix)
+                             model_grid_suffix, strip_grid_suffix, FILTER_DIMS)
 from src.aux01_pe_functions import (calculate_density_fields_from_buoyancy, sorted_timeseries,
                                     local_potential_energies_timeseries, filtered_reference_profile, calculate_sfs_ape_dissipation)
-from src.aux03_plotting import run_label
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -76,7 +76,6 @@ FIGURES = REPO_ROOT / "figures" / "validation"
 FIGURES.mkdir(parents=True, exist_ok=True)
 filename = str(REPO_ROOT / args.filename) if not os.path.isabs(args.filename) else args.filename
 stem = Path(filename).stem
-FILTER_DIMS = ["x_caa", "z_aac"]
 
 
 def online_name(ℓ, suffix=""):
@@ -186,9 +185,9 @@ for row, ℓ in enumerate(args.filter_scales):
     vmax = max(float(np.nanpercentile(np.abs(on_snap.values), 99)), float(np.nanpercentile(np.abs(off_snap.values), 99)))
     vmax = vmax if vmax > 0 else 1.0
     kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
-    on_snap.plot(ax=axes[0], **kw);  axes[0].set_title(f"Online ε_Aˢ (ℓ={ℓ:g})")
-    off_snap.plot(ax=axes[1], **kw); axes[1].set_title(f"Offline ε_Aˢ (ℓ={ℓ:g})")
-    diff.plot(ax=axes[2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+    xz_slice(on_snap).plot(ax=axes[0], **kw);  axes[0].set_title(f"Online ε_Aˢ (ℓ={ℓ:g})")
+    xz_slice(off_snap).plot(ax=axes[1], **kw); axes[1].set_title(f"Offline ε_Aˢ (ℓ={ℓ:g})")
+    xz_slice(diff).plot(ax=axes[2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
     axes[2].set_title("Difference (online − offline)")
     for a in axes:
         if zw is not None:

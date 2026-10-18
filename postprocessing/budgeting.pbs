@@ -16,7 +16,7 @@
 # pipeline lives in offline/ and runs only as the CI cross-check.
 set -eo pipefail
 
-NZ=${NZ:-2048}
+NZ=${NZ:-512}
 SIM=Nz${NZ}_Ri0.10
 OUT_DIR=${KHAPE_OUTPUT_DIR:-output}   # where simulation.pbs wrote the run; kelvin_helmholtz_instability.jl reads the same variable
 PYTHON=${KHAPE_PYTHON:?submit through the submit_*.sh wrappers, which pass KHAPE_PYTHON}

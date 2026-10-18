@@ -11,9 +11,11 @@ import xarray as xr
 from conftest import PP_OUTPUT, STEM
 
 # Residual must be < THRESHOLD x 100% of the mean budget term. Measured on the assembled online budgets over all
-# records: 0.46% and 0.40% (APE, ℓ=1 and 7) and 0.85% and 0.19% (KE) at CI's Nz=512, identical in two runs of the
-# same code; 0.14%, 0.18%, 0.48% and 0.29% at Nz=1024. KE at ℓ=1 at the CI resolution is the binding case.
-THRESHOLD = 0.01
+# records of CI's 3D run (Nz=128, Δ = 0.195h, Re = 258): KE 3.4% and 1.6%, APE 4.3% and 4.0% at ℓ=1 and 7. That is
+# the resolution, not the third dimension: the 2D code at the same Δx and Re (Nz=256) gives KE 3.1% and 0.24%, APE
+# 1.3% and 0.66%, and the old 2D CI at Nz=512 closed to 0.85%/0.19% (KE) and 0.46%/0.40% (APE), 0.48%/0.29% and
+# 0.14%/0.18% at Nz=1024. A missing or mis-signed term is O(30-100%), so 6% still catches what the test is for.
+THRESHOLD = 0.06
 
 
 def rms(arr):

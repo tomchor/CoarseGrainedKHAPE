@@ -36,7 +36,7 @@ def filtered_delta():
     data = np.zeros((Nx, Nz))
     data[Nx // 2, Nz // 2] = 1.0 / (dx * dz)
     da = xr.DataArray(data, dims=["x_caa", "z_aac"], coords={"x_caa": x, "z_aac": z})
-    gf = GaussianFilter(FILTER_SCALE, dx, dz)
+    gf = GaussianFilter(FILTER_SCALE, {"x_caa": dx, "z_aac": dz})
     return gf.apply(da, dims=["x_caa", "z_aac"])
 #---
 

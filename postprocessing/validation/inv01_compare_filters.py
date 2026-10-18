@@ -8,8 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # postprocessing/ on path for `src.*`
 from aux_check import add_tolerance_arg, set_tolerance, check, finalize
-from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter
-from src.aux03_plotting import run_label
+from src.aux00_utils import load_dataset_and_grid, make_gaussian_filter, FILTER_DIMS
+from src.aux03_plotting import run_label, xz_slice
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -48,7 +48,7 @@ ds_snap = ds.sel(time=t_sel, method="nearest").squeeze()
 #+++ Compute offline-filtered fields and compare with online
 # Both the online GaussianFilter (Oceanostics) and the offline one (aux00_utils)
 # now use ℓ = FWHM as the filter length scale parameter.
-field_names = ["u", "w", "b"]
+field_names = ["u", "v", "w", "b"]
 
 print("Computing offline-filtered fields...")
 results = {}
@@ -60,7 +60,7 @@ for ℓ in args.filter_scales:
             print(f"  WARNING: '{online_var}' not found in dataset, skipping")
             continue
         online = ds_snap[online_var]
-        offline = gf.apply(ds_snap[name], dims=["x_caa", "z_aac"])
+        offline = gf.apply(ds_snap[name], dims=FILTER_DIMS)
         results[(name, ℓ)] = dict(online=online, offline=offline, diff=online - offline)
 print(f"  Computed {len(results)} field comparisons")
 #---
@@ -84,13 +84,13 @@ for i, (name, ℓ) in enumerate(rows):
     vmax = max(float(np.nanpercentile(np.abs(r["online"].values), 98)), float(np.nanpercentile(np.abs(r["offline"].values), 98)))
     kw = dict(x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
 
-    r["online"].plot(ax=axes[i, 0], **kw)
+    xz_slice(r["online"]).plot(ax=axes[i, 0], **kw)
     axes[i, 0].set_title(f"Online {name}_ℓ{ℓ_str}")
 
-    r["offline"].plot(ax=axes[i, 1], **kw)
+    xz_slice(r["offline"]).plot(ax=axes[i, 1], **kw)
     axes[i, 1].set_title(f"Offline {name} (ℓ={ℓ_str})")
 
-    r["diff"].plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
+    xz_slice(r["diff"]).plot(ax=axes[i, 2], x="x_caa", y="z_aac", add_colorbar=True, cmap="RdBu_r", robust=True)
     axes[i, 2].set_title("Difference")
 
     for k in range(3):

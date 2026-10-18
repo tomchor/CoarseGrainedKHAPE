@@ -85,7 +85,8 @@ VALIDATION = REPO_ROOT / "postprocessing" / "validation"
 # the first gap the way ε_Kˢ does; measured at Nz=192/Re=262 it does not:
 #   7.8e-02 (field, l=1)   1.4e-01 (int eps_As dV, l=1)
 #   4.0e-02 (field, l=7)   1.1e-01 (int eps_As dV, l=7)
-# so 0.30 is ~2x the worst, and stays under the 0.5 a factor-of-two error would produce.
+# On CI's 3D Nz=128 run (Δ = 0.195h) the integral reads 3.0e-01 (ℓ=1) and 2.5e-01 (ℓ=7), the field 1.7e-01
+# and 1.2e-01, so the tolerance is 0.5; a factor-of-two error would produce about 1.
 
 # `inv09` (the cross-scale APE flux Π_A, which `03_energy_transfer.py` computes offline) is the APE twin of
 # `inv02`, and was expected to be as loose: both are a product of two filtered-and-differentiated
@@ -100,20 +101,21 @@ VALIDATION = REPO_ROOT / "postprocessing" / "validation"
 # `inv10` is not an online-vs-offline comparison at all: every term of both budgets is now written by
 # the simulation, so it checks that the online budgets *close* on their own, with the same metric
 # `test_budgets.py` applies to the assembled files (rms(residual) / mean over terms of rms(term)). It is
-# held at the same 0.01 threshold, which is what makes the two directly comparable. Measured at CI's
-# Nz=512 on 2026-09-28 (first pair skipped, identical in two runs of the same code): KE 0.79% (ℓ=1) and
-# 0.17% (ℓ=7), APE 0.43% and 0.38%; at Nz=1024, all records: KE 0.48% and 0.29%, APE 0.14% and 0.18%.
-# The offline pipeline's own budget sits at 2.3% (Nz=512) and 1.2% (Nz=1024) on the same runs, which is
-# its ε discretisation; test_offline_check.py holds it at 3%.
+# held at the same threshold, which is what makes the two directly comparable: 0.06, from CI's 3D Nz=128 run
+# (KE 3.4% and 1.6%, APE 4.2% and 4.6% with the first pair skipped; test_budgets.py explains why the CI
+# resolution sets it). In 2D at Nz=512 (2026-09-28): KE 0.79% (ℓ=1) and 0.17% (ℓ=7), APE 0.43% and 0.38%;
+# at Nz=1024, all records: KE 0.48% and 0.29%, APE 0.14% and 0.18%. The offline pipeline's own budget sits
+# at 23-33% at ℓ=1 on the 3D CI run, 2.3% (Nz=512) and 1.2% (Nz=1024) in 2D, which is its ε discretisation;
+# test_offline_check.py holds it at 50% as a sanity check.
 CASES = [
     pytest.param("inv01_compare_filters.py", 0.25, [], id="filtered_fields"),
     pytest.param("inv02_compare_ke_transfer.py", 1.0, [], id="Pi_K"),
     pytest.param("inv05_compare_dissipation.py", 0.5, [], id="eps_Ks"),
     pytest.param("inv06_compare_sorted_profiles.py", 1e-9, ["--n-workers", "2"], id="sorted_state"),
     pytest.param("inv07_compare_local_ape.py", 1e-6, ["--n-workers", "2"], id="local_ape"),
-    pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.30, ["--n-workers", "2"], id="sfs_ape_dissipation"),
+    pytest.param("inv08_compare_sfs_ape_dissipation.py", 0.5, ["--n-workers", "2"], id="sfs_ape_dissipation"),
     pytest.param("inv09_compare_ape_transfer.py", 0.15, ["--n-workers", "2"], id="Pi_A"),
-    pytest.param("inv10_online_budget_closure.py", 0.01, [], id="online_budget_closure"),
+    pytest.param("inv10_online_budget_closure.py", 0.06, [], id="online_budget_closure"),
 ]
 
 
