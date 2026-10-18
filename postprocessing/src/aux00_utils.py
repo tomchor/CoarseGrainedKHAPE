@@ -2,6 +2,7 @@ import os
 import re
 import warnings
 from pathlib import Path
+import netCDF4
 import numpy as np
 import xarray as xr
 
@@ -36,13 +37,31 @@ def output_flag(ds, name):
 # standalone copy (`nccopy -k nc4` of the merged file) holds the data itself but keeps the attribute, which is deleted
 # from the copy as part of making it (README, Multi-GPU runs).
 def check_rank_files(filename, ds):
-    """Raise if `filename` (opened as `ds`) is a virtual merge and any rank file it reads from is missing."""
-    missing = [name for name in ds.attrs.get("virtual_rank_files", "").split() if not (Path(filename).parent / name).exists()]
+    """Raise if `filename` (opened as `ds`) is a virtual merge and a rank file it reads from is missing or from another run."""
+    names = ds.attrs.get("virtual_rank_files", "").split()
+    missing = [name for name in names if not (Path(filename).parent / name).exists()]
     if missing:
         raise FileNotFoundError(f"{filename} lists rank files {missing} in `virtual_rank_files` that are not beside it. A "
                                 "virtual merge would read their slabs as fill values: restore them. A standalone copy made "
                                 "with nccopy holds the data itself and only kept the attribute: delete it from the copy with "
                                 f"`ncatted -h -a virtual_rank_files,global,d,, {filename}`")
+
+    # A rerun at the same Nz in the same directory writes its rank files under the same names, and the merged file would
+    # read the new slabs beside its own time axis and integrals. Every file of a run carries the same `run_id` (a merge
+    # from before there was one has none, and neither have its rank files).
+    def run_id(name):
+        try:
+            with netCDF4.Dataset(Path(filename).parent / name) as rank_file:
+                return rank_file.__dict__.get("run_id")
+        except OSError as error:
+            raise OSError(f"{filename} reads from {name}, which cannot be opened: is a run writing it? ({error})") from error
+
+    others = [name for name in names if run_id(name) != ds.attrs.get("run_id")]
+    if others:
+        stem = str(Path(filename).with_suffix(""))
+        raise ValueError(f"{filename} was merged from another run than the one its rank files {others} now hold (their "
+                         "`run_id` differs): a later run at the same resolution wrote them in the same directory. Merge "
+                         f"them again, `julia --project merge_rank_output.jl {stem}`, or run elsewhere")
 #---
 
 #+++ Multi-grid output files

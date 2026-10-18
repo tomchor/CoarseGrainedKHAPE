@@ -21,6 +21,8 @@
 #   - maps or concatenates every variable with an x dimension in rank order (the x coordinates are written out, and
 #     checked to come out increasing);
 #   - copies every other variable from rank 0, after checking that all ranks agree bit for bit;
+#   - copies the global attributes from rank 0, after checking that every rank file carries the same `run_id`, which
+#     the Python loader then compares with the rank files' own (a rerun in the same directory rewrites them);
 #   - rewrites each variable's `indices` attribute, which records the slab's x range, to the whole domain's;
 #   - writes the grid metadata groups for the whole domain with Oceananigans' own writer, on the CPU (a file that
 #     says `GPU()` cannot be read back where CUDA is not loaded, e.g. by the animation on a CPU node).
@@ -75,6 +77,9 @@ function merge_ranks(stem; virtual)
     ds₀ = first(sources)
     virtual_fields = []
     try
+        run_ids = [haskey(ds.attrib, "run_id") ? ds.attrib["run_id"] : nothing for ds in sources]
+        allequal(run_ids) || error("the rank files of $stem come from different runs: run_id $(join(unique(run_ids), ", "))")
+
         NCDataset(merged_file, "c") do out
             for (name, value) in ds₀.attrib
                 out.attrib[name] = value

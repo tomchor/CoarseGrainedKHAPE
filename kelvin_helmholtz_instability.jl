@@ -205,6 +205,13 @@ else
     rank = 0
 end
 
+# A random tag every file of this run carries in its global attributes, rank 0's on all ranks. A rerun at the same Nz in
+# the same directory writes its rank files under the same names, and a file merged from the earlier run would then read
+# the new slabs beside its own time axis and integrals: check_rank_files (postprocessing/src/aux00_utils.py) compares them.
+run_id = randstring(RandomDevice(), 16)
+params.ranks > 1 && (run_id = MPI.bcast(run_id, arch.communicator; root = 0))
+params = (; params..., run_id)
+
 # Every rank takes part in every collective (reductions, halo exchanges, the gathers), the progress messages included,
 # but only rank 0 prints them: the others keep their warnings and errors.
 rank == 0 || global_logger(ConsoleLogger(stderr, Logging.Warn))

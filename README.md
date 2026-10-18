@@ -175,7 +175,8 @@ What changes when `NGPUS > 1`:
 - The 3D file is merged **virtually**, in seconds: its fields are HDF5 virtual datasets that read each rank's slab
   from the rank file it is in, so the merged file takes almost no space and **the rank files must stay beside it**
   (the directory can move as a whole). A missing rank file would read as fill values, so the Python loader refuses a
-  merged file whose rank files are not all there. The 2D file (9 GB at Nz=1024) is copied, so Julia reads it as any
+  merged file whose rank files are not all there, or were rewritten since by a later run at the same resolution in the
+  same directory (every file of a run carries the same `run_id`). The 2D file (9 GB at Nz=1024) is copied, so Julia reads it as any
   file; Julia readers of the virtual 3D file need `allow_virtual_storage!()` from `merge_rank_output.jl` first.
 - For a standalone 3D file, which no longer needs the rank files, copy the virtual one with netCDF's own
   `nccopy -k nc4 khi_Nz<NZ>_Ri0.10.nc <copy>.nc` (hours at Nz=1024, and better on a login node than in a job,
