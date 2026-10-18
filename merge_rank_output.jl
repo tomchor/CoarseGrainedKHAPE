@@ -19,7 +19,7 @@
 # whole and identical on every rank, since the reductions are all-reduced; and the grid of its own slab in the grid
 # metadata groups. So the merge
 #   - maps or concatenates every variable with an x dimension in rank order (the x coordinates are written out, and
-#     checked to come out increasing);
+#     checked to come out increasing), then replaces the x coordinates and spacings with the whole domain's;
 #   - copies every other variable from rank 0, after checking that all ranks agree bit for bit;
 #   - copies the global attributes from rank 0, after checking that every rank file carries the same `run_id`, which
 #     the Python loader then compares with the rank files' own (a rerun in the same directory rewrites them);
@@ -30,7 +30,7 @@
 using NCDatasets
 using HDF5_jll: libhdf5, libhdf5_hl
 using Oceananigans
-using Oceananigans: RectilinearGrid, CPU, Periodic, Bounded
+using Oceananigans: RectilinearGrid, CPU, Periodic, Bounded, xspacings
 
 const NCExt = Base.get_extension(Oceananigans, :OceananigansNCDatasetsExt)
 
@@ -333,19 +333,27 @@ function check_increasing(out)
     return nothing
 end
 
-# The grid metadata groups a single-GPU run writes, for the whole domain. The simulation's grid is fixed by its
-# global attributes: (Nx, Ny, Nz) cells on [-Lx/2, Lx/2] × [-Ly/2, Ly/2] × [-Lz/2, Lz/2], (Periodic, Periodic, Bounded),
-# the default halo. Checked against the merged coordinates before it is written.
+# The grid metadata groups a single-GPU run writes, for the whole domain, and its x coordinates and spacings. The
+# simulation's grid is fixed by its global attributes: (Nx, Ny, Nz) cells on [-Lx/2, Lx/2] × [-Ly/2, Ly/2] ×
+# [-Lz/2, Lz/2], (Periodic, Periodic, Bounded), the default halo. A rank file's x coordinates and spacings are those of
+# its own slab, whose ends Oceananigans accumulates slab by slab (`partition_coordinate`): over 8 ranks the two end
+# slabs' Δx come out 2 ulps off Lx/Nx (over 2 or 4 they happen to be exact), and the concatenated Δx_caa took three
+# values, which the offline sort refuses (`sorted_timeseries`). So the merged ones are the global grid's, checked against
+# the concatenated slabs to roundoff first.
 function write_global_grid!(out, ds₀)
     N = Int.((ds₀.attrib["Nx"], ds₀.attrib["Ny"], ds₀.attrib["Nz"]))
     L = Float64.((ds₀.attrib["Lx"], ds₀.attrib["Ly"], ds₀.attrib["Lz"]))
     grid = RectilinearGrid(CPU(); size = N, x = (-L[1]/2, L[1]/2), y = (-L[2]/2, L[2]/2), z = (-L[3]/2, L[3]/2),
                            topology = (Periodic, Periodic, Bounded))
 
-    if haskey(out, "x_caa")
-        x = Array(out["x_caa"].var)
-        length(x) == N[1] && isapprox(x, collect(xnodes(grid, Center())); rtol = 1e-12, atol = 1e-12) ||
-            error("the merged x_caa does not match the grid the global attributes describe")
+    for (name, ℓx) in (("x_caa", Center()), ("x_faa", Face()), ("Δx_caa", Center()), ("Δx_faa", Face()))
+        haskey(out, name) || continue
+        slabs = Array(out[name].var)
+        T = eltype(slabs)   # the 2D writer stores its spacings in Float32, as it does its fields
+        global_values = T.(startswith(name, "Δ") ? [xspacings(grid, ℓx)[i, 1, 1] for i in 1:N[1]] : xnodes(grid, ℓx))
+        length(slabs) == N[1] && isapprox(slabs, global_values; rtol = sqrt(eps(T))) ||
+            error("the merged $name does not match the grid the global attributes describe")
+        out[name].var[1:N[1]] = global_values
     end
 
     NCExt.write_grid_reconstruction_data!(out, grid, nothing)
