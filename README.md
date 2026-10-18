@@ -281,7 +281,7 @@ Software rendering costs about **90 seconds per six-panel figure** at Nz=1024, m
 
 ### Subset a run for local plotting
 
-`03_subset_3d.py` writes a small NetCDF of selected fields, times and a z crop, in float32, that `plot7_3d_volume.jl` reads unchanged. It copies the grid reconstruction groups (rewriting the z extent to the crop) and drops `virtual_rank_files`, both of which a plain `to_netcdf` of a sliced dataset would get wrong. Each of `u`, `v` and `w` it keeps brings its filtered counterpart at `--scale` along, which is what `plot7_3d_volume.jl` derives Q, enstrophy and speed from by default, so a figure drawn from the subset matches the one the batch job draws from the run.
+`03_subset_3d.py` writes a small NetCDF of selected fields, times and a z crop, in float32, that `plot7_3d_volume.jl` reads unchanged. It copies the grid reconstruction groups (rewriting the z extent to the crop) and drops `virtual_rank_files`, both of which a plain `to_netcdf` of a sliced dataset would get wrong. Of a `--save_sorted` run (every one-GPU run by default), whose sorted column has a grid of its own, it keeps the model grid alone, under the plain dimension names. Each of `u`, `v` and `w` it keeps brings its filtered counterpart at `--scale` along, which is what `plot7_3d_volume.jl` derives Q, enstrophy and speed from by default, so a figure drawn from the subset matches the one the batch job draws from the run.
 
 ```bash
 cd postprocessing

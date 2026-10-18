@@ -21,6 +21,9 @@
 #     the file when the rank files are absent, which they will be once it has been copied away. So the
 #     source's rank files are checked before anything is read: a missing one would put fill values in
 #     the subset with nothing left to say so.
+#   - a --save_sorted run holds the sorted column on a grid of its own, and a writer holding two grids
+#     suffixes every dimension and prefixes every grid group with its grid's number. The subset keeps
+#     the model grid alone, under the plain names, as a single-grid run writes them.
 #+++ Imports
 import logging
 import os
@@ -29,7 +32,7 @@ from pathlib import Path
 import numpy as np
 import netCDF4
 import xarray as xr
-from src.aux00_utils import check_rank_files, model_grid_suffix
+from src.aux00_utils import GRID_SUFFIX_RE, check_rank_files, model_grid_suffix, strip_grid_suffix
 #---
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
@@ -65,9 +68,10 @@ outfile = args.output or str(Path(filename).with_name(Path(filename).stem + "_su
 #+++ Open and resolve the field names
 ds = xr.open_dataset(filename, decode_times=False, chunks={"time": 1})
 check_rank_files(filename, ds)   # load_dataset_and_grid's guard, which a plain open_dataset skips
-if model_grid_suffix(ds):
-    raise SystemExit("this file holds more than one grid (a --save_sorted run). Subsetting the sorted column too is not "
-                     "handled here; rerun the simulation without --save_sorted, or extend this script")
+# A --save_sorted run holds the sorted column on a grid of its own, and its writer suffixes every dimension with its
+# grid (`z_aac_grid1`): the subset keeps the model grid alone, under the plain names, as a single-grid run writes them.
+suffix = model_grid_suffix(ds)
+ds = strip_grid_suffix(ds, suffix)
 
 
 def resolve(name):
@@ -89,9 +93,10 @@ if args.scale:
     wanted += [name for name in filtered if name in ds and name not in wanted]
 print(f"Keeping {len(wanted)} fields: {', '.join(wanted)}")
 
-# Every time-independent variable comes along: these are the grid's own (Δx_caa, Δy_aca, Δz_aac, ...), which
-# load_dataset_and_grid builds dV from, so it fails on a file without them. They are 1D and cost nothing.
-grid_vars = [v for v in ds.data_vars if "time" not in ds[v].dims and ds[v].size <= ds.sizes.get("z_aaf", 0) + 1]
+# Every time-independent variable of the model grid comes along: these are the grid's own (Δx_caa, Δy_aca, Δz_aac, ...),
+# which load_dataset_and_grid builds dV from, so it fails on a file without them. They are 1D and cost nothing.
+grid_vars = [v for v in ds.data_vars if "time" not in ds[v].dims and ds[v].size <= ds.sizes.get("z_aaf", 0) + 1
+             and not any(GRID_SUFFIX_RE.search(str(d)) for d in ds[v].dims)]
 wanted += [v for v in grid_vars if v not in wanted]
 print(f"Keeping {len(grid_vars)} grid variables: {', '.join(grid_vars)}")
 #---
@@ -138,6 +143,8 @@ for name, da in out.data_vars.items():
     encoding[name] = enc
 
 out.attrs = {k: v for k, v in ds.attrs.items() if k != "virtual_rank_files"}
+if suffix:
+    out.attrs["save_sorted"] = 0   # the sorted column stayed behind with its grid
 out.attrs["subset_of"] = Path(filename).name
 out.attrs["subset_zlim"] = args.zlim
 
@@ -146,13 +153,15 @@ print(f"Writing {outfile} ...")
 out.to_netcdf(tmp, encoding=encoding)
 ds.close()
 
-# Copy the grid groups, which xarray does not carry across, and make the model grid's z match the crop.
+# Copy the grid groups, which xarray does not carry across, and make the model grid's z match the crop. A two-grid
+# file prefixes the model grid's with its number (`grid_1_`); the subset has one grid, so they lose it.
+prefix = f"grid_{suffix.removeprefix('_grid')}_" if suffix else ""
 with netCDF4.Dataset(filename) as src, netCDF4.Dataset(tmp, "a") as dst:
     for name in ("underlying_grid_reconstruction_args", "underlying_grid_reconstruction_kwargs",
                  "grid_reconstruction_metadata"):
-        if name not in src.groups:
+        if prefix + name not in src.groups:
             continue
-        g_src, g_dst = src.groups[name], dst.createGroup(name)
+        g_src, g_dst = src.groups[prefix + name], dst.createGroup(name)
         attrs = {k: g_src.getncattr(k) for k in g_src.ncattrs()}
         if name == "underlying_grid_reconstruction_kwargs":
             attrs["z"] = np.array([z_lo, z_hi])

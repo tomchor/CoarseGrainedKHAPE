@@ -133,7 +133,20 @@ allow_virtual_storage!()
 # variable of a 03_subset_3d.py subset declares one (xarray's default for floats); the simulation's own
 # files declare none, so for them nothing changes. A masked value stays NaN, which `prepare` filters out.
 ds = NCDataset(filepath, "r"; maskingvalue = NaN)
-x, y, z = ds["x_caa"][:], ds["y_aca"][:], ds["z_aac"][:]
+
+# A --save_sorted run writes the sorted column on a grid of its own, and a writer holding two grids suffixes every
+# dimension with its grid's number (`x_caa_grid1`). The model grid's suffix is read off b's dimensions, as
+# model_grid_suffix does in postprocessing/src/aux00_utils.py; it is "" for a single-grid file.
+function model_grid_suffix(ds)
+    haskey(ds, "b") || return ""
+    for dim in dimnames(ds["b"])
+        m = match(r"_grid\d+$", dim)
+        isnothing(m) || return m.match
+    end
+    return ""
+end
+suffix  = model_grid_suffix(ds)
+x, y, z = ds["x_caa"*suffix][:], ds["y_aca"*suffix][:], ds["z_aac"*suffix][:]
 times   = ds["time"][:]
 n = isnothing(tsel) ? length(times) : argmin(abs.(times .- tsel))
 t = times[n]
