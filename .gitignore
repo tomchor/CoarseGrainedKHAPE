@@ -28,3 +28,4 @@ figures_check/*.pdf
 figures/*.png
 figures/*.pdf
 bathymetry/*nc
+animations/*_ranges.toml

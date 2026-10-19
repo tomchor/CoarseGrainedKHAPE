@@ -260,13 +260,14 @@ When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it 
 
 ### Render 3D isosurfaces
 
-`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default, and the default panels are the six-term budget set at ℓ = 1.
+`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default: the six-term budget set at ℓ = 1, in three rows of two (`COLS`), with 800 ray-march steps per isosurface ray (`SAMPLES`) and a shell half-width of 0.02 of each panel's range (`ISORANGE`; `auto` for Makie's own, ~0.034 at six levels).
 
 ```bash
 cd postprocessing
 bash submit_render3d.sh TIMES=100,120,140                      # default Nz=1024, the six budget terms at l=1
 bash submit_render3d.sh FROM=60 TO=160 EVERY=10                # a strided range instead of a list: 11 figures
 bash submit_render3d.sh TIMES=120 LEVELS=2                     # one time, fewer isosurfaces: much faster
+bash submit_render3d.sh TIMES=120 SAMPLES=200 ISORANGE=auto     # Makie's own rays and shells
 bash submit_render3d.sh TIMES=100,140 FIELDS=Q,enstrophy       # other panels; bare names pick up _l<SCALE>
 bash submit_render3d.sh TIMES=120 FILE=/glade/derecho/scratch/someone/khi_Nz1024_Ri0.10.nc
 # one row per budget: tendency / conversion / flux / dissipation
@@ -277,7 +278,44 @@ A `-` prefix on a field negates it, for a term that enters two budgets with oppo
 
 **The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
 
-Software rendering costs about **90 seconds per six-panel figure** at Nz=1024, measured on a Casper CPU node, so the job is sequential in the times and its 6 h walltime covers about 200 of them. A handful finishes in minutes; PBS charges what is used, not what is asked, though a shorter request does schedule sooner. `LEVELS=2` and a smaller `ZLIM` are faster still. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `03_subset_3d.py` (below) is for.
+Software rendering costs about **2 minutes per six-panel figure** at Nz=1024 and the default `SAMPLES=800` (90 s at 200), measured on a Casper CPU node, so the job renders its times one after another, in one Julia process, and its 6 h walltime covers about 150 of them. `ISORANGE` is not a smoothing knob: the visible surface sits at level ± `ISORANGE`, so a wider shell draws each surface further out and weak features near a level appear or vanish with it. Neither setting is in the figure name, so a render at another value replaces the last one at that time. A handful finishes in minutes; PBS charges what is used, not what is asked, though a shorter request does schedule sooner. `LEVELS=2` and a smaller `ZLIM` are faster still. `NCPUS` (default 4) sets the job's cores: Mesa's llvmpipe rasteriser renders with all of them (`LP_NUM_THREADS`), its softpipe fallback with one. The log names the renderer that ran (`OpenGL renderer: ...`) and the time of every frame, split into preparing the fields and rendering them (the first includes Julia's compilation), so a preview at `NCPUS=16` against one at 4 shows directly whether more cores pay. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `03_subset_3d.py` (below) is for.
+
+### 3D thumbnail
+
+`THUMBNAIL=1` draws a journal thumbnail (JFM asks for one) at each of `TIMES`: a single field, `Π_A` unless `FIELDS` names another, with no text at all (no title, colourbar, axis labels or ticks), at exactly 1.2:1, 1200 × 1000 figure units, which is 2400 × 2000 px at the default `PX_PER_UNIT=2`. Everything else is the figure's: the same isosurface levels (`LEVELS`/`FRACTIONS`), samples, crop, camera and buoyancy contours on the walls. It is saved as `figures/<run>_3dvol_<field>_l<SCALE>_thumbnail_t<time>.png`, so it never replaces the six-panel figure, and logs to `logs/render3d_Nz<NZ>_Ri0.10_thumbnail.{log,out}`. plot7 checks the saved image's pixels are 6:5 and fails otherwise. Locally, `--thumbnail 1200` (any multiple of 6) with one `--field`.
+
+```bash
+bash submit_render3d.sh THUMBNAIL=1 TIMES=100,120,140          # Π_A at three times, to choose from
+bash submit_render3d.sh THUMBNAIL=1 TIMES=90 ZLIM=3 FRAME=0     # tighter crop, no box: the data and the wall contours only
+bash submit_render3d.sh THUMBNAIL=1 TIMES=120 FIELDS=Q          # another field
+```
+
+`FRAME` (1 draws the box edges, 0 leaves only the data) and `BACKGROUND` (any Makie colour, default white) are the thumbnail's own; `AZIMUTH` and `ELEVATION` move the camera (units of π, defaults 1.30 and 0.12) for figures too. Two things to know when tuning the crop. Each panel's range is the 99th percentile of |field| within the crop, so `ZLIM` moves the levels' physical values with it and can bring weak outer surfaces in or out; and a crop that cuts through the outer buoyancy contours leaves short vertical stubs where they leave the walls (|z| < 2.5 does on the Nz=128 run, 3 and 4 do not). Neither `ZLIM` nor `FRAME` is in the file name, so a render with other values replaces the last one at that time.
+
+### Animate the 3D fields
+
+`ANIMATE=1` makes the job render a window of records as an animation instead of figures. A standalone figure scales each panel by its own 99th percentile at that time, which in a movie would hide growth and decay; an animation fixes each panel's scale over the whole window instead, so a surface means the same value in every frame, and structure appears as the billow grows and fades as it decays.
+
+```bash
+bash submit_render3d.sh ANIMATE=1                              # every record from t = 10 to the end, at 10 fps
+bash submit_render3d.sh ANIMATE=1 FROM=20 TO=150 EVERY=4       # a window, one frame every 4 time units
+bash submit_render3d.sh PREVIEW=1                              # a quick test: every 20 time units, half resolution
+bash submit_render3d.sh ANIMATE=1 RANGE_WINDOW=90:             # the whole run, scaled by its 3D stage
+bash submit_render3d.sh ANIMATE=1 RANGE_STAT=p90 FPS=15 \
+    RANGES=../animations/khi_Nz1024_Ri0.10_3dvol_6panel_l1_ranges.toml   # reuse the measured scales
+```
+
+The job runs two passes of `plot7_3d_volume.jl`. The first (`--measure`) draws nothing: it writes every panel's 99th percentile of |field|, and its minimum and maximum, at each record to `animations/<name>_ranges.toml`. The second (`--ranges`) renders the frames against those scales into `animations/frames/<name>/` and joins them into `animations/<name>.mp4` with Makie's own ffmpeg, so no module is needed; `<name>` is the figure's name without the time, e.g. `khi_Nz1024_Ri0.10_3dvol_6panel_l1`. Each panel's fixed scale is `RANGE_STAT` of its series (`max` by default, so nothing saturates; `pNN` for a percentile over time), and a panel that changes sign at any record keeps its symmetric pair of surfaces in every frame. `FROM` defaults to 10, past the small-amplitude phase that a fixed scale would render as empty frames; `TO` to the last record; `EVERY` to every record. `RANGES` reuses an earlier job's measured scales, skipping the first pass. `PREVIEW=1` is a quick test of the whole job: an animation with one frame every 20 time units (`EVERY=20`) at half the resolution (`PX_PER_UNIT=1`, a quarter of the pixels), under names of its own (`<name>_preview.mp4`, its own ranges file and frames), so it never replaces the full animation; levels and samples stay as they are, and an `EVERY` or `PX_PER_UNIT` given explicitly overrides it. Its logs are `logs/render3d_Nz<NZ>_Ri0.10_preview.{log,out}`, as a full animation's are `..._anim.{log,out}` (figures keep `render3d_Nz<NZ>_Ri0.10`), so a preview and a full animation can run at the same time. Its scales come from those frames' records only, so they can sit a little below the full run's peak. Every other option (`FIELDS`, `LEVELS`, `SAMPLES`, ...) applies as it does to a figure, and the ranges file refuses a render whose crop, percentile, filter scale or velocity differs from the one it was measured with.
+
+Fixed by the peak, the dissipation panels empty out late in the run: on the Nz=128 test run every budget term peaks during breaking (t ≈ 48–64), and by t = 100 ε_Kˢ and ε_Aˢ are 7–14× below their peaks. The 1024 preview shows the same for τ(w,b_r), Π_A and ε_Aˢ, whose peaks come from the primary 2D billow (t ≈ 40–60), so the fine structure of the 3D stage falls below their weakest surface. `RANGE_WINDOW=FROM:TO` (either end optional, e.g. `90:`) takes each panel's scale from those times only while still animating the whole window: the 3D stage then fills its surfaces, and the earlier frames saturate, every surface up to the innermost reached wherever a term exceeds its scale, which the titles' "(fixed)" range states. Animating only the later phase (`FROM=80`) is the alternative that saturates nothing.
+
+Locally the same two passes are:
+
+```bash
+julia +1.13 --project postprocessing/plot7_3d_volume.jl <file> --field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale 1 --mode isosurface --overlay b --from 10 --measure ranges.toml
+julia +1.13 --project postprocessing/plot7_3d_volume.jl <file> --field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale 1 --mode isosurface --overlay b --from 10 \
+    --ranges ranges.toml --frame-dir frames --movie anim.mp4
+```
 
 ### Subset a run for local plotting
 
