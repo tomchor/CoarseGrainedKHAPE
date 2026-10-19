@@ -395,3 +395,7 @@ Each job writes its logs to the `logs/` directory beside its PBS script: `logs/`
 - for a multi-GPU run, also `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` (every GPU's memory every 10 s); the merge writes to the simulation's own `.out`
 
 The simulation job is named `kelvin_helmholtz_<NZ>`. The others follow the pattern `<stage>_Nz<NZ>_Ri0.10`, e.g. `budgeting_Nz512_Ri0.10`, `sweep_filter_Nz512_Ri0.10`, `validation_Nz512_Ri0.10`, `plots_Nz512_Ri0.10` and `render3d_Nz512_Ri0.10`. The 3D render adds `_anim`, `_preview` or `_thumbnail` for an animation, a preview or a thumbnail, the sweep transfer adds `_fixed_ref` for `FIXED_REF=1`, both sweep jobs add `_odd` for `EXTENSION=odd`, and a split transfer's jobs add `_part<K>of<N>`, the one that joins them `_merge`. The wall-extension test is `extension_test_Nz<NZ>_l<SCALE>_<EXTENSION>`.
+
+## License
+
+The code is released under the MIT License; see [LICENSE](LICENSE).
