@@ -270,4 +270,3 @@ dependencies:
   - zlib-ng=2.2.5=hde8ca8f_0
   - zstandard=0.25.0=py313h54dd161_1
   - zstd=1.5.7=hb8e6e7a_2
-prefix: /glade/u/home/tomasc/miniconda3/envs/py313

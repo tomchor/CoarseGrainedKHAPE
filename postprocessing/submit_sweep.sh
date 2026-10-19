@@ -21,8 +21,9 @@ for arg in "$@"; do case $arg in
   PLOTS=*)       PLOTS="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, FIXED_REF=, N_TIME_SKIP=, EXTENSION=, SWEEP_PARTS=, FILTER= or PLOTS=)" >&2; exit 2;;
 esac; done
-# The allocation to charge and the Python to run: defaults in khape_defaults.sh, overridden from the environment.
+# The allocation to charge and the Python to run: from the environment, khape_local.sh or khape_defaults.sh.
 source "$(dirname "$0")/../khape_defaults.sh"
+check_khape_account
 check_khape_python
 case $EXTENSION in edge|odd) ;; *) echo "EXTENSION must be edge or odd, not '$EXTENSION'" >&2; exit 2;; esac
 [ "$EXTENSION" = "edge" ] && EXT_TAG="" || EXT_TAG="_${EXTENSION}"

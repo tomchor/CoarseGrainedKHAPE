@@ -25,9 +25,10 @@ for arg in "$@"; do case $arg in
   OFFLINE_CHECK=*) OFFLINE_CHECK="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=, NGPUS=, SAVE_TENSORS=, SAVE_SORTED= or OFFLINE_CHECK=)" >&2; exit 2;;
 esac; done
-# The allocation to charge, and the Python for the figures simulation.pbs draws after the run: defaults in
-# khape_defaults.sh, overridden from the environment.
+# The allocation to charge, and the Python for the figures simulation.pbs draws after the run: from the environment,
+# khape_local.sh or khape_defaults.sh.
 source "$(dirname "$0")/khape_defaults.sh"
+check_khape_account
 check_khape_python
 NGPUS=${NGPUS:-$(default_ngpus $NZ)} || exit 2
 if [ "$NGPUS" = "1" ]; then

@@ -1,8 +1,11 @@
-# Defaults for the submit wrappers: the project to charge and the python of the py313 environment. Every
-# submit_*.sh sources this file, so this is the one place to change either; a value already set in the
-# environment (export KHAPE_ACCOUNT=..., KHAPE_PYTHON=...) wins. The .pbs files do not read this file: the
-# wrapper hands them the values (qsub -A and -v). See the README, Environment.
-KHAPE_ACCOUNT=${KHAPE_ACCOUNT:-UMCP0061}
+# Settings for the submit wrappers: the project to charge and the python of the py313 environment. Every submit_*.sh
+# sources this file, which reads them from the environment (export KHAPE_ACCOUNT=..., KHAPE_PYTHON=...), then from
+# khape_local.sh beside it, then from the defaults below. khape_local.sh holds one machine's or one user's settings and
+# is ignored by git; it is sourced, so its lines read KHAPE_ACCOUNT=${KHAPE_ACCOUNT:-ABCD0001} for the environment to
+# keep precedence. The project to charge has no default, so no account is in the repository. The .pbs files do not
+# read this file: the wrapper hands them the values (qsub -A and -v). See the README, Environment.
+KHAPE_LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/khape_local.sh"
+if [ -f "$KHAPE_LOCAL" ]; then source "$KHAPE_LOCAL"; fi
 KHAPE_PYTHON=${KHAPE_PYTHON:-$HOME/miniconda3/envs/py313/bin/python}
 
 # Optional output redirection: $KHAPE_OUTPUT_DIR (simulation output) and $KHAPE_PP_OUTPUT (post-processing output),
@@ -12,6 +15,14 @@ KHAPE_PYTHON=${KHAPE_PYTHON:-$HOME/miniconda3/envs/py313/bin/python}
 KHAPE_REDIRECT=""
 [ -n "${KHAPE_OUTPUT_DIR:-}" ] && KHAPE_REDIRECT="$KHAPE_REDIRECT,KHAPE_OUTPUT_DIR=$KHAPE_OUTPUT_DIR"
 [ -n "${KHAPE_PP_OUTPUT:-}" ]  && KHAPE_REDIRECT="$KHAPE_REDIRECT,KHAPE_PP_OUTPUT=$KHAPE_PP_OUTPUT"
+
+# For every wrapper: fail at submission, not in the queue, when there is no project to charge.
+check_khape_account() {
+    [ -n "${KHAPE_ACCOUNT:-}" ] && return 0
+    echo "error: KHAPE_ACCOUNT is not set; set it to the project to charge, in the environment or in $KHAPE_LOCAL" \
+         "(see the README, Environment)" >&2
+    exit 2
+}
 
 # For the wrappers that submit Python jobs: fail at submission, not in the queue, when the interpreter is not there.
 check_khape_python() {

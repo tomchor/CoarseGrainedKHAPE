@@ -83,9 +83,10 @@ if [ -z "$TIMES" ]; then
     [ "$TIMES" != "BADSTEP" ] || { echo "error: EVERY=$EVERY must be positive" >&2; exit 2; }
     [ "$TIMES" != "EMPTY" ]   || { echo "error: TO=$TO is before FROM=$FROM" >&2; exit 2; }
 fi
-# The allocation to charge: default in khape_defaults.sh, overridden from the environment. No Python here --
+# The allocation to charge: from the environment or khape_local.sh, through khape_defaults.sh. No Python here --
 # this job is Julia only -- but KHAPE_OUTPUT_DIR still has to reach it, which $KHAPE_REDIRECT carries.
 source "$(dirname "$0")/../khape_defaults.sh"
+check_khape_account
 
 # `qsub -v` splits its own list on commas, so the times travel colon-separated. Spaces are accepted on this
 # side for convenience and normalised here.
