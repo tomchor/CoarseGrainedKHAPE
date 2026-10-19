@@ -1,12 +1,10 @@
 # Exploratory: volume render and isosurfaces of one snapshot of a 3D run.
 #
-#   julia --project postprocessing/plot7_3d_volume.jl <3d_output_filepath> [--field b] [--mode both] ...
+#   julia --project postprocessing/plot7_3d_volume.jl [file] [options]     # --help lists the options
 #
-# One --field lays the panels out by mode (volume and isosurface of it); a comma-separated list lays them
-# out by field, one panel each, in the single --mode given. --scale appends the _ℓ<ℓ> every budget term
-# carries, so the six-term budget figure is one readable line:
-#
-#   ... --field Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As --scale 1 --mode isosurface --time 108
+# With no arguments it draws Q and the five budget terms at ℓ = 1 and t = 100 of the Nz = 1024 run, in three rows
+# of two: figures/khi_Nz1024_Ri0.10_3dvol_6panel_l1_t100.0.png. One --field with --mode both draws its volume
+# render and its isosurfaces side by side instead.
 #
 # Several times render in one process (`--times 100,120` or `--from 10 --to 200 [--every 4]`), one figure
 # each, exactly as a single --time would draw it. Each panel is scaled by its own 99th percentile at that
@@ -23,6 +21,7 @@
 # The isosurface is the more useful of the two modes for this flow -- Q or enstrophy picks out the
 # streamwise vortices that braid the billow, which is the whole reason the simulation went 3D.
 
+using ArgParse
 using NCDatasets
 using GLMakie
 using Printf
@@ -39,141 +38,206 @@ fractions(lo, hi, n) = n <= 1 ? [hi] : collect(range(lo, hi, n))
 
 
 #+++ Arguments
-# Deliberately hand-rolled rather than ArgParse: this is called by hand, and keeping it dependency-light
-# means it also runs under `julia --project` with nothing precompiled beyond Makie and NCDatasets.
-length(ARGS) > 0 || error("Usage: julia --project postprocessing/plot7_3d_volume.jl <3d_output_filepath> [--field F] [--mode M] ...")
-filepath = ARGS[1]
-opts = Dict{String,String}()
-for i in 2:2:length(ARGS)-1
-    startswith(ARGS[i], "--") || error("expected a --flag at argument $i, got $(ARGS[i])")
-    opts[ARGS[i][3:end]] = ARGS[i+1]
+settings = ArgParseSettings(description = "Volume render and isosurfaces of one snapshot of a 3D run.")
+@add_arg_table! settings begin
+    "file"
+        help = "3D output file; a relative path is taken from the repository root"
+        required = false
+        default = joinpath(get(ENV, "KHAPE_OUTPUT_DIR", "output"), "khi_Nz1024_Ri0.10.nc")
+    "--field"
+        help = "comma-separated panels; a '-' prefix negates a field and a lone '.' leaves a cell empty"
+        default = "Q,wb_rs,Π_K,Π_A,ε_Ks,ε_As"
+    "--scale"
+        help = "filter scale ℓ, appended as _ℓ<ℓ> to the per-scale names ('' for none)"
+        default = "1"
+    "--mode"
+        help = "volume, isosurface, or both (one --field, a panel per mode)"
+        default = "isosurface"
+        range_tester = in(("volume", "isosurface", "both"))
+    "--cols"
+        help = "panels per row"
+        arg_type = Int
+        default = 2
+    "--zlim"
+        help = "crop to |z| < zlim"
+        arg_type = Float64
+        default = 4.0
+    "--clim-percentile"
+        help = "percentile of |field| that sets each panel's range"
+        arg_type = Float64
+        default = 99.0
+    "--derived-from"
+        help = "velocity Q, enstrophy and speed are built from: filtered (at --scale) or full"
+        default = "filtered"
+        range_tester = in(("filtered", "full"))
+    "--samples"
+        help = "ray-march steps per ray (Makie's 200 is coarser than the Nz = 1024 grid)"
+        arg_type = Int
+        default = 800
+    "--isorange"
+        help = "isosurface shell half-width, in units of each panel's range, or auto for Makie's; wider draws surfaces further out"
+        default = "0.02"
+    "--alpha"
+        help = "isosurface alpha"
+        arg_type = Float64
+        default = 0.35
+    "--colormap"
+        help = "colormap of every panel"
+        default = "balance"
+    "--azimuth"
+        help = "camera azimuth, in units of π"
+        arg_type = Float64
+        default = 1.30
+    "--elevation"
+        help = "camera elevation, in units of π"
+        arg_type = Float64
+        default = 0.12
+    "--px-per-unit"
+        help = "pixels per figure unit"
+        arg_type = Float64
+        default = 2.0
 end
-# A field may be prefixed "-" to negate it, for a term that enters two budgets with opposite sign, and a
-# lone "." leaves a cell empty, so a row with fewer terms than the grid is wide keeps its alignment.
-# --field takes one name or a comma-separated list. One name lays the panels out by --mode (volume and/or
-# isosurface of that field); several lay them out by field, one panel each, in the single --mode given.
-fields  = String.(split(get(opts, "field", "b"), ","))
-scale   = get(opts, "scale", "")               # appended as _ℓ<scale> to any name that needs it (see resolve)
-mode    = get(opts, "mode", "both")            # volume | isosurface | both
-cols    = parse(Int, get(opts, "cols", "2"))
-tsel    = haskey(opts, "time") ? parse(Float64, opts["time"]) : nothing
-# Several times: an explicit list, or a window [from, to] taken every record or every `every` in time. Each
-# requested time goes to the nearest record, as --time does, and a record asked for twice renders once.
-tlist   = haskey(opts, "times") ? [parse(Float64, s) for s in split(opts["times"], ",")] : nothing
-t_from  = haskey(opts, "from") ? parse(Float64, opts["from"]) : nothing
-t_to    = parse(Float64, get(opts, "to", "Inf"))
-t_every = haskey(opts, "every") ? parse(Float64, opts["every"]) : nothing
-count(!isnothing, (tsel, tlist, t_from)) <= 1 || error("--time, --times and --from are alternatives; give one")
-!(haskey(opts, "to") || haskey(opts, "every")) || !isnothing(t_from) || error("--to and --every need --from")
-isnothing(t_every) || t_every > 0 || error("--every must be positive; got $t_every")
-# The fixed scale for an animation. --measure writes, for every panel (and the overlay), its --clim-percentile
-# of |field| and its min and max at each requested time, and draws nothing. --ranges reads such a file and
-# fixes each panel's range at --range-stat of that series (max, or pNN for a percentile over time) within
-# --range-window FROM:TO, and fixes whether it is drawn signed: a field that changes sign at any of those
-# times keeps its symmetric pair of surfaces throughout, rather than gaining or losing them mid-animation.
-measure_file = get(opts, "measure", nothing)
-ranges_file  = get(opts, "ranges", nothing)
+add_arg_group!(settings, "overlay")
+@add_arg_table! settings begin
+    "--overlay"
+        help = "reference field drawn on every panel ('' for none)"
+        default = "b"
+    "--overlay-style"
+        help = "wall: contours on the two vertical walls; iso: isosurfaces in the box, which hide the panel's own"
+        default = "wall"
+        range_tester = in(("wall", "iso"))
+    "--overlay-levels"
+        help = "contour lines (wall) or isosurfaces (iso) of the overlay, by default 10 or 1"
+        arg_type = Int
+    "--overlay-color"
+        help = "colour of iso overlay surfaces"
+        default = "seagreen"
+    "--overlay-alpha"
+        help = "alpha of iso overlay surfaces"
+        arg_type = Float64
+        default = 0.45
+    "--overlay-clip"
+        help = "fraction of y an iso overlay spans"
+        arg_type = Float64
+        default = 0.45
+end
+add_arg_group!(settings, "records (one of)"; exclusive = true)
+@add_arg_table! settings begin
+    "--time"
+        help = "draw the record nearest this time"
+        arg_type = Float64
+        default = 100.0
+    "--times"
+        help = "comma-separated times, one figure each"
+    "--from"
+        help = "every record from this time on (see --to and --every)"
+        arg_type = Float64
+end
+add_arg_group!(settings, "isosurface levels (one of)"; exclusive = true)
+@add_arg_table! settings begin
+    "--levels"
+        help = "surfaces per signed panel, spread over 0.18–0.85 of its range; a panel of one sign gets half"
+        arg_type = Int
+        default = 6
+    "--fractions"
+        help = "comma-separated fractions of each panel's range to place the surfaces at"
+end
+add_arg_group!(settings, "windows (--from) and animations")
+@add_arg_table! settings begin
+    "--to"
+        help = "end of the --from window, by default the last record"
+        arg_type = Float64
+    "--every"
+        help = "step in time through the --from window, by default every record"
+        arg_type = Float64
+        range_tester = >(0)
+    "--measure"
+        help = "write each panel's scale at every record to this TOML file, drawing nothing"
+    "--ranges"
+        help = "fix each panel's scale from a --measure file"
+    "--range-stat"
+        help = "statistic of each panel's measured series that fixes its scale: max or pNN"
+        default = "max"
+        range_tester = s -> s == "max" || occursin(r"^p\d+(\.\d+)?$", s)
+    "--range-window"
+        help = "FROM:TO, the measured times the scales come from; either end optional"
+        default = ":"
+    "--frame-dir"
+        help = "write numbered frames here instead of named figures"
+    "--movie"
+        help = "join the frames into this mp4"
+    "--fps"
+        help = "frames per second of the movie"
+        arg_type = Int
+        default = 10
+end
+add_arg_group!(settings, "thumbnail")
+@add_arg_table! settings begin
+    "--thumbnail"
+        help = "draw one field with no text, W units wide and W/1.2 high (W a multiple of 6)"
+        arg_type = Int
+    "--background"
+        help = "thumbnail background colour"
+        default = "white"
+    "--frame"
+        help = "1 draws the thumbnail's box edges, 0 leaves only the data"
+        arg_type = Int
+        default = 1
+        range_tester = in((0, 1))
+end
+
+args = parse_args(settings)
+filepath     = args["file"]
+fields       = String.(split(args["field"], ","))
+scale        = args["scale"]
+mode         = args["mode"]
+cols         = args["cols"]
+tsel         = args["time"]
+tlist        = isnothing(args["times"]) ? nothing : parse.(Float64, split(args["times"], ","))
+t_from       = args["from"]
+t_to         = something(args["to"], Inf)
+t_every      = args["every"]
+isnothing(args["to"]) && isnothing(t_every) || !isnothing(t_from) || error("--to and --every need --from")
+measure_file = args["measure"]
+ranges_file  = args["ranges"]
 isnothing(measure_file) || isnothing(ranges_file) || error("--measure and --ranges are the two passes; give one")
-range_stat   = get(opts, "range-stat", "max")
-range_stat == "max" || occursin(r"^p\d+(\.\d+)?$", range_stat) || error("--range-stat must be max or pNN; got $range_stat")
-# Either end may be left open: "90:" is from t = 90 to the last measured time.
-window_ends = split(get(opts, "range-window", ":"), ":")
-length(window_ends) == 2 || error("--range-window takes FROM:TO, either end optional; got $(opts["range-window"])")
+range_stat   = args["range-stat"]
+window_ends  = split(args["range-window"], ":")
+length(window_ends) == 2 || error("--range-window takes FROM:TO, either end optional; got $(args["range-window"])")
 range_window = (isempty(window_ends[1]) ? -Inf : parse(Float64, window_ends[1]),
                 isempty(window_ends[2]) ? Inf : parse(Float64, window_ends[2]))
-# Frames for a movie: frame_0001.png, ... in --frame-dir, numbered in time order, instead of the usual named
-# figures, so an animation can never overwrite a standalone figure. --movie joins them with Makie's own
-# ffmpeg (FFMPEG_jll), at --fps frames per second.
-frame_dir = get(opts, "frame-dir", nothing)
-movie     = get(opts, "movie", nothing)
-fps       = parse(Int, get(opts, "fps", "10"))
+frame_dir    = args["frame-dir"]
+movie        = args["movie"]
+fps          = args["fps"]
 isnothing(movie) || !isnothing(frame_dir) || error("--movie joins the frames --frame-dir writes; give both")
-zlim   = parse(Float64, get(opts, "zlim", "4.0"))
-pct     = parse(Float64, get(opts, "clim-percentile", "99.0"))
-# Where the isosurfaces sit, as fractions of each panel's own colour range. By default --levels n spreads
-# n/2 of them evenly over 0.18-0.85; --fractions places them explicitly instead, e.g. "0.1,0.5,0.85". The
-# two are alternatives, not a pair.
-if haskey(opts, "levels") && haskey(opts, "fractions")
-    error("--levels and --fractions both set; they are alternative ways to place the same surfaces")
-end
-nlevels = parse(Int, get(opts, "levels", "6"))
-level_fracs = haskey(opts, "fractions") ?
-              [parse(Float64, f) for f in split(opts["fractions"], ",")] :
-              fractions(0.18, 0.85, nlevels ÷ 2)
+zlim         = args["zlim"]
+pct          = args["clim-percentile"]
+level_fracs  = isnothing(args["fractions"]) ? fractions(0.18, 0.85, args["levels"] ÷ 2) :
+               parse.(Float64, split(args["fractions"], ","))
 all(0 .< level_fracs .<= 1) || error("--fractions must lie in (0, 1]; got $level_fracs")
-alpha   = parse(Float64, get(opts, "alpha", "0.35"))
-# The diverging map every panel is drawn on. :balance (cmocean) by default; the perceptually uniform
-# Scientific Colour Maps (:vik, :broc, :berlin, :cork, ...) and the ColorBrewer names also work.
-cmap_name = Symbol(get(opts, "colormap", "balance"))
-# Camera, in units of π, as Makie's Axis3 takes it. Azimuth π looks straight down +x, so the streamwise
-# direction is fully into the page; 1.5π looks along +y and gives x the full width but puts y edge-on and
-# collides its labels. 1.3π is where x still spans nearly the whole frame and y keeps enough depth to read.
-azim    = parse(Float64, get(opts, "azimuth", "1.30"))
-elev    = parse(Float64, get(opts, "elevation", "0.12"))
-# A second field drawn as isosurfaces over every panel, in grey, as a shared reference: b traces the
-# deformed interface the budget terms live on, which is otherwise invisible in a Q or Π panel.
-overlay   = get(opts, "overlay", "")
-ov_alpha  = parse(Float64, get(opts, "overlay-alpha", "0.45"))
-# One flat colour, not a colormap, and deliberately not grey: the panels use :balance (blue-white-red), whose
-# middle *is* grey, so a grey overlay reads as washed-out data rather than as context. A saturated hue off that
-# axis stays legibly separate. Any Makie colour name works.
-ov_color  = Symbol(get(opts, "overlay-color", "seagreen"))
-ov_clip   = parse(Float64, get(opts, "overlay-clip", "0.45"))
-# Which velocity Q, enstrophy and speed are built from: the filtered field at --scale, or the full one.
-# Filtered by default, so they sit on the same scale as the budget terms beside them. Note this makes them
-# consistent in *velocity*, not in decomposition: Q(ū) is a resolved-scale quantity where Π_K, ε_Kˢ, ε_Aˢ
-# and τ are sub-filter, and Q, being quadratic in gradients, has no natural resolved/sub-filter split.
-# Rendered pixels per logical unit. The isosurfaces are a raymarched/transparent mesh, so the output is a
-# raster however it is saved -- a PDF would just embed the same bitmap. Raising this is the only way to
-# sharpen the edges; it does not touch the marching-cubes faceting, which is set by the data grid.
-px_per_unit = parse(Float64, get(opts, "px-per-unit", "2"))
-# A 3D contour is not a mesh: Makie raymarches the box and draws a step wherever the value lies within
-# ±isorange of a level, lighting it with a normal finite-differenced at the step size. --samples is the
-# number of steps per ray (800 by default: Makie's 200 is coarser than the data at Nz=1024, and 800 cost
-# ~2 min per six-panel figure there against ~90 s). --isorange is the shell half-width in the normalised
-# (-1, 1) units every panel is drawn in: 0.02 by default, and "auto" for Makie's own, a tenth of the
-# smallest gap between levels (~0.034 at the default six). The visible surface is where a ray first meets
-# level ± isorange, so a wider shell draws each surface that much further out: on the Nz=128 run, Q's
-# −0.515 blobs show at ~0.034, vanish at 0.015 and spread into sheets at 0.06. More samples only sharpen
-# the edges.
-samples  = parse(Int, get(opts, "samples", "800"))
-isorange_arg = get(opts, "isorange", "0.02")
-isorange = isorange_arg == "auto" ? Makie.automatic : parse(Float64, isorange_arg)
-derived_from = get(opts, "derived-from", "filtered")
-derived_from in ("filtered", "full") || error("--derived-from must be filtered or full; got $derived_from")
-# How the overlay is drawn. `wall` paints it on the bounding planes behind the data, `iso` draws it as
-# isosurfaces in the box.
-#
-# `wall` is the default because `iso` does not work here, for a reason no amount of tuning fixes: two sets
-# of interpenetrating isosurfaces always fight. Transparency cannot separate them, because GLMakie ignores
-# alpha on a volume contour (--overlay-alpha 0.05 and 1.0 render byte-identically), so the overlay is a
-# solid sheet across whatever the panel is about. Clipping it to a curtain helps a little and still looks
-# cluttered. On the wall the same field is context, not a competing object, and occludes nothing.
-ov_style  = get(opts, "overlay-style", "wall")
-# Lines on a wall want more of them than surfaces in the volume want of themselves, so the default differs.
-ov_levels = parse(Int, get(opts, "overlay-levels", ov_style == "wall" ? "10" : "1"))
-# A deliberately low-contrast ramp for the walls: no black, no white. A full-range map (:bone, :grays)
-# bottoms out at black, and a big black panel behind the data reads as a rendering fault rather than as
-# background. Named maps still work via --overlay-colormap.
-ov_cmap   = haskey(opts, "overlay-colormap") ? Symbol(opts["overlay-colormap"]) : cgrad([:gray88, :gray52])
-ov_style in ("wall", "iso") || error("--overlay-style must be wall or iso; got $ov_style")
-# A thumbnail (JFM's, for one): one field, no text at all -- no title, colourbar, axis labels or ticks --
-# at an aspect ratio of exactly 1.2:1. --thumbnail W sets the width in figure units and the height is W/1.2,
-# so W must be a multiple of 6 for a whole number of units; the pixels are those times --px-per-unit (the
-# default 1200 at 2 gives 2400 x 2000). The box frame and the overlay's wall contours stay: they are what
-# makes it read as a volume. The camera, levels and overlay are the usual flags.
-thumb_w = haskey(opts, "thumbnail") ? parse(Int, opts["thumbnail"]) : nothing
-# The thumbnail's background (any Makie colour; a dark one, e.g. black or "#0b1a2e", makes saturated surfaces
-# stand out at the size a journal shows it) and whether the box's edges are drawn (--frame 0 leaves only the data).
-thumb_bg    = parse(Makie.Colors.Colorant, get(opts, "background", "white"))
-thumb_frame = get(opts, "frame", "1") == "1"
+alpha        = args["alpha"]
+cmap_name    = Symbol(args["colormap"])
+azim         = args["azimuth"]
+elev         = args["elevation"]
+overlay      = args["overlay"]
+ov_style     = args["overlay-style"]
+ov_levels    = something(args["overlay-levels"], ov_style == "wall" ? 10 : 1)
+ov_color     = Symbol(args["overlay-color"])
+ov_alpha     = args["overlay-alpha"]
+ov_clip      = args["overlay-clip"]
+px_per_unit  = args["px-per-unit"]
+samples      = args["samples"]
+isorange     = args["isorange"] == "auto" ? Makie.automatic : parse(Float64, args["isorange"])
+derived_from = args["derived-from"]
+thumb_w      = args["thumbnail"]
+thumb_bg     = parse(Makie.Colors.Colorant, args["background"])
+thumb_frame  = args["frame"] == 1
 if !isnothing(thumb_w)
     thumb_w > 0 && thumb_w % 6 == 0 || error("--thumbnail W must be a positive multiple of 6, so W/1.2 is whole; got $thumb_w")
     length(fields) == 1 && only(fields) != "." || error("--thumbnail draws one field; got --field $(join(fields, ","))")
     mode != "both" || error("--thumbnail draws one panel; give --mode isosurface or volume")
     isnothing(frame_dir) && isnothing(measure_file) || error("--thumbnail makes stills; it takes no --frame-dir or --measure")
 end
-mode in ("volume", "isosurface", "both") || error("--mode must be volume, isosurface or both; got $mode")
 length(fields) == 1 || mode != "both" ||
     error("--mode both lays panels out by mode, so it takes one --field; got $(length(fields)). Pick --mode isosurface or volume.")
 
@@ -225,7 +289,7 @@ elseif !isnothing(t_from)
     isnothing(t_every) ? in_window :
         unique(nearest.(range(times[first(in_window)], times[last(in_window)] + 1e-9 * t_every; step = t_every)))
 else
-    [isnothing(tsel) ? length(times) : nearest(tsel)]
+    [nearest(tsel)]
 end
 # `read3d` and `prepare` read the current record from these two globals, which the loop at the bottom sets.
 n = first(records)

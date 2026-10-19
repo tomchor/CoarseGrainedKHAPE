@@ -283,6 +283,13 @@ bash submit_render3d.sh TIMES=120 FILE=/glade/derecho/scratch/someone/khi_Nz1024
 bash submit_render3d.sh TIMES=90 COLS=4 FIELDS="dKs_dt,wb_rs,Π_K,ε_Ks,dEas_dt,-wb_rs,Π_A,ε_As"
 ```
 
+`plot7_3d_volume.jl` also runs on its own (it needs an OpenGL context, which an X session provides); `--help` lists its options. With none it draws the job's default figure at t = 100 from `$KHAPE_OUTPUT_DIR/khi_Nz1024_Ri0.10.nc`:
+
+```bash
+julia +1.13 --project postprocessing/plot7_3d_volume.jl                                       # figures/khi_Nz1024_Ri0.10_3dvol_6panel_l1_t100.0.png
+julia +1.13 --project postprocessing/plot7_3d_volume.jl <file> --times 100,120 --levels 2      # another run, two times
+```
+
 A `-` prefix on a field negates it, for a term that enters two budgets with opposite sign, and a lone `.` leaves a cell empty so a short row keeps its alignment. `TIMES` and `FIELDS` are comma-separated here and travel to the job colon-separated, because `qsub -v` splits its own variable list on commas — which is also why a range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. `EVERY` has no default: the wrapper does not open the run to find its output interval.
 
 **The job asks for no GPU.** GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has neither a display nor the NVIDIA driver exposed to one. `/usr/bin/Xvfb` plus Mesa's software rasteriser (`LIBGL_ALWAYS_SOFTWARE=1`) gives a context on a plain CPU node, so this is an ordinary batch job needing no modules, no VirtualGL and no FastX session; the job starts its own Xvfb on a free display and kills it on exit. Note `xvfb-run` is *not* installed, only the `Xvfb` binary it wraps. `vglrun` is installed and would render in hardware, but it needs an X server bound to a GPU, which is separate setup.
