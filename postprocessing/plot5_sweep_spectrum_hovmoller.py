@@ -112,11 +112,13 @@ for ax, da, letter, name in [(ax_T, pi_T, "a", r"$\Pi_K + \Pi_A$"),
             ha="right", va="top", bbox=dict(facecolor="white", edgecolor="none", pad=2.5, alpha=0.85))
 
 # Both conventions on the figure: the data is plotted against 1/ℓ, but the text discusses scales as ℓ.
-# It goes on the far edge of (a), which the in-panel labels leave free.
+# With time on x the ℓ axis goes on the right of every row, opposite its 1/ℓ axis, so each panel reads on
+# its own; with scale on x it goes on the top of (a) only, the one edge of the stack the shared axis leaves free.
 if time_x:
     ax_A.set_xlabel(r"$t$")
-    ax_ell = ax_T.secondary_yaxis("right", functions=(lambda x: 1 / x, lambda x: 1 / x))
-    ax_ell.set_ylabel(r"filter scale $\ell$")
+    for ax in axes:
+        ax_ell = ax.secondary_yaxis("right", functions=(lambda x: 1 / x, lambda x: 1 / x))
+        ax_ell.set_ylabel(r"filter scale $\ell$")
 else:
     ax_A.set_xlabel(r"$1/\ell$")
     ax_ell = ax_T.secondary_xaxis("top", functions=(lambda x: 1 / x, lambda x: 1 / x))
