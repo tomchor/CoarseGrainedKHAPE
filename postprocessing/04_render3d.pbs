@@ -11,7 +11,10 @@
 #PBS -l select=1:ncpus=4:mem=64GB:ngpus=0
 #PBS -l job_priority=regular
 
-# plot7_3d_volume.jl (GLMakie isosurfaces) at one or more output times.
+# plot7_3d_volume.jl (GLMakie isosurfaces) at one or more output times, or, with ANIMATE=1, an animation:
+# every record from FROM to TO (every EVERY in time, or every record), each panel on a scale fixed over those
+# records, joined into animations/<run>_3dvol_<panels>_l<SCALE>.mp4. With THUMBNAIL=1, one field at each time with no
+# text at exactly 1.2:1 (plot7 --thumbnail), for a journal thumbnail; BACKGROUND and FRAME are its own.
 #
 # No GPU: GLMakie needs an OpenGL context, not a GPU, and Casper's compute nodes have neither a display nor
 # the NVIDIA driver exposed to one. Xvfb (/usr/bin/Xvfb, present without the usual xvfb-run wrapper) plus
@@ -19,11 +22,17 @@
 # context on a plain CPU node, so this is an ordinary batch job. Verified on crhtc73, 2026-10-03.
 # vglrun is also installed and would render in hardware, but it needs an X server bound to a GPU, which is
 # a separate piece of setup; the software path needs nothing and is fast enough for stills -- measured at
-# about 90 s per six-panel figure at Nz=1024, plus a few minutes of Julia startup and precompilation.
+# about 2 min per six-panel figure at Nz=1024 at the default 800 steps per ray (90 s at Makie's 200),
+# plus a few minutes of Julia startup and precompilation.
 #
-# The times render sequentially, so the walltime scales with how many are asked for: 200 of them is about
-# 5 h, which is what the 6 h request covers. A handful finishes in minutes and leaves the rest unused --
+# The times render sequentially, in one Julia process, so the walltime scales with how many are asked for:
+# 150 of them is about 5 h, which is what the 6 h request covers; an animation's measuring pass adds little. A handful finishes in minutes and leaves the rest unused --
 # PBS charges what is used, not what is asked, though a shorter request does schedule sooner.
+#
+# Cores: 4 by default; submit_render3d.sh NCPUS= asks for more with qsub -l, which overrides the select line
+# below. Mesa's llvmpipe rasteriser is multithreaded and takes its thread count from LP_NUM_THREADS, set here
+# to the cores the wrapper asked for; softpipe, its fallback, uses one whatever it is given. Which one rendered is in
+# the log ("OpenGL renderer: ..."), and every frame logs its own time, so the two can be compared directly.
 set -eo pipefail
 
 [ -n "${PBS_O_WORKDIR:-}" ] && cd "$PBS_O_WORKDIR"   # postprocessing/, where the wrapper submits from
@@ -31,10 +40,19 @@ REPO=$(cd .. && pwd)
 
 NZ=${NZ:-1024}
 # Colon-separated, because `qsub -v` splits its own list on commas and a space would not survive it.
-TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
+ANIMATE=${ANIMATE:-0}
+if [ "$ANIMATE" = 1 ]; then
+    # An animation is a window of records, not a list: plot7 picks them from the run, which the wrapper
+    # never opens. TO empty runs to the last record, EVERY empty takes every record.
+    FROM=${FROM:-10}; TO=${TO:-}; EVERY=${EVERY:-}
+    RANGE_STAT=${RANGE_STAT:-max}; RANGE_WINDOW=${RANGE_WINDOW:-}; FPS=${FPS:-10}; RANGES=${RANGES:-}
+    PREVIEW=${PREVIEW:-0}   # only names the files here: the wrapper has already set the preview's EVERY and PX_PER_UNIT
+else
+    TIMES=${TIMES:?set TIMES (colon-separated, e.g. 100:120:140); submit through submit_render3d.sh}
+fi
 # Colon-separated on the way in, for the same reason TIMES is; plot7 wants commas.
 FIELDS=$(echo "${FIELDS:-Q:wb_rs:Π_K:Π_A:ε_Ks:ε_As}" | tr ':' ',')
-COLS=${COLS:-3}
+COLS=${COLS:-2}
 SCALE=${SCALE:-1}
 LEVELS=${LEVELS:-6}
 # Colon-separated in, commas out, as TIMES and FIELDS are. Empty means "use LEVELS". The two are passed as
@@ -42,14 +60,24 @@ LEVELS=${LEVELS:-6}
 # so the fraction list ended up on the command line a second time as a stray argument.
 FRACTIONS=$(echo "${FRACTIONS:-}" | tr ':' ',')
 if [ -n "$FRACTIONS" ]; then LEVEL_ARGS=(--fractions "$FRACTIONS"); else LEVEL_ARGS=(--levels "$LEVELS"); fi
+SAMPLES=${SAMPLES:-800}
+# plot7 reads "auto" as Makie's automatic shell width.
+ISORANGE=${ISORANGE:-0.02}
 ZLIM=${ZLIM:-4}
 DERIVED=${DERIVED:-filtered}
 # No default here: submit_render3d.sh always passes OVERLAY, b unless given OVERLAY= for no overlay. Should `qsub -v`
 # drop that empty variable rather than export it, even ${OVERLAY-b} would read it as unset and draw b.
 OVERLAY=${OVERLAY:-}
+PX_PER_UNIT=${PX_PER_UNIT:-2}
 OUT_DIR=${KHAPE_OUTPUT_DIR:-$REPO/output}   # where simulation.pbs wrote the run
 FILE=${FILE:-$OUT_DIR/khi_Nz${NZ}_Ri0.10.nc}
+# By mode, as submit_render3d.sh names the job and its PBS log, so a preview and a full animation running at
+# once keep separate logs.
 JOB_NAME="render3d_Nz${NZ}_Ri0.10"
+[ "$ANIMATE" = 1 ] && JOB_NAME="${JOB_NAME}_$([ "${PREVIEW:-0}" = 1 ] && echo preview || echo anim)"
+# A journal thumbnail: one field, no text, 1.2:1 (plot7 --thumbnail). The wrapper has already defaulted FIELDS to Π_A.
+THUMBNAIL=${THUMBNAIL:-0}
+[ "$THUMBNAIL" = 1 ] && JOB_NAME="${JOB_NAME}_thumbnail"
 qalter -N "$JOB_NAME" "$PBS_JOBID" || true
 
 module li
@@ -78,6 +106,10 @@ $JULIA --version
 $JULIA --project="$REPO" -e 'using Pkg; Pkg.instantiate()'
 #---
 
+# The per-run log, started here so the renderer the smoke test reports lands in it with the rest.
+LOG=logs/${JOB_NAME}.out
+: > "$LOG"
+
 #+++ Virtual display
 # A free display number, so two of these on one node do not collide. Killed on exit however the job ends.
 for n in $(seq 99 160); do
@@ -90,41 +122,75 @@ trap 'kill $XVFB_PID 2>/dev/null || true' EXIT
 sleep 3
 export DISPLAY=":$DISPLAY_NUM"
 export LIBGL_ALWAYS_SOFTWARE=1
-echo "Xvfb on $DISPLAY (pid $XVFB_PID), software OpenGL"
+# The wrapper passes the cores it asked for as RENDER_THREADS. Not PBS's own $NCPUS: on Casper that came through
+# as 1 in a job granted 4 (2026-10-16), so llvmpipe rendered on one thread. nproc, the cores this job may run
+# on, is the fallback for a job submitted without the wrapper.
+export LP_NUM_THREADS=${RENDER_THREADS:-$(nproc)}
+echo "Xvfb on $DISPLAY (pid $XVFB_PID), software OpenGL, LP_NUM_THREADS=$LP_NUM_THREADS (nproc $(nproc), PBS NCPUS ${NCPUS:-unset})"
 
 # Fail here rather than after a long render if the context cannot be made.
 $JULIA --project="$REPO" -e 'using GLMakie; GLMakie.activate!(visible=false)
 fig = Figure(size=(200,150)); Axis(fig[1,1]); lines!(1:10, rand(10))
-save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK")'
+save(joinpath(tempdir(), "glmakie_smoke.png"), fig); println("GLMakie context OK")
+# Which rasteriser Mesa picked: llvmpipe (multithreaded) or softpipe (one thread). Read from the context the
+# smoke test just drew with, which is the one plot7 renders through.
+screen = GLMakie.singleton_screen(false); GLMakie.ShaderAbstractions.switch_context!(screen.glscreen)
+gl(s) = unsafe_string(GLMakie.ModernGL.glGetString(s))
+println("OpenGL renderer: ", gl(GLMakie.ModernGL.GL_RENDERER), " | version: ", gl(GLMakie.ModernGL.GL_VERSION))' 2>&1 | tee -a "$LOG"
 #---
 
 #+++ Render
-LOG=logs/${JOB_NAME}.out
-: > "$LOG"
-echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY" | tee -a "$LOG"
-echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
+echo "file=$FILE  fields=$FIELDS  cols=$COLS  scale=$SCALE  ${LEVEL_ARGS[*]}  samples=$SAMPLES  isorange=$ISORANGE  zlim=$ZLIM  derived=$DERIVED  overlay=$OVERLAY  px_per_unit=$PX_PER_UNIT" | tee -a "$LOG"
+PLOT7=($JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE"
+       --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface
+       "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" --samples "$SAMPLES" --isorange "$ISORANGE"
+       --zlim "$ZLIM" --overlay "$OVERLAY" --px-per-unit "$PX_PER_UNIT"
+       --azimuth "${AZIMUTH:-1.30}" --elevation "${ELEVATION:-0.12}")
+[ "$THUMBNAIL" = 1 ] && PLOT7+=(--thumbnail 1200 --background "${BACKGROUND:-white}" --frame "${FRAME:-1}")   # 1200 x 1000 units, exactly 1.2:1
 
-# One invocation per time: each writes its own figure, named by the time, and a failure at one time is
-# reported rather than losing the rest of the run.
-# A time that fails is reported and the rest continue, but the job exits non-zero at the end. Figures are
-# named by time alone, so a failed render leaves the previous one in place: without this the job reports
-# success and the stale figure reads as a result. PBS marking it failed is the only reliable signal.
+if [ "$ANIMATE" = 1 ]; then
+    # Named as plot7 names a figure, less the time. The frames get a directory of their own, so a movie can
+    # never overwrite a standalone figure, and plot7 clears stale frames from it before rendering.
+    case "$FIELDS" in (*,*) TAG="$(echo "$FIELDS" | tr ',' '\n' | wc -l | tr -d ' ')panel";; (*) TAG=$FIELDS;; esac
+    NAME="$(basename "$FILE" .nc)_3dvol_${TAG}${SCALE:+_l$SCALE}"
+    [ "$PREVIEW" = 1 ] && NAME="${NAME}_preview"   # its own movie, ranges and frames: a test never replaces the real one
+    ANIM_DIR=$REPO/animations
+    WINDOW=(--from "$FROM")
+    [ -n "$TO" ] && WINDOW+=(--to "$TO")
+    [ -n "$EVERY" ] && WINDOW+=(--every "$EVERY")
+    echo "animate: from=$FROM to=${TO:-end} every=${EVERY:-record} range_stat=$RANGE_STAT range_window=${RANGE_WINDOW:-all} fps=$FPS ranges=${RANGES:-measured}" | tee -a "$LOG"
+    # Pass 1, the scales: each panel's percentile at every record in the window. Skipped when RANGES names a
+    # file from an earlier job, so the same scales can serve another stride or frame rate.
+    if [ -z "$RANGES" ]; then
+        RANGES=$ANIM_DIR/${NAME}_ranges.toml
+        time "${PLOT7[@]}" "${WINDOW[@]}" --measure "$RANGES" 2>&1 | tee -a "$LOG"
+    fi
+    # Pass 2, the frames against those scales, then the movie. plot7 exits non-zero if any frame fails, and
+    # makes no movie then, since a missing frame would end the sequence there.
+    # The scale may come from part of the window (RANGE_WINDOW); the frames are always the whole of it.
+    RANGE_ARGS=(--range-stat "$RANGE_STAT")
+    [ -n "$RANGE_WINDOW" ] && RANGE_ARGS+=(--range-window "$RANGE_WINDOW")
+    time "${PLOT7[@]}" "${WINDOW[@]}" --ranges "$RANGES" "${RANGE_ARGS[@]}" \
+        --frame-dir "$ANIM_DIR/frames/$NAME" --movie "$ANIM_DIR/$NAME.mp4" --fps "$FPS" 2>&1 | tee -a "$LOG"
+    ls -la "$ANIM_DIR/$NAME.mp4" "$RANGES" | tee -a "$LOG"
+    qstat -f "$PBS_JOBID" >> "$LOG"
+    exit 0
+fi
+
+echo "times=$(echo "$TIMES" | tr ':' ' ')" | tee -a "$LOG"
+# Every time in one process, which saves Julia's startup on each, and draws each figure exactly as a single
+# --time would. A time that fails is reported and the rest continue, but plot7 exits non-zero at the end:
+# figures are named by time alone, so a failed render leaves the previous one in place, and without this the
+# job reports success and the stale figure reads as a result. PBS marking it failed is the only reliable signal.
 failed=0
-for T in $(echo "$TIMES" | tr ':' ' '); do
-    echo "=== t = $T ===" | tee -a "$LOG"
-    time $JULIA --project="$REPO" "$REPO/postprocessing/plot7_3d_volume.jl" "$FILE" \
-        --field "$FIELDS" --scale "$SCALE" --cols "$COLS" --mode isosurface \
-        "${LEVEL_ARGS[@]}" --derived-from "$DERIVED" \
-        --zlim "$ZLIM" --overlay "$OVERLAY" --time "$T" 2>&1 | tee -a "$LOG" \
-        || { failed=$((failed + 1)); echo "warning: t = $T failed (see above); continuing" | tee -a "$LOG"; }
-done
+time "${PLOT7[@]}" --times "$(echo "$TIMES" | tr ':' ',')" 2>&1 | tee -a "$LOG" || failed=1
 
 echo "Figures in $REPO/figures/" | tee -a "$LOG"
-ls -la "$REPO"/figures/*6panel* 2>/dev/null | tee -a "$LOG" || true
+ls -la "$REPO"/figures/*_3dvol_* 2>/dev/null | tee -a "$LOG" || true
 qstat -f "$PBS_JOBID" >> "$LOG"
 if [ "$failed" -gt 0 ]; then
-    echo "error: $failed of the requested times failed to render; any figure of that name on disk is from an" \
-         "earlier run" | tee -a "$LOG"
+    echo "error: some of the requested times failed to render (see above); any figure of that name on disk is" \
+         "from an earlier run" | tee -a "$LOG"
     exit 1
 fi
 #---

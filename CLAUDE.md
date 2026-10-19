@@ -56,11 +56,23 @@ bash submit_sweep.sh NZ=1024 FILTER=0 PLOTS=1  # the transfer alone (six parts) 
 ### 3D isosurface figures
 ```bash
 cd postprocessing
-bash submit_render3d.sh TIMES=100,120,140              # plot7 at each time; default panels are the six budget terms at ℓ=1
+bash submit_render3d.sh TIMES=100,120,140              # plot7 at each time; default panels are the six budget terms at ℓ=1, three rows of two
 bash submit_render3d.sh FROM=60 TO=160 EVERY=10       # a strided range instead of a list (EVERY has no default)
 bash submit_render3d.sh TIMES=120 LEVELS=2             # fewer isosurfaces: much faster under software rendering
 bash submit_render3d.sh TIMES=120 FILE=/glade/.../khi_Nz1024_Ri0.10.nc
+bash submit_render3d.sh ANIMATE=1 FROM=20 TO=150             # an animation, each panel on one scale fixed over the window
+bash submit_render3d.sh PREVIEW=1                              # a quick test of one: EVERY=20, PX_PER_UNIT=1, _preview names
+bash submit_render3d.sh THUMBNAIL=1 TIMES=90 ZLIM=3 FRAME=0     # JFM thumbnail: Π_A (or FIELDS=one field), no text, exactly 1.2:1, no box
+bash submit_render3d.sh ANIMATE=1 RANGE_WINDOW=90:             # scale from t ≥ 90 only (the 3D stage); earlier frames saturate
 ```
+With `ANIMATE=1` the job runs `plot7_3d_volume.jl` twice: `--measure` writes each panel's 99th percentile of |field|
+and its extremes at every record to `animations/<name>_ranges.toml`, and `--ranges` renders the frames against
+`RANGE_STAT` (default `max`) of those series into `animations/frames/<name>/`, then `--movie` joins them with
+Makie's `FFMPEG_jll` into `animations/<name>.mp4`. A standalone figure is untouched by any of it: without
+`--ranges` every panel is scaled by its own record, exactly as before (checked pixel for pixel), and several
+`TIMES` now render in one Julia process rather than one each. `THUMBNAIL=1` (plot7 `--thumbnail 1200`) draws one
+field at the figure's levels with no text, 2400 × 2000 px, into `..._thumbnail_t<time>.png`; `FRAME=0` drops the box
+edges and `BACKGROUND` sets its colour. `AZIMUTH`/`ELEVATION` move the camera for figures and thumbnails alike.
 `04_render3d.pbs` asks for **no GPU**. GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has
 neither a display nor the NVIDIA driver exposed to one; `/usr/bin/Xvfb` plus Mesa's software rasteriser
 (`LIBGL_ALWAYS_SOFTWARE=1`) gives one on a plain CPU node, so this is an ordinary batch job needing no modules,
@@ -69,8 +81,8 @@ rendering (a long software render should not be how a broken display announces i
 an EXIT trap. Two traps: `xvfb-run` is **not** installed on Casper, only the `Xvfb` binary it wraps, and
 `julia +1.13` is a juliaup feature that Casper's `julia` reads as a filename, so the job finds 1.13 the way
 `simulation.pbs` does. `TIMES` and `FIELDS` travel colon-separated because `qsub -v` splits its own list on
-commas, which is also why a strided range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. Software rendering costs about 90 s per six-panel figure at Nz=1024 (measured), so the job renders its
-times sequentially; the job's 6 h walltime covers about 200 of them; `03_subset_3d.py` is still the quicker loop
+commas, which is also why a strided range is `FROM`/`TO`/`EVERY` rather than a `100:10:200` literal. Software rendering costs about 2 min per six-panel figure at Nz=1024 (measured, at the default `SAMPLES=800` ray-march steps; 90 s at Makie's 200), so the job renders its
+times sequentially, in one Julia process; the job's 6 h walltime covers about 150 of them at its default 4 cores (`NCPUS`; Mesa's llvmpipe takes them all through `LP_NUM_THREADS`, and the log names the renderer and times every frame); `03_subset_3d.py` is still the quicker loop
 for tuning camera, levels and colours, since no `qsub` round trip beats a local render.
 
 ### Local post-processing (no PBS)
@@ -126,7 +138,7 @@ Standalone visualization scripts (outside the budget pipeline that `00_get_budge
 - `plot4_omega_br_snapshots.py` -- spanwise vorticity ω (top row, `--top b` for buoyancy instead) and b_r (bottom row) snapshots, one column per time, with buoyancy contours overlaid on both (from the `_2d.nc` file; `simulation.pbs` draws it right after the run)
 - `plot5_sweep_spectrum_hovmoller.py` -- Hovmöllers of the cross-scale transfers over filter scale and time (from the sweep output)
 - `plot6_budgets.py` -- 2x2 panel of SFS KE and APE budget time series (assembled from the simulation output by `online_budgets`; no post-processing needed, and `simulation.pbs` draws it right after the run)
-- `plot7_3d_volume.jl` -- GLMakie volume render and isosurfaces of one snapshot, the only 3D-rendering script (the run is three-dimensional but every other figure reduces it to an x–z slice at the first y index). One `--field` lays the panels out by `--mode` (volume and isosurface of it), a comma-separated list by field, one panel each; `--scale` appends the `_ℓ<ℓ>` every budget term carries, so the six-term figure is one line. `--overlay b` draws a reference field as contours on the two vertical bounding walls -- lines rather than a second set of isosurfaces, which no colour or opacity makes readable (GLMakie ignores `alpha` on a volume contour). Q, enstrophy and speed are derived here from u, v, w, all written at cell centres: the file's own `ω` is the spanwise component alone. Needs an OpenGL context but **no GPU** -- see `04_render3d.pbs`, the batch job `submit_render3d.sh` submits for it (it is Julia, so `plots.pbs` does not run it)
+- `plot7_3d_volume.jl` -- GLMakie volume render and isosurfaces of one snapshot, the only 3D-rendering script (the run is three-dimensional but every other figure reduces it to an x–z slice at the first y index). One `--field` lays the panels out by `--mode` (volume and isosurface of it), a comma-separated list by field, one panel each; `--scale` appends the `_ℓ<ℓ>` every budget term carries, so the six-term figure is one line. `--overlay b` draws a reference field as contours on the two vertical bounding walls -- lines rather than a second set of isosurfaces, which no colour or opacity makes readable (GLMakie ignores `alpha` on a volume contour). Q, enstrophy and speed are derived here from u, v, w, all written at cell centres: the file's own `ω` is the spanwise component alone. Several times render in one process (`--times`, or `--from`/`--to`/`--every`); `--measure` and `--ranges` fix each panel's scale over them for an animation, `--frame-dir` and `--movie` write it; `--thumbnail W` draws one field with no text at W × W/1.2 (a journal thumbnail). Needs an OpenGL context but **no GPU** -- see `04_render3d.pbs`, the batch job `submit_render3d.sh` submits for it (it is Julia, so `plots.pbs` does not run it)
 - `03_subset_3d.py` -- not a figure: cuts a run down to a laptop-sized NetCDF (chosen fields, chosen records, z cropped, float32) that `plot7_3d_volume.jl` reads unchanged, for tuning a figure locally rather than over `qsub`. It copies the grid reconstruction groups, rewriting the z extent to the crop, and drops `virtual_rank_files`; of a `--save_sorted` run it keeps the model grid alone, under the plain names; each of `u`, `v` and `w` it keeps brings its filtered counterpart at `--scale` along, which plot7 derives Q, enstrophy and speed from by default
 - `X6_panels.py` -- 4-panel snapshot of local SFS budget fields (straight from the simulation output, as `plot6`; an extra figure, so it writes to `extra_figures/` and no job draws it)
 - `anim1_panels.py` -- animated version of the X6 panels (requires ffmpeg); reads everything from the `_2d.nc` file, so it needs no post-processing: every panel (the budget terms through `online_budgets`, and the online `b_r`, on the x–z plane the 2D writer slices) and the time series (the `_int` volume integrals of the same records)
