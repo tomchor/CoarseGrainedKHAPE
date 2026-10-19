@@ -161,7 +161,11 @@ else
             end
             lines!(ax, t[1:nt], sum(y for (_, y, _) in terms); label="residual", color=:gray, linestyle=:dash)
             vlines!(ax, @lift([t[$n]]); color=:black, linestyle=:dot)
-            axislegend(ax, position=:rt, labelsize=9)
+            # One row above the axis, in its top protrusion: the two time-series rows are 12% of the figure each, too
+            # short for a stacked legend of five or six entries, which spilled out of the axis and over the t ticks.
+            # Above the axis it covers no curve, which a legend inside would wherever the terms peak.
+            Legend(fig[rowidx, 1:4, Top()], ax; orientation=:horizontal, framevisible=false, labelsize=13,
+                   patchsize=(22, 10), padding=(0, 0, 2, 0), colgap=14)
         end
         rowsize!(fig.layout, 4, Relative(0.12)); rowsize!(fig.layout, 5, Relative(0.12))
 
