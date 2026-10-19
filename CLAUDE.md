@@ -62,7 +62,7 @@ bash submit_render3d.sh TIMES=120 LEVELS=2             # fewer isosurfaces: much
 bash submit_render3d.sh TIMES=120 FILE=/glade/.../khi_Nz1024_Ri0.10.nc
 bash submit_render3d.sh ANIMATE=1 FROM=20 TO=150             # an animation, each panel on one scale fixed over the window
 bash submit_render3d.sh PREVIEW=1                              # a quick test of one: EVERY=20, PX_PER_UNIT=1, _preview names
-bash submit_render3d.sh THUMBNAIL=1 TIMES=120                  # JFM thumbnail: Π_A (or FIELDS=one field), no text, exactly 1.2:1
+bash submit_render3d.sh THUMBNAIL=1 TIMES=90 ZLIM=3 FRAME=0     # JFM thumbnail: Π_A (or FIELDS=one field), no text, exactly 1.2:1, no box
 bash submit_render3d.sh ANIMATE=1 RANGE_WINDOW=90:             # scale from t ≥ 90 only (the 3D stage); earlier frames saturate
 ```
 With `ANIMATE=1` the job runs `plot7_3d_volume.jl` twice: `--measure` writes each panel's 99th percentile of |field|
@@ -70,7 +70,9 @@ and its extremes at every record to `animations/<name>_ranges.toml`, and `--rang
 `RANGE_STAT` (default `max`) of those series into `animations/frames/<name>/`, then `--movie` joins them with
 Makie's `FFMPEG_jll` into `animations/<name>.mp4`. A standalone figure is untouched by any of it: without
 `--ranges` every panel is scaled by its own record, exactly as before (checked pixel for pixel), and several
-`TIMES` now render in one Julia process rather than one each.
+`TIMES` now render in one Julia process rather than one each. `THUMBNAIL=1` (plot7 `--thumbnail 1200`) draws one
+field at the figure's levels with no text, 2400 × 2000 px, into `..._thumbnail_t<time>.png`; `FRAME=0` drops the box
+edges and `BACKGROUND` sets its colour. `AZIMUTH`/`ELEVATION` move the camera for figures and thumbnails alike.
 `04_render3d.pbs` asks for **no GPU**. GLMakie needs an OpenGL context, not a GPU, and a Casper compute node has
 neither a display nor the NVIDIA driver exposed to one; `/usr/bin/Xvfb` plus Mesa's software rasteriser
 (`LIBGL_ALWAYS_SOFTWARE=1`) gives one on a plain CPU node, so this is an ordinary batch job needing no modules,

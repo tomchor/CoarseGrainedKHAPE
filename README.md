@@ -280,19 +280,19 @@ A `-` prefix on a field negates it, for a term that enters two budgets with oppo
 
 Software rendering costs about **2 minutes per six-panel figure** at Nz=1024 and the default `SAMPLES=800` (90 s at 200), measured on a Casper CPU node, so the job renders its times one after another, in one Julia process, and its 6 h walltime covers about 150 of them. `ISORANGE` is not a smoothing knob: the visible surface sits at level ± `ISORANGE`, so a wider shell draws each surface further out and weak features near a level appear or vanish with it. Neither setting is in the figure name, so a render at another value replaces the last one at that time. A handful finishes in minutes; PBS charges what is used, not what is asked, though a shorter request does schedule sooner. `LEVELS=2` and a smaller `ZLIM` are faster still. `NCPUS` (default 4) sets the job's cores: Mesa's llvmpipe rasteriser renders with all of them (`LP_NUM_THREADS`), its softpipe fallback with one. The log names the renderer that ran (`OpenGL renderer: ...`) and the time of every frame, split into preparing the fields and rendering them (the first includes Julia's compilation), so a preview at `NCPUS=16` against one at 4 shows directly whether more cores pay. For tuning camera angle, levels and colours a local loop is quicker than any `qsub` round trip, which is what `03_subset_3d.py` (below) is for.
 
-### Animate the 3D fields
+### 3D thumbnail
 
-`THUMBNAIL=1` draws a journal thumbnail (JFM asks for one) at each of `TIMES`: a single field, `Π_A` unless `FIELDS` names another, with no text at all (no title, colourbar, axis labels or ticks), at exactly 1.2:1, 1200 × 1000 figure units, which is 2400 × 2000 px at the default `PX_PER_UNIT=2`. The box frame and the buoyancy contours on the walls stay, since they are what make it read as a volume; levels, samples and camera are as for a figure. It is saved as `figures/<run>_3dvol_<field>_l<SCALE>_thumbnail_t<time>.png`, so it never replaces the six-panel figure, and logs to `logs/render3d_Nz<NZ>_Ri0.10_thumbnail.{log,out}`. plot7 checks the saved image's pixels are 6:5 and fails otherwise. Locally, `--thumbnail 1200` (any multiple of 6) with one `--field`.
+`THUMBNAIL=1` draws a journal thumbnail (JFM asks for one) at each of `TIMES`: a single field, `Π_A` unless `FIELDS` names another, with no text at all (no title, colourbar, axis labels or ticks), at exactly 1.2:1, 1200 × 1000 figure units, which is 2400 × 2000 px at the default `PX_PER_UNIT=2`. Everything else is the figure's: the same isosurface levels (`LEVELS`/`FRACTIONS`), samples, crop, camera and buoyancy contours on the walls. It is saved as `figures/<run>_3dvol_<field>_l<SCALE>_thumbnail_t<time>.png`, so it never replaces the six-panel figure, and logs to `logs/render3d_Nz<NZ>_Ri0.10_thumbnail.{log,out}`. plot7 checks the saved image's pixels are 6:5 and fails otherwise. Locally, `--thumbnail 1200` (any multiple of 6) with one `--field`.
 
 ```bash
 bash submit_render3d.sh THUMBNAIL=1 TIMES=100,120,140          # Π_A at three times, to choose from
+bash submit_render3d.sh THUMBNAIL=1 TIMES=90 ZLIM=3 FRAME=0     # tighter crop, no box: the data and the wall contours only
 bash submit_render3d.sh THUMBNAIL=1 TIMES=120 FIELDS=Q          # another field
-bash submit_render3d.sh THUMBNAIL=1 TIMES=100,120,140 FRACTIONS=0.5 ZLIM=2.5 OVERLAY= BACKGROUND=black FRAME=0
-                                                               # bold: one surface pair, tight crop, dark, no box
 ```
 
-`BACKGROUND` (any Makie colour, default white) and `FRAME` (1 draws the box edges, 0 leaves only the data) are the
-thumbnail's own; `AZIMUTH` and `ELEVATION` move the camera (units of π, defaults 1.30 and 0.12) for figures too.
+`FRAME` (1 draws the box edges, 0 leaves only the data) and `BACKGROUND` (any Makie colour, default white) are the thumbnail's own; `AZIMUTH` and `ELEVATION` move the camera (units of π, defaults 1.30 and 0.12) for figures too. Two things to know when tuning the crop. Each panel's range is the 99th percentile of |field| within the crop, so `ZLIM` moves the levels' physical values with it and can bring weak outer surfaces in or out; and a crop that cuts through the outer buoyancy contours leaves short vertical stubs where they leave the walls (|z| < 2.5 does on the Nz=128 run, 3 and 4 do not). Neither `ZLIM` nor `FRAME` is in the file name, so a render with other values replaces the last one at that time.
+
+### Animate the 3D fields
 
 `ANIMATE=1` makes the job render a window of records as an animation instead of figures. A standalone figure scales each panel by its own 99th percentile at that time, which in a movie would hide growth and decay; an animation fixes each panel's scale over the whole window instead, so a surface means the same value in every frame, and structure appears as the billow grows and fades as it decays.
 
