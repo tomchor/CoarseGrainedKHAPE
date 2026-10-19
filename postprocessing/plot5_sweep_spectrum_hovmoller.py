@@ -23,10 +23,10 @@ parser.add_argument("--linear-width", type=float, default=1e-2,
                     help="Width of the near-linear region of the colour scale; the mapping is logarithmic "
                          "beyond it, with a smooth transition.")
 parser.add_argument("--cmap", default="RdBu_r", help="Diverging colormap for the transfer")
-parser.add_argument("--orient", choices=["scale-x", "time-x"], default="scale-x",
-                    help="Which variable runs along x. 'scale-x' puts 1/l on x with time up the y axis; "
-                         "'time-x' flips them, the conventional Hovmoller orientation. The flipped version "
-                         "is written to its own file, so the two can sit side by side.")
+parser.add_argument("--orient", choices=["time-x", "scale-x"], default="time-x",
+                    help="Which variable runs along x. 'time-x' (default) puts time on x with 1/l up the y axis, "
+                         "the conventional Hovmoller orientation; 'scale-x' flips them. The flipped version "
+                         "is written to its own file (_scalex), so the two can sit side by side.")
 parser.add_argument("--fig-height", type=float, default=None,
                     help="Figure height in inches. Default 7.2 with scale on x, 6.4 with time on x.")
 parser.add_argument("--fig-width", type=float, default=None,
@@ -78,7 +78,7 @@ norm = AsinhNorm(linear_width=args.linear_width, vmin=-vmax, vmax=vmax)
 
 #+++ Figure
 # All three rows are Hovmollers on one 1/ℓ axis and one colour scale, so a colour means the same rate in
-# every panel and the total can be compared with its parts by eye. Time runs up the y axis in each.
+# every panel and the total can be compared with its parts by eye. Time runs along x by default (--orient).
 fig_w = args.fig_width  if args.fig_width  is not None else (9.5 if args.orient == "time-x" else 7.0)
 fig_h = args.fig_height if args.fig_height is not None else (6.4 if args.orient == "time-x" else 7.2)
 fig, axes = plt.subplots(3, 1, figsize=(fig_w, fig_h), constrained_layout=True,
@@ -145,6 +145,6 @@ cbar.set_label(r"$\int \Pi\, \mathrm{d}V$")
 
 plot_filename = str(FIGURES / os.path.basename(input_filename)
                     .replace("energy_transfer_sweep",
-                             "sweep_spectrum_hovmoller" + ("_timex" if time_x else "")).replace(".nc", ".pdf"))
+                             "sweep_spectrum_hovmoller" + ("" if time_x else "_scalex")).replace(".nc", ".pdf"))
 fig.savefig(plot_filename, dpi=150, bbox_inches="tight")
 print(f"Plot saved to: {plot_filename}")
