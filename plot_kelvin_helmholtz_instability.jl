@@ -109,7 +109,11 @@ else
     nt = length(t)
 
     slab(name, n)  = ds_nc[name][:, 1, kz, n]
-    series(name)   = Float64.(ds_nc[name][1:nt])
+    # The budget series skip the first record, iteration 0's: its time derivatives are not yet defined, so it is no
+    # budget statement and its residual is meaningless, and the curves jumped there from a spurious value to their
+    # working one. 01_online_budgets.py drops the same record. The panels still show it, as the initial state.
+    kt = 2:nt
+    series(name)   = Float64.(ds_nc[name][kt])
     "Symmetric color limit from the 99th percentile of |field| over ~10 sampled frames."
     function clim(name)
         samples = round.(Int, range(1, nt, length=min(10, nt)))
@@ -157,9 +161,9 @@ else
         for (rowidx, terms, label) in ((4, ke_terms, "SFS KE budget"), (5, ape_terms, "SFS APE budget"))
             ax = Axis(fig[rowidx, 1:4]; ylabel=label, xlabel=(rowidx == 5 ? "t" : ""), xticklabelsvisible=(rowidx == 5))
             for (lbl, y, color) in terms
-                lines!(ax, t[1:nt], y; label=lbl, color, linewidth=1.5)
+                lines!(ax, t[kt], y; label=lbl, color, linewidth=1.5)
             end
-            lines!(ax, t[1:nt], sum(y for (_, y, _) in terms); label="residual", color=:gray, linestyle=:dash)
+            lines!(ax, t[kt], sum(y for (_, y, _) in terms); label="residual", color=:gray, linestyle=:dash)
             vlines!(ax, @lift([t[$n]]); color=:black, linestyle=:dot)
             # One row above the axis, in its top protrusion: the two time-series rows are 12% of the figure each, too
             # short for a stacked legend of five or six entries, which spilled out of the axis and over the t ticks.
