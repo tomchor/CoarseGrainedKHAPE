@@ -18,7 +18,7 @@ parser.add_argument("--filename", default="output/khi_Nz2048_Ri0.10.nc",
 parser.add_argument("--fixed-reference", action="store_true", default=False,
                     help="Load output produced with the fixed-in-time reference profile")
 parser.add_argument("--extension", default="edge", help="Which wall-extension run to plot ('edge' is the default sweep)")
-parser.add_argument("--max-time", type=float, default=140.0, help="Latest time included, in both the average and the Hovmollers")
+parser.add_argument("--max-time", type=float, default=200.0, help="Latest time included in the Hovmollers (default 200, the whole run)")
 parser.add_argument("--linear-width", type=float, default=1e-2,
                     help="Width of the near-linear region of the colour scale; the mapping is logarithmic "
                          "beyond it, with a smooth transition.")
