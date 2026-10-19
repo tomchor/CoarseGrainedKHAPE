@@ -29,3 +29,4 @@ figures/*.png
 figures/*.pdf
 bathymetry/*nc
 animations/*_ranges.toml
+khape_local.sh

@@ -45,8 +45,9 @@ for arg in "$@"; do case $arg in
   *) echo "unknown argument: $arg (expected NZ=, NGPUS=, FIXED_REF=, VALIDATE=, PLOTS=, SAVE_SORTED=, SIMULATION= or SWEEP_PARTS=)" >&2
      exit 2;;
 esac; done
-# The allocation to charge and the Python to run: defaults in khape_defaults.sh, overridden from the environment.
+# The allocation to charge and the Python to run: from the environment, khape_local.sh or khape_defaults.sh.
 source "$(dirname "$0")/khape_defaults.sh"
+check_khape_account
 check_khape_python
 [ "$FIXED_REF" = "1" ] && REF_SUFFIX="_fixed_ref" || REF_SUFFIX=""
 # --save_sorted writes the validation-only sorted-state fields (the two model-grid z✶ methods, the column,

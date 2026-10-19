@@ -9,6 +9,7 @@ Computes Available Potential Energy (APE) from three-dimensional Kelvin-Helmholt
 3. **Sweep** — parameter sweep over filter scales, split into two jobs:
    - `postprocessing/sweep_filter.pbs` — filters fields at all scales (shared; runs once regardless of `FIXED_REF`)
    - `postprocessing/sweep_transfer.pbs` — computes and plots energy transfer spectra (per `FIXED_REF` variant); above `NZ=512` the records are split across `SWEEP_PARTS` such jobs, and a last, small one joins their files and plots (see [Run sweep only](#run-sweep-only))
+4. **Optional jobs**: the online-vs-offline validation (`postprocessing/validation/validation.pbs`, see [Run the online-vs-offline validation](#run-the-online-vs-offline-validation)), the final figures once the sweep is done (`postprocessing/plots.pbs`), and the 3D isosurface figures, animations and thumbnails (`postprocessing/04_render3d.pbs`, see [Render 3D isosurfaces](#render-3d-isosurfaces))
 
 ## Post-processing scripts (`postprocessing/`)
 
@@ -19,14 +20,16 @@ Scripts in `postprocessing/` follow a naming convention by purpose:
 | `01_online_budgets.py`, `02_plot_budgets.py` | **Budget pipeline.** Every term of the SFS KE and APE budgets is computed by the simulation itself; `01` writes the integrated budgets from those online terms (at the simulation's own filter scales, ℓ = 1 and 7 by default) and `02` plots them. |
 | `03_subset_3d.py`, `04_render3d.pbs` | **3D rendering.** `03` cuts a run down to a laptop-sized file for tuning `plot7_3d_volume.jl` locally; `04` is the batch job, submitted by `submit_render3d.sh`, that renders it at chosen times on the HPC (see [Render 3D isosurfaces](#render-3d-isosurfaces)). Both read the simulation output directly, so they need no budgeting run. |
 | `offline/01_…` – `offline/05_…` | **Offline budget pipeline, kept as a test.** The independent Python implementation of every term (scipy filtering on a z-padded domain, a numpy density sort, an FFT-filtered reference profile). It is no longer a product: `offline/run_offline_budgets.sh` runs it into `output/offline/` and `pytest --offline-check` compares each term against the assembled online budgets (see [Tests](#tests)). |
+| `validation/inv01_…` – `validation/inv10_…` | **Online-vs-offline validation.** The `inv0*` scripts each recompute one quantity of the simulation's online output offline and compare the two in one figure, in `figures/validation/` (`inv04` animates the comparison into `animations/` instead); `inv10` checks that the online budgets close from their volume integrals alone. `validation.pbs` runs them all (see [Run the online-vs-offline validation](#run-the-online-vs-offline-validation)). |
 | `sweep1_…` – `sweep3_…` | **Parameter sweep pipeline** over filter scales: filter fields, compute cross-scale transfer at every scale, and plot transfer spectra. |
+| `compare_extension.py` | **Wall-extension test.** Compares the sweep with b oddly reflected past the walls against the production (edge) sweep (see [Wall-extension test](#wall-extension-test)). |
 | `plot4_…` – `plot7_…` | **Paper figure scripts.** Produce the figures used in the manuscript (ω and b_r snapshots, Hovmöllers of the sweep transfers, SFS KE/APE budget time series, 3D isosurfaces). `plots.pbs` runs every `plot*.py`; `plot7_3d_volume.jl` is Julia and runs in `04_render3d.pbs`. Output goes to `figures/`. |
 | `anim1_…`, `X1_…` – `X14_…` | **Extra material.** Animations (`anim*`, requires `ffmpeg`) and the extra figures outside the manuscript set (`X*`, X for extra: Π hovmöllers, snapshot panels, a thumbnail, sweep-spectrum diagnostics, the mixing efficiency). The `X*` scripts write to `postprocessing/extra_figures/`, not `figures/`. |
 | `aux*` (under `src/`) | Shared utilities reused across the pipeline (data loading, Gaussian filtering, spatial derivatives, PE/KE budget terms, plotting helpers). |
 | `00_get_budgets.sh`, `inv00_get_sweep.sh` | Local helpers that run the budget pipeline or sweep pipeline end-to-end without PBS (see [Running locally](#running-locally-without-pbs)). |
 | `*.pbs`, `submit_*.sh` | PBS job scripts and their wrappers (see [Submitting jobs](#submitting-jobs)). |
 
-All Python scripts accept `--filename`, and most accept `--filter-scales` and `--n-workers`; the sweep scripts also take `--fixed-reference`. Run any script with `--help` for its full argument list.
+Every Python script takes `--filename`, the path of the simulation's 3D output file. The other arguments vary by script (`--filter-scales` or `--filter-scale`, `--n-workers` for the scripts that sort, `--fixed-reference` and `--extension` for the sweep and the figures drawn from it), so run any script with `--help` for its full argument list.
 
 ### Where the budgets come from
 
@@ -43,7 +46,9 @@ conda env create -f environment.yml   # creates env "py313"
 conda activate py313
 ```
 
-The Julia simulation uses the project's `Project.toml`/`Manifest.toml` — instantiate with `julia --project -e 'using Pkg; Pkg.instantiate()'` on first use.
+The Julia code uses the project's `Project.toml` and `Manifest.toml`, and the Manifest is resolved with Julia 1.13. Instantiate it with `julia --project -e 'using Pkg; Pkg.instantiate()'` on first use. The PBS jobs instantiate it themselves before they run, and find Julia 1.13 through `$JULIA`, juliaup or `$WORK/julia-1.13` (see [Environment](#environment)).
+
+Before submitting any job, set the project to charge, `KHAPE_ACCOUNT` (see [Environment](#environment)).
 
 ## Submitting jobs
 
@@ -56,20 +61,29 @@ The Julia simulation uses the project's `Project.toml`/`Manifest.toml` — insta
 
 Always use the `submit_*.sh` wrappers rather than submitting `*.pbs` files directly — the wrappers ensure job names and log files reflect the run parameters.
 
-Arguments are passed as `KEY=VALUE` pairs in any order. All arguments are optional and fall back to their defaults if omitted.
+Arguments are passed as `KEY=VALUE` pairs in any order and fall back to their defaults when omitted; only `submit_render3d.sh` requires one, for a figure (`TIMES`, or `FROM`/`TO`/`EVERY`). Every wrapper refuses an argument it does not know, so a misspelled key cannot silently fall back to its default; for `submit_sweep.sh`, that would rerun the default sweep over the production files.
 
 ### Environment
 
-The submit wrappers take the project to charge and the Python to run from two variables whose defaults live in `khape_defaults.sh` (sourced by every `submit_*.sh`, so that is the one place to change them), and two more variables move the output off the repository, for example to scratch. To override any of them, export it in the shell you submit from, or set it in the login environment (e.g. `~/.bashrc`): every wrapper hands the Python and, when they are set, the two output directories to its jobs (`qsub -v`), which PBS would not otherwise pass on, and the jobs run in a login shell. Give absolute paths. No `.pbs` file names an account, a mail address or a Python environment, since the wrapper hands them over at submission; PBS mails its reports to whoever submitted the job.
+The submit wrappers take the project to charge and the Python to run from two variables, and two more move the output off the repository, for example to scratch. Every wrapper sources `khape_defaults.sh`, which reads each of them from the environment, then from `khape_local.sh` beside it, and otherwise uses the default in the table below. `KHAPE_ACCOUNT` has no default, and every wrapper stops at submission while it is unset. `khape_local.sh` is ignored by git, so it holds one machine's or one user's settings without any of them entering the repository:
+
+```bash
+# khape_local.sh, in the repository's top directory
+KHAPE_ACCOUNT=${KHAPE_ACCOUNT:-ABCD0001}                       # the project to charge
+KHAPE_PYTHON=${KHAPE_PYTHON:-/path/to/envs/py313/bin/python}   # only where the default below does not fit
+```
+
+The file is sourced, so with its lines written as `${VAR:-value}` a value exported in the shell you submit from still wins over it. Only the wrappers and `setup_mpi_env.sh` read it; the tests and the scripts you run by hand read the environment alone. Every wrapper hands the account (`qsub -A`), the Python and, when they are set, the two output directories (`qsub -v`) to its jobs, which PBS would not otherwise pass on. Give absolute paths. No `.pbs` file names an account, a mail address or a Python environment, since the wrapper hands them over at submission, and no tracked file names an account; PBS mails its reports to whoever submitted the job.
 
 | Variable | Default | Read by |
 |----------|---------|---------|
-| `KHAPE_ACCOUNT` | `UMCP0061` | every submit wrapper, which charges each job to it with `qsub -A` |
+| `KHAPE_ACCOUNT` | none | every submit wrapper, which charges each job to it with `qsub -A` and stops at submission while it is unset |
 | `KHAPE_PYTHON` | `$HOME/miniconda3/envs/py313/bin/python` | the wrappers, which check that it exists at submission and pass it to every Python job and to the simulation job, for the figures it draws after the run (the path to your `py313` environment's `python`) |
 | `KHAPE_OUTPUT_DIR` | `output/` | the simulation (where it writes), every post-processing PBS job (where they read the run), and the tests |
 | `KHAPE_PP_OUTPUT` | `postprocessing/output/` | every post-processing script (through `src/aux00_utils.PP_OUTPUT`) and the tests |
 | `KHAPE_MPI_DEPOT` | `$WORK/.julia-mpi` | `setup_mpi_env.sh` and multi-GPU simulation jobs: the Julia depot for the packages built against the system MPI |
 | `KHAPE_MPI_ENV` | `$KHAPE_MPI_DEPOT/environments/khape-mpi` | the same: the Julia environment that sends MPI.jl to Casper's CUDA-aware OpenMPI (through MPItrampoline) |
+| `JULIA` | juliaup's 1.13, else `$WORK/julia-1.13/bin/julia` | `simulation.pbs`, `04_render3d.pbs` and `setup_mpi_env.sh`: the Julia 1.13 to run. No wrapper hands it on, so a job sees it only from the login environment (e.g. `~/.bashrc`; the jobs run in a login shell) |
 
 ### Run everything (simulation + post-processing + sweep, with optional validation and plots)
 
@@ -97,7 +111,7 @@ bash submit_all_pbs.sh SIMULATION=0 PLOTS=1
 
 Jobs are chained: `budgeting` starts after the simulation, `sweep_filter` after `budgeting`, and `sweep_transfer` after `sweep_filter` (above `NZ=512`, `SWEEP_PARTS` transfer jobs at once and a small one that joins their files; see Run sweep only). With `SIMULATION=0` there is no simulation job and `budgeting` starts at once, on the run already in `$KHAPE_OUTPUT_DIR` (the wrapper stops if that run does not exist). `budgeting` assembles and plots the integrated budgets from the simulation's online terms (about a minute); when `FIXED_REF=1`, the sweep transfer job builds its own frozen column (see Run sweep only).
 
-`SAVE_SORTED` defaults to `1`, so the simulation also writes the validation-only view of the sorted reference state (the two model-grid z✶ methods, the sorted column, ∫E_b) that `inv06` and `inv07` compare against the offline sort. Every budget term is written regardless, so `SAVE_SORTED=0` gives smaller output and changes no budget number; `VALIDATE=1` turns it back on.
+`SAVE_SORTED` defaults to `1` on one GPU (on several it is `0`, and `1` is refused; see [Multi-GPU runs](#multi-gpu-runs)), so the simulation also writes the validation-only view of the sorted reference state (the two model-grid z✶ methods, the sorted column, ∫E_b) that `inv06` and `inv07` compare against the offline sort. Every budget term is written regardless, so `SAVE_SORTED=0` gives smaller output and changes no budget number; `VALIDATE=1` turns it back on.
 
 Two optional stages are gated by flags (both default `0`, so the base behavior is simulation + post-processing + sweep):
 - `VALIDATE=1` runs the simulation with `--save_tensors` (and with `--save_sorted`, even if `SAVE_SORTED=0`) and submits a parallel **validation** job (`postprocessing/validation/validation.pbs`) after the simulation, writing online-vs-offline comparison figures (`figures/validation/`) and animations (`animations/`).
@@ -128,14 +142,14 @@ bash submit_simulation.sh NZ=1024 NGPUS=8
 
 The grid is isotropic (Δx = Δy = Δz) on a domain of one KH wavelength λ in x, λ/3 in y and 25h in z, so `NZ` sets the whole grid: 288 × 96 × 512 cells at `NZ=512`. The Reynolds number scales as Re = Re₀ Nz^(4/3) (Kolmogorov resolution at fixed domain height), with Re₀ = 0.1 by default, i.e. Re = 410 at Nz=512.
 
-When the run ends, the same job runs every paper figure script, `postprocessing/plot*.py`, in name order, into `figures/`; the `X*` extra figures are not drawn. `plot4_omega_br_snapshots.py` reads the `_2d.nc` file and `plot6_budgets.py` assembles the SFS budgets from the 3D file itself. `plot5_sweep_spectrum_hovmoller.py` reads the sweep output, which does not exist yet at that point, so it fails there, or draws an earlier sweep of the same run name if one is on disk; `plots.pbs` draws it after the sweep. A figure that fails is logged as a warning rather than failing the job, so jobs chained on the simulation with `afterok` still start. The wrapper checks `KHAPE_PYTHON` at submission and passes it to the job for this.
+When the run ends, the simulation draws its animations from the `_2d.nc` file into `animations/`: `khi_Nz<NZ>_Ri0.10_2d.mp4`, and a panels animation of the SFS budget terms for each filter scale (`khi_Nz<NZ>_Ri0.10_panels_l<ℓ>.mp4`). The same job then runs every paper figure script, `postprocessing/plot*.py`, in name order, into `figures/`; the `X*` extra figures are not drawn. `plot4_omega_br_snapshots.py` reads the `_2d.nc` file and `plot6_budgets.py` assembles the SFS budgets from the 3D file itself. `plot5_sweep_spectrum_hovmoller.py` reads the sweep output, which does not exist yet at that point, so it fails there, or draws an earlier sweep of the same run name if one is on disk; `plots.pbs` draws it after the sweep. A figure that fails is logged as a warning rather than failing the job, so jobs chained on the simulation with `afterok` still start. The wrapper checks `KHAPE_PYTHON` at submission and passes it to the job for this.
 
 `SAVE_TENSORS=1` passes `--save_tensors` to the Julia simulation, which additionally outputs the
 resolved strain-rate (S̄ⁱʲ) and sub-filter stress (τⁱʲ) tensor components at each filter scale. These
 are full 3D fields (off by default to keep production output lean) and are consumed only by the
 validation scripts in `postprocessing/validation/`.
 
-`SAVE_SORTED` (default **1**) passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
+`SAVE_SORTED` (default 1 on one GPU) passes `--save_sorted`, which additionally outputs the adiabatically sorted reference
 state in the forms only the validation reads: the reference height `z✶_3dsort` (`ThreeDimensionalSort`) and
 `z✶_heaviside` (`HeavisideIntegral`) as 3D fields on the model grid, the sorted column `z✶_1dsort` / `b✶_1dsort`
 (what `VerticalSort` builds; see CLAUDE.md, Online sorted reference state) on its own N = Nx·Ny·Nz vertical axis, and ∫E_b. The column itself is built and used by every
@@ -148,9 +162,10 @@ both grids; the resulting per-grid dimension suffixing is undone at load time by
 
 ### Multi-GPU runs
 
-An Nz=512 run peaks at 54 GB on one A100-80GB, and Nz=1024 has 8× the cells, so above `NZ=512` the simulation runs on
-several GPUs: `NGPUS` (default 1 up to `NZ=512`, 4 up to `NZ=1024`, required beyond) on whole Casper A100-80GB nodes
-(so a multiple of 4), one MPI rank per GPU, the domain split into x-slabs (`--ranks`). Once per machine, first:
+An Nz=512 run peaks at 43 GiB on one A100-80GB (measured with `--save_sorted`), and Nz=1024 has 8× the cells, so
+above `NZ=512` the simulation runs on several GPUs: `NGPUS` (default 1 up to `NZ=512`, 4 up to `NZ=1024`, required
+beyond) on whole Casper A100-80GB nodes (so a multiple of 4), one MPI rank per GPU, the domain split into x-slabs
+(`--ranks`). Once per machine, first:
 
 ```bash
 bash setup_mpi_env.sh   # sends MPI.jl to Casper's CUDA-aware OpenMPI, from a Julia environment and depot of its own
@@ -193,21 +208,15 @@ per doubling of Nz, so this tops out near Nz=1024. Four A100-80GB hold an Nz=102
 80, measured over the first outputs, where a time step takes 125 ms and an output ~67 s, after about an hour of setup
 and compilation, so a run to t=200 takes ~4–4.5 h. `NGPUS=8` (two nodes) is the fallback should a run need more.
 
-### Run a simulation + online-vs-offline validation
+### Run the online-vs-offline validation
 
 ```bash
-# Submit the simulation (with --save_tensors) then a chained validation job (default Nz=512)
-bash submit_validation_run.sh
-bash submit_validation_run.sh NZ=256
+bash submit_all_pbs.sh VALIDATE=1                # default Nz=512: the simulation, then validation beside budgeting
+bash submit_all_pbs.sh NZ=256 VALIDATE=1
+bash submit_all_pbs.sh SIMULATION=0 VALIDATE=1   # on the run already in $KHAPE_OUTPUT_DIR, with budgeting and the sweep
 ```
 
-`submit_validation_run.sh` submits the simulation with `SAVE_TENSORS=1` and a `validation` job that
-runs after it (`afterok`). The validation job recomputes the filtered fields, cross-scale KE transfer
-Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, the local APE,
-and the sub-filter APE dissipation ε_Aˢ offline and
-compares them against the simulation's online diagnostics (`postprocessing/validation/inv01`–`inv09`),
-writing comparison figures to `figures/validation/` and online-vs-offline animations to `animations/`. Note that
-`inv06` needs a run with `SAVE_SORTED=1` (which `submit_all_pbs.sh VALIDATE=1` sets automatically).
+The validation job has no wrapper of its own: `VALIDATE=1` runs the simulation with `--save_tensors` and `--save_sorted` and adds `postprocessing/validation/validation.pbs` to the chain, after the simulation and in parallel with budgeting. It needs a one-GPU run (`NGPUS=1`). With `SIMULATION=0`, the existing run must have been written with `SAVE_TENSORS=1` and `SAVE_SORTED=1`, since `inv03` reads the tensors and `inv06`/`inv07` the sorted state. The job recomputes offline the filtered fields, the cross-scale KE transfer Π_K, the strain/stress tensors, the SFS KE dissipation ε_Kˢ, the sorted reference state, the local APE, the sub-filter APE dissipation ε_Aˢ and the cross-scale APE flux Π_A, and compares each against the simulation's online output, one figure per script in `figures/validation/` (`inv01`–`inv09`). `inv04` instead animates the online, offline and difference fields of Π_K, ε_Kˢ and w into `animations/`, and `inv10` checks that the online budgets close from their volume integrals alone.
 
 ### Run post-processing only
 
@@ -235,7 +244,7 @@ bash submit_sweep.sh NZ=1024                  # the transfer in six jobs over sh
 bash submit_sweep.sh NZ=1024 FILTER=0 PLOTS=1 # the transfer alone, on the filtered file already written, then the plots
 ```
 
-`submit_sweep.sh` refuses any argument it does not know, so a misspelled key cannot silently rerun the default sweep over the production files.
+`N_TIME_SKIP=n` (default 2) has the filter keep every n-th output time, and the transfer works on those.
 
 **Splitting the transfer.** The transfer's memory grows with the records it holds times the cells: the 3D Nz=512 run took 689 GiB of a 730 GiB node in one job, and the Nz=1024 one ran out of it, the sorted column of the padded domain alone being 421 M slots per record there. `SWEEP_PARTS` (default 1 up to `NZ=512`, 6 up to `NZ=1024`, required beyond; also taken by `submit_all_pbs.sh`) splits the records into that many contiguous shares, one job each, all running at once after the filter (`sweep2 --part K/N`, which writes a `_part<K>of<N>` file), and a small job after all of them joins the files into the usual one, checking that they hold every record once and in order, and runs `sweep3` (`sweep2 --merge-parts N`). Every quantity is computed record by record, so the split changes no number. Within a job, each scale's integrals are computed before the next scale is built, so nothing accumulates across the 30 scales, and the sort and the reference-height lookup fill their outputs record by record instead of holding every record twice. `FILTER=0` skips `sweep1` and starts the transfer at once on the filtered file already in place; `PLOTS=1` adds the plots job after the transfer.
 
@@ -256,15 +265,15 @@ A run over a subset of scales (`sweep1 --filter-scales`, as `extension_test.pbs`
 
 `FIXED_REF=both` submits the filter job once and two transfer jobs (one for each variant) that both depend on the single filter job. The transfer step writes only the volume integrals (`∫Π_K dV`, `∫Π_A dV`, ...), which is all the sweep plots read; `sweep2_energy_transfer.py --keep-fields` also writes the 4D fields, which are enormous at production resolution.
 
-When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it sorts t=0 on the grid it loaded and broadcasts that row over the time axis. **The sweep does not need the budgeting pipeline to have run**, and does not read `_sorted_density_fixed_ref.nc`. It cannot: the column's z✶ are the padded grid's own heights, and the sweep pads to 4σ of its widest scale (ℓ=20) while `02_sort_density.py` pads to the budget scales — at Nz=2048, 2784 cells per side against 1024 — so the budgeting pipeline's column belongs to a different grid. Sorting t=0 costs one sort, and is bit-identical to `02`'s output whenever the two paddings do coincide.
+When `FIXED_REF=1`, the transfer job builds its own frozen reference column: it sorts t=0 of the padded domain (the padded fluid is part of the column even where the arrays leave it out) and broadcasts that row over the time axis, at the cost of one sort. The sweep reads nothing from the budget pipeline.
 
 ### Render 3D isosurfaces
 
-`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default: the six-term budget set at ℓ = 1, in three rows of two (`COLS`), with 800 ray-march steps per isosurface ray (`SAMPLES`) and a shell half-width of 0.02 of each panel's range (`ISORANGE`; `auto` for Makie's own, ~0.034 at six levels).
+`submit_render3d.sh` (which submits `04_render3d.pbs`) runs `plot7_3d_volume.jl` at one or more output times, one figure per time, into `figures/`. `TIMES`, or `FROM`/`TO`/`EVERY`, is required; everything else has a default, and the wrapper lists every argument at its top. The default panels are the Q criterion and the five budget terms `wb_rs`, `Π_K`, `Π_A`, `ε_Ks` and `ε_As` at ℓ = 1, in three rows of two (`COLS`), with 800 ray-march steps per isosurface ray (`SAMPLES`) and a shell half-width of 0.02 of each panel's range (`ISORANGE`; `auto` for Makie's own, ~0.034 at six levels).
 
 ```bash
 cd postprocessing
-bash submit_render3d.sh TIMES=100,120,140                      # default Nz=1024, the six budget terms at l=1
+bash submit_render3d.sh TIMES=100,120,140                      # default Nz=1024, Q and five budget terms at l=1
 bash submit_render3d.sh FROM=60 TO=160 EVERY=10                # a strided range instead of a list: 11 figures
 bash submit_render3d.sh TIMES=120 LEVELS=2                     # one time, fewer isosurfaces: much faster
 bash submit_render3d.sh TIMES=120 SAMPLES=200 ISORANGE=auto     # Makie's own rays and shells
@@ -369,13 +378,13 @@ one-process results bit for bit.
 
 `--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped. It needs a simulation run with `--offline_check` (`OFFLINE_CHECK=1`), whose consecutive-iteration output pairs the offline pipeline differences for its tendencies; the pipeline refuses a run without them.
 
-CI (`.github/workflows/test.yml`) runs the Julia simulation (Nz=128, `--Re0 0.4` for Re = 258, outputs every 4 time units) twice in parallel, once as production writes it and once with `--save_sorted --offline_check`, then two jobs in parallel: `test-online` (the production run: assemble → pytest → animation, minutes) and `test-offline-check` (the paired run: the offline pipeline → `pytest --offline-check`), on push to `main` and on PR comments starting with `test`.
+CI (`.github/workflows/test.yml`) runs on push to `main` and on PR comments starting with `test` (`test_trigger.yml`). It runs the Julia simulation on the CPU (Nz=128, `--Re0 0.4` for Re = 258, outputs every 4 time units) twice in parallel, once as production writes it and once with `--save_sorted --offline_check`, beside the Gaussian filter unit tests (`test-gaussian-filter`), then two jobs in parallel: `test-online` (the production run: assemble → pytest → animation, minutes) and `test-offline-check` (the paired run: the offline pipeline → `pytest --offline-check`). Each test job posts its own commit status, and `report` the combined one. The figures, the integrated budgets and the animations are uploaded as artifacts whether or not the tests pass.
 
 ## Logs
 
-All job logs are written to the `logs/` subdirectory next to the submit script:
-- `logs/<job_name>.log` — PBS stdout/stderr (written by PBS after job ends)
-- `logs/<job_name>.out` — Python script output (written live via `tee`)
+Each job writes its logs to the `logs/` directory beside its PBS script: `logs/` for the simulation, `postprocessing/logs/` for the post-processing jobs and `postprocessing/validation/logs/` for the validation.
+- `<job_name>.log`: PBS stdout/stderr (written by PBS after the job ends)
+- `<job_name>.out`: the job's own output (written live via `tee`)
 - for a multi-GPU run, also `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` (every GPU's memory every 10 s); the merge writes to the simulation's own `.out`
 
-Job names follow the pattern `<stage>_Nz<NZ>_Ri0.10[_fixed_ref]`, e.g. `budgeting_Nz2048_Ri0.10`, `sweep_filter_Nz2048_Ri0.10`, `sweep_transfer_Nz2048_Ri0.10_fixed_ref` (the `_fixed_ref` tag exists only for the sweep). A split sweep transfer's jobs add `_part<K>of<N>`, and the one that joins them `_merge`.
+The simulation job is named `kelvin_helmholtz_<NZ>`. The others follow the pattern `<stage>_Nz<NZ>_Ri0.10`, e.g. `budgeting_Nz512_Ri0.10`, `sweep_filter_Nz512_Ri0.10`, `validation_Nz512_Ri0.10`, `plots_Nz512_Ri0.10` and `render3d_Nz512_Ri0.10`. The 3D render adds `_anim`, `_preview` or `_thumbnail` for an animation, a preview or a thumbnail, the sweep transfer adds `_fixed_ref` for `FIXED_REF=1`, both sweep jobs add `_odd` for `EXTENSION=odd`, and a split transfer's jobs add `_part<K>of<N>`, the one that joins them `_merge`. The wall-extension test is `extension_test_Nz<NZ>_l<SCALE>_<EXTENSION>`.

@@ -7,8 +7,9 @@ for arg in "$@"; do case $arg in
   NZ=*) NZ="${arg#*=}";;
   *) echo "unknown argument: $arg (expected NZ=)" >&2; exit 2;;
 esac; done
-# The allocation to charge and the Python to run: defaults in khape_defaults.sh, overridden from the environment.
+# The allocation to charge and the Python to run: from the environment, khape_local.sh or khape_defaults.sh.
 source "$(dirname "$0")/../khape_defaults.sh"
+check_khape_account
 check_khape_python
 
 NAME="budgeting_Nz${NZ}_Ri0.10"
