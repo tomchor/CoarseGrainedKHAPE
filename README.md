@@ -385,7 +385,7 @@ one-process results bit for bit.
 
 `--offline-check` runs `postprocessing/offline/run_offline_budgets.sh` (unless its output already exists) and `tests/test_offline_check.py` compares every field and every integral of the offline budgets against the online ones, term by term, with tolerances set from measurement; it also runs the `inv0*` validation scripts (`tests/test_online_vs_offline.py`). Without the flag those tests are skipped. It needs a simulation run with `--offline_check` (`OFFLINE_CHECK=1`), whose consecutive-iteration output pairs the offline pipeline differences for its tendencies; the pipeline refuses a run without them.
 
-CI (`.github/workflows/test.yml`) runs on push to `main` and on PR comments starting with `test` (`test_trigger.yml`). It runs the Julia simulation on the CPU (Nz=128, `--Re0 0.4` for Re = 258, outputs every 4 time units) twice in parallel, once as production writes it and once with `--save_sorted --offline_check`, beside the Gaussian filter unit tests (`test-gaussian-filter`), then two jobs in parallel: `test-online` (the production run: assemble → pytest → animation, minutes) and `test-offline-check` (the paired run: the offline pipeline → `pytest --offline-check`). Each test job posts its own commit status, and `report` the combined one. The figures, the integrated budgets and the animations are uploaded as artifacts whether or not the tests pass.
+CI (`.github/workflows/test.yml`) runs on push to `main` and on PR comments starting with `test` (`test_trigger.yml`), from someone with write access and on a PR whose branch is in this repository. It runs the Julia simulation on the CPU (Nz=128, `--Re0 0.4` for Re = 258, outputs every 4 time units) twice in parallel, once as production writes it and once with `--save_sorted --offline_check`, beside the Gaussian filter unit tests (`test-gaussian-filter`), then two jobs in parallel: `test-online` (the production run: assemble → pytest → animation, minutes) and `test-offline-check` (the paired run: the offline pipeline → `pytest --offline-check`). Each test job posts its own commit status, and `report` the combined one. The figures, the integrated budgets and the animations are uploaded as artifacts whether or not the tests pass.
 
 ## Logs
 
@@ -395,3 +395,7 @@ Each job writes its logs to the `logs/` directory beside its PBS script: `logs/`
 - for a multi-GPU run, also `logs/kelvin_helmholtz_<NZ>_gpu_memory.csv` (every GPU's memory every 10 s); the merge writes to the simulation's own `.out`
 
 The simulation job is named `kelvin_helmholtz_<NZ>`. The others follow the pattern `<stage>_Nz<NZ>_Ri0.10`, e.g. `budgeting_Nz512_Ri0.10`, `sweep_filter_Nz512_Ri0.10`, `validation_Nz512_Ri0.10`, `plots_Nz512_Ri0.10` and `render3d_Nz512_Ri0.10`. The 3D render adds `_anim`, `_preview` or `_thumbnail` for an animation, a preview or a thumbnail, the sweep transfer adds `_fixed_ref` for `FIXED_REF=1`, both sweep jobs add `_odd` for `EXTENSION=odd`, and a split transfer's jobs add `_part<K>of<N>`, the one that joins them `_merge`. The wall-extension test is `extension_test_Nz<NZ>_l<SCALE>_<EXTENSION>`.
+
+## License
+
+The code is released under the MIT License; see [LICENSE](LICENSE).

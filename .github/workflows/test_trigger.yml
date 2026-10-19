@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
+    # Anyone can comment on a public repository, and this job runs from main with a write token, so only people with
+    # write access start a run.
     if: |
       github.event.issue.pull_request != null &&
-      startsWith(github.event.comment.body, 'test')
+      startsWith(github.event.comment.body, 'test') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
 
     permissions:
       actions: write
@@ -39,17 +42,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }})
+          # test.yml can only be dispatched on a branch of this repository. A fork's branch name would resolve to our
+          # branch of that name, if there is one (a fork's main to our main), and its result would land on the fork's commit.
+          if [ "$(echo "$PR" | jq -r '.head.repo.full_name')" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::this PR's branch is in a fork; push it to a branch of this repository to test it"
+            exit 1
+          fi
           echo "branch=$(echo "$PR" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
           echo "sha=$(echo "$PR" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
 
       - name: Set commit statuses to pending
         uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
         with:
           script: |
             const params = {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ steps.pr.outputs.sha }}',
+              sha: process.env.HEAD_SHA,
               state: 'pending',
               description: 'Tests dispatched…',
             };
@@ -63,8 +74,9 @@ jobs:
       - name: Dispatch test workflow on PR branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Read from the environment, never pasted into the script: a branch name may contain ", ; and $(...), and
+          # pasted in, a crafted one would run as shell commands with this job's token.
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
         run: |
-          gh workflow run test.yml \
-            --repo ${{ github.repository }} \
-            --ref "${{ steps.pr.outputs.branch }}" \
-            -f head_sha="${{ steps.pr.outputs.sha }}"
+          gh workflow run test.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" -f head_sha="$HEAD_SHA"
